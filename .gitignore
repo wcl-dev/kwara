@@ -1,0 +1,27 @@
+# Python 虛擬環境（勿提交；各機器自行 python -m venv .venv）
+.venv/
+venv/
+env/
+
+# 快取與編譯產物
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Streamlit 本機密鑰（若使用 secrets）
+.streamlit/secrets.toml
+
+# kwara 本機 SQLite 與快照產物（clone 後由程式自動建立）
+kwara/data/*.db
+kwara/data/snapshots/
+
+# whois_osint 執行輸出（可選）
+whois_osint/whois_results.*
+whois_osint/whois_cache.csv
+
+# 常見系統檔
+Thumbs.db
+.DS_Store
