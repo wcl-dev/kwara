@@ -1,0 +1,31 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "建立虛擬環境 (.venv)",
+      "type": "shell",
+      "command": "python",
+      "args": ["-m", "venv", ".venv"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "group": "build",
+      "presentation": { "reveal": "always" }
+    },
+    {
+      "label": "安裝 WHOIS 依賴 (pip install)",
+      "type": "shell",
+      "command": "python",
+      "args": ["-m", "pip", "install", "-r", "requirements.txt"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "group": "build",
+      "presentation": { "reveal": "always" }
+    },
+    {
+      "label": "執行 WHOIS 範例",
+      "type": "shell",
+      "command": "python",
+      "args": ["whois_domain_lookup.py", "https://www.google.com/search?q=google.com"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "group": { "kind": "test", "isDefault": true },
+    }
+  ]
+}

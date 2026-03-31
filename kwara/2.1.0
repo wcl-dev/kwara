@@ -1,0 +1,13 @@
+Collecting ipwhois
+  Downloading ipwhois-1.3.0-py2.py3-none-any.whl.metadata (21 kB)
+Collecting dnspython (from ipwhois)
+  Downloading dnspython-2.8.0-py3-none-any.whl.metadata (5.7 kB)
+Collecting defusedxml (from ipwhois)
+  Downloading defusedxml-0.7.1-py2.py3-none-any.whl.metadata (32 kB)
+Downloading ipwhois-1.3.0-py2.py3-none-any.whl (70 kB)
+   ---------------------------------------- 70.7/70.7 kB 642.9 kB/s eta 0:00:00
+Downloading defusedxml-0.7.1-py2.py3-none-any.whl (25 kB)
+Downloading dnspython-2.8.0-py3-none-any.whl (331 kB)
+   ---------------------------------------- 331.1/331.1 kB 2.6 MB/s eta 0:00:00
+Installing collected packages: dnspython, defusedxml, ipwhois
+Successfully installed defusedxml-0.7.1 dnspython-2.8.0 ipwhois-1.3.0
