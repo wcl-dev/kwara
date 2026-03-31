@@ -16,10 +16,12 @@ __pycache__/
 
 # kwara 本機 SQLite 與快照產物（clone 後由程式自動建立）
 kwara/data/*.db
+kwara/data/*.db-*
 kwara/data/snapshots/
+kwara/data/exports/
 
 # whois_osint 執行輸出（可選）
-whois_osint/whois_results.*
+whois_osint/whois_results*
 whois_osint/whois_cache.csv
 
 # 常見系統檔
