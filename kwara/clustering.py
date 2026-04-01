@@ -13,11 +13,40 @@ from urllib.parse import parse_qs, urlparse
 # Domains that are themselves shortlink services.
 # When a scan's final_domain lands here it means the scan did not penetrate
 # the redirect — the real destination is unknown. Exclude from shared_destinations.
+def _merge_risk_tags(snap_json, intel_json) -> list:
+    """Union snapshot page tags and scan-level intel tags (e.g. new_domain from WHOIS)."""
+    a = []
+    b = []
+    if snap_json:
+        try:
+            a = json.loads(snap_json)
+        except (ValueError, TypeError):
+            a = []
+    if intel_json:
+        try:
+            b = json.loads(intel_json)
+        except (ValueError, TypeError):
+            b = []
+    seen = set()
+    out = []
+    for t in a + b:
+        if t not in seen:
+            seen.add(t)
+            out.append(t)
+    return out
+
+
 KNOWN_SHORTLINK_DOMAINS = {
-    "bit.ly", "t.co", "tinyurl.com", "ow.ly", "goo.gl", "short.io",
+    "bit.ly", "bitly.com", "t.co", "tinyurl.com", "ow.ly", "goo.gl", "short.io",
     "rebrand.ly", "bl.ink", "buff.ly", "dlvr.it", "ift.tt",
     "lnkd.in", "fb.me", "youtu.be", "amzn.to", "tiny.cc",
     "is.gd", "v.gd", "cutt.ly", "shrtco.de", "clck.ru",
+    "s.id", "rb.gy", "short.link", "tiny.one",
+    # Regional / common redirect landing hosts
+    "reurl.cc", "ppt.cc", "picsee.co", "trib.al",
+    "vm.tiktok.com", "ig.me",
+    # Not listed: generic content/image landing sites (e.g. picelse) — those are
+    # surfaced via hop_count>=2 redirector detection in app.py, not as "shortlink SaaS".
 }
 
 
@@ -33,7 +62,8 @@ def shared_destinations(conn: sqlite3.Connection, case_id: int) -> tuple:
         """SELECT sr.final_url,
                   ua.id AS ua_id, ua.original_url,
                   me.id AS post_id, me.platform, me.actor_label,
-                  s.risk_tags
+                  s.risk_tags,
+                  sr.intel_risk_tags
            FROM url_artifacts ua
            JOIN message_evidence me ON me.id = ua.message_id
            JOIN scan_runs sr ON sr.id = (
@@ -63,12 +93,7 @@ def shared_destinations(conn: sqlite3.Connection, case_id: int) -> tuple:
 
         if r["ua_id"] not in seen_urls[domain]:
             seen_urls[domain].add(r["ua_id"])
-            url_tags = []
-            if r["risk_tags"]:
-                try:
-                    url_tags = json.loads(r["risk_tags"])
-                except (ValueError, TypeError):
-                    url_tags = []
+            url_tags = _merge_risk_tags(r["risk_tags"], r["intel_risk_tags"])
             data[domain]["urls"].append({"original_url": r["original_url"], "risk_tags": url_tags})
             if url_tags:
                 data[domain]["flagged_url_count"] += 1
@@ -107,14 +132,20 @@ def shared_destinations(conn: sqlite3.Connection, case_id: int) -> tuple:
 
 def asn_clusters(conn: sqlite3.Connection, case_id: int) -> list:
     """
-    Group snapshotted domains by ASN (hosting provider).
-    Only includes snapshots where asn is populated.
+    Group landing domains by ASN (hosting provider).
+    Uses ASN from snapshot row or from scan_runs after domain intel (no snapshot required).
 
     Returns list of dicts sorted by url_count desc.
     """
     rows = conn.execute(
-        """SELECT s.final_domain, s.ip_address, s.asn, s.as_org, s.as_country,
+        """SELECT sr.final_url,
+                  COALESCE(s.final_domain, '') AS snap_domain,
+                  COALESCE(s.ip_address, sr.ip_address) AS ip_address,
+                  COALESCE(s.asn, sr.asn) AS asn,
+                  COALESCE(s.as_org, sr.as_org) AS as_org,
+                  COALESCE(s.as_country, sr.as_country) AS as_country,
                   s.risk_tags,
+                  sr.intel_risk_tags,
                   ua.id AS ua_id, ua.original_url,
                   me.id AS post_id
            FROM url_artifacts ua
@@ -124,12 +155,12 @@ def asn_clusters(conn: sqlite3.Connection, case_id: int) -> list:
                WHERE url_artifact_id = ua.id AND status = 'done'
                ORDER BY id DESC LIMIT 1
            )
-           JOIN snapshots s ON s.scan_run_id = sr.id
+           LEFT JOIN snapshots s ON s.scan_run_id = sr.id
                AND s.id = (
                    SELECT id FROM snapshots WHERE scan_run_id = sr.id
                    ORDER BY id DESC LIMIT 1
                )
-           WHERE ua.case_id = ? AND s.asn IS NOT NULL""",
+           WHERE ua.case_id = ? AND COALESCE(s.asn, sr.asn) IS NOT NULL""",
         (case_id,),
     ).fetchall()
 
@@ -150,21 +181,20 @@ def asn_clusters(conn: sqlite3.Connection, case_id: int) -> list:
         data[asn]["as_org"]     = r["as_org"]
         data[asn]["as_country"] = r["as_country"]
 
-        if r["final_domain"] not in seen_domains[asn]:
-            seen_domains[asn].add(r["final_domain"])
+        fd = r["snap_domain"] or (urlparse(r["final_url"]).hostname or "")
+        if not fd:
+            continue
+
+        if fd not in seen_domains[asn]:
+            seen_domains[asn].add(fd)
             data[asn]["domains"].append({
-                "domain":     r["final_domain"],
+                "domain":     fd,
                 "ip_address": r["ip_address"],
             })
 
         if r["ua_id"] not in seen_urls[asn]:
             seen_urls[asn].add(r["ua_id"])
-            url_tags = []
-            if r["risk_tags"]:
-                try:
-                    url_tags = json.loads(r["risk_tags"])
-                except (ValueError, TypeError):
-                    url_tags = []
+            url_tags = _merge_risk_tags(r["risk_tags"], r["intel_risk_tags"])
             data[asn]["urls"].append({"original_url": r["original_url"], "risk_tags": url_tags})
             if url_tags:
                 data[asn]["flagged_url_count"] += 1

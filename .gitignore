@@ -2,6 +2,7 @@
 .venv/
 venv/
 env/
+**/.venv/
 
 # 快取與編譯產物
 __pycache__/
@@ -19,6 +20,9 @@ kwara/data/*.db
 kwara/data/*.db-*
 kwara/data/snapshots/
 kwara/data/exports/
+
+# 本機匯入／暫存 CSV（範例請放在版本庫根目錄，例如 test_data_*.csv）
+kwara/*.csv
 
 # whois_osint 執行輸出（可選）
 whois_osint/whois_results*

@@ -1,13 +1,15 @@
 """
 pipeline.py — 統一調度 scan → snapshot → whois
 app.py 只呼叫這裡，不直接碰底層模組。
+網域情資（WHOIS／ASN）可獨立於截圖寫入 scan_runs。
 """
 import json
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone
+from urllib.parse import urlparse
 
 from scanner import scan_url as _scan
-from snapshots import snapshot_url as _snapshot
+from snapshots import snapshot_url as _snapshot, snapshot_batch as _snapshot_batch
 from whois_lookup import query_whois, UNKNOWN
 from ip_lookup import lookup_ip
 
@@ -33,65 +35,135 @@ def _parse_posted_at(raw: str):
     return None
 
 
+def _intel_now() -> str:
+    return datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+
 def run_scan_only(conn: sqlite3.Connection, url_artifact_id: int) -> int:
     return _scan(conn, url_artifact_id)
 
 
-def run_snapshot(conn: sqlite3.Connection, scan_run_id: int) -> int:
-    snapshot_id = _snapshot(conn, scan_run_id)
-    _apply_whois(conn, snapshot_id)
-    _apply_ip_asn(conn, snapshot_id)
-    return snapshot_id
-
-
-def _apply_ip_asn(conn: sqlite3.Connection, snapshot_id: int) -> None:
+def _latest_snapshot_id(conn: sqlite3.Connection, scan_run_id: int) -> int | None:
     row = conn.execute(
-        "SELECT final_domain FROM snapshots WHERE id = ?", (snapshot_id,)
+        """SELECT id FROM snapshots WHERE scan_run_id = ?
+           ORDER BY id DESC LIMIT 1""",
+        (scan_run_id,),
     ).fetchone()
-    if not row or not row["final_domain"]:
+    return row["id"] if row else None
+
+
+def _enrich_domain_for_scan_run(
+    conn: sqlite3.Connection,
+    scan_run_id: int,
+    snapshot_id: int | None = None,
+) -> None:
+    sr = conn.execute(
+        "SELECT id, final_url, status FROM scan_runs WHERE id = ?",
+        (scan_run_id,),
+    ).fetchone()
+    if not sr or (sr["status"] or "") != "done" or not sr["final_url"]:
         return
 
-    data = lookup_ip(row["final_domain"])
-    conn.execute(
-        """UPDATE snapshots
-           SET ip_address = ?, asn = ?, as_org = ?, as_country = ?
-           WHERE id = ?""",
-        (data["ip"], data["asn"], data["as_org"], data["as_country"], snapshot_id),
-    )
-    conn.commit()
+    final_domain = urlparse(sr["final_url"]).hostname or ""
+    if not final_domain:
+        return
 
-
-def _apply_whois(conn: sqlite3.Connection, snapshot_id: int) -> None:
-    row = conn.execute(
-        """SELECT s.final_domain, s.risk_tags, me.posted_at
-           FROM snapshots s
-           JOIN scan_runs sr ON sr.id = s.scan_run_id
+    posted_row = conn.execute(
+        """SELECT me.posted_at FROM scan_runs sr
            JOIN url_artifacts ua ON ua.id = sr.url_artifact_id
            JOIN message_evidence me ON me.id = ua.message_id
-           WHERE s.id = ?""",
-        (snapshot_id,),
+           WHERE sr.id = ?""",
+        (scan_run_id,),
     ).fetchone()
-    if not row or not row["final_domain"]:
-        return
+    posted_at = posted_row["posted_at"] if posted_row else None
 
-    registrar, creation_date, _ = query_whois(row["final_domain"])
+    registrar, creation_date, _ = query_whois(final_domain)
+    data = lookup_ip(final_domain)
+    ref_date = _parse_posted_at(posted_at) if posted_at else None
+    if ref_date is None:
+        ref_date = datetime.now()
 
-    # Use posted_at as reference date; fall back to today if unparseable
-    ref_date = _parse_posted_at(row["posted_at"]) or datetime.now()
-
-    tags = json.loads(row["risk_tags"] or "[]")
+    intel_tags: list[str] = []
     if creation_date and creation_date != UNKNOWN:
         try:
             age = (ref_date - datetime.strptime(creation_date, "%Y-%m-%d")).days
-            if age < NEW_DOMAIN_DAYS and "new_domain" not in tags:
-                tags.append("new_domain")
+            if age < NEW_DOMAIN_DAYS:
+                intel_tags.append("new_domain")
         except ValueError:
             pass
 
+    enriched_at = _intel_now()
+
+    if snapshot_id is not None:
+        snap = conn.execute(
+            "SELECT id, risk_tags FROM snapshots WHERE id = ? AND scan_run_id = ?",
+            (snapshot_id, scan_run_id),
+        ).fetchone()
+        if snap:
+            tags = json.loads(snap["risk_tags"] or "[]")
+            for t in intel_tags:
+                if t not in tags:
+                    tags.append(t)
+            conn.execute(
+                """UPDATE snapshots SET whois_registrar = ?, whois_creation_date = ?,
+                       ip_address = ?, asn = ?, as_org = ?, as_country = ?, risk_tags = ?
+                   WHERE id = ?""",
+                (
+                    registrar,
+                    creation_date,
+                    data["ip"],
+                    data["asn"],
+                    data["as_org"],
+                    data["as_country"],
+                    json.dumps(tags),
+                    snapshot_id,
+                ),
+            )
+
     conn.execute(
-        """UPDATE snapshots
-           SET whois_registrar = ?, whois_creation_date = ?, risk_tags = ?
+        """UPDATE scan_runs SET whois_registrar = ?, whois_creation_date = ?,
+               ip_address = ?, asn = ?, as_org = ?, as_country = ?,
+               intel_risk_tags = ?, domain_enriched_at = ?
            WHERE id = ?""",
-        (registrar, creation_date, json.dumps(tags), snapshot_id),
+        (
+            registrar,
+            creation_date,
+            data["ip"],
+            data["asn"],
+            data["as_org"],
+            data["as_country"],
+            json.dumps(intel_tags),
+            enriched_at,
+            scan_run_id,
+        ),
     )
     conn.commit()
+
+
+def run_domain_intel_only(conn: sqlite3.Connection, scan_run_id: int) -> None:
+    """WHOIS / ASN only; no browser. Updates scan_runs; merges into snapshot row if present."""
+    sid = _latest_snapshot_id(conn, scan_run_id)
+    _enrich_domain_for_scan_run(conn, scan_run_id, snapshot_id=sid)
+
+
+def run_domain_intel_batch(conn: sqlite3.Connection, scan_run_ids: list[int]) -> None:
+    for sr_id in scan_run_ids:
+        run_domain_intel_only(conn, sr_id)
+
+
+def run_snapshot(conn: sqlite3.Connection, scan_run_id: int) -> int:
+    snapshot_id = _snapshot(conn, scan_run_id)
+    _enrich_domain_for_scan_run(conn, scan_run_id, snapshot_id=snapshot_id)
+    return snapshot_id
+
+
+def run_snapshot_batch(conn: sqlite3.Connection, scan_run_ids: list[int]) -> list[int]:
+    """Capture screenshots for multiple URLs in one subprocess, then enrich."""
+    snapshot_ids = _snapshot_batch(conn, scan_run_ids)
+    for sid in snapshot_ids:
+        row = conn.execute(
+            "SELECT scan_run_id FROM snapshots WHERE id = ?", (sid,)
+        ).fetchone()
+        if row:
+            _enrich_domain_for_scan_run(conn, row["scan_run_id"], snapshot_id=sid)
+    return snapshot_ids

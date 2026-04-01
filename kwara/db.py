@@ -18,12 +18,75 @@ def migrate_db(conn: sqlite3.Connection) -> None:
         ("asn",        "TEXT"),
         ("as_org",     "TEXT"),
         ("as_country", "TEXT"),
+        ("capture_status", "TEXT"),
+        ("capture_detail", "TEXT"),
     ]
     for col, defn in new_cols:
         try:
             conn.execute(f"ALTER TABLE snapshots ADD COLUMN {col} {defn}")
         except sqlite3.OperationalError:
             pass  # column already exists
+    scan_run_cols = [
+        ("whois_registrar", "TEXT"),
+        ("whois_creation_date", "TEXT"),
+        ("ip_address", "TEXT"),
+        ("asn", "TEXT"),
+        ("as_org", "TEXT"),
+        ("as_country", "TEXT"),
+        ("intel_risk_tags", "TEXT"),
+        ("domain_enriched_at", "TEXT"),
+    ]
+    for col, defn in scan_run_cols:
+        try:
+            conn.execute(f"ALTER TABLE scan_runs ADD COLUMN {col} {defn}")
+        except sqlite3.OperationalError:
+            pass
+    conn.commit()
+    _backfill_legacy_capture_status(conn)
+
+
+# Same signals as _snapshot_worker / snapshots for HTML challenge pages
+_CF_HTML_SNIPPET = (
+    "challenge-platform",
+    "正在執行安全驗證",
+    "Just a moment",
+    "cf-turnstile-response",
+)
+
+
+def _backfill_legacy_capture_status(conn: sqlite3.Connection) -> None:
+    """Set capture_status for rows where column was never filled (idempotent)."""
+    rows = conn.execute(
+        """SELECT id, screenshot_path, html_path FROM snapshots
+           WHERE capture_status IS NULL OR TRIM(capture_status) = ''"""
+    ).fetchall()
+    if not rows:
+        return
+    for row in rows:
+        sid = row["id"]
+        sp, hp = row["screenshot_path"], row["html_path"]
+        if not sp or not os.path.isfile(sp) or os.path.getsize(sp) == 0:
+            continue
+        looks_cf = False
+        if hp and os.path.isfile(hp):
+            try:
+                with open(hp, encoding="utf-8", errors="ignore") as f:
+                    snippet = f.read(8000)
+            except OSError:
+                snippet = ""
+            looks_cf = any(sig in snippet for sig in _CF_HTML_SNIPPET)
+        if looks_cf:
+            conn.execute(
+                """UPDATE snapshots SET capture_status = ?, capture_detail = ?
+                   WHERE id = ?""",
+                ("cf_challenge", "legacy_backfill_html_cf_signals", sid),
+            )
+        else:
+            conn.execute(
+                """UPDATE snapshots SET capture_status = ?, capture_detail = NULL
+                   WHERE id = ?""",
+                ("ok", sid),
+            )
     conn.commit()
 
 
@@ -92,7 +155,9 @@ def init_db(conn: sqlite3.Connection) -> None:
         risk_tags            TEXT,
         whois_registrar      TEXT,
         whois_creation_date  TEXT,
-        captured_at          TEXT
+        captured_at          TEXT,
+        capture_status       TEXT,
+        capture_detail       TEXT
     );
 
     CREATE TABLE IF NOT EXISTS report_status (
