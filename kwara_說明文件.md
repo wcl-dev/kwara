@@ -22,10 +22,13 @@ streamlit run app.py
 cases（案件）
   └─ message_evidence（來源貼文）
         └─ url_artifacts（擷取的 URL）
-              └─ scan_runs（掃描執行紀錄）
+              └─ scan_runs（掃描執行紀錄；含 final_url、hop_count）
                     ├─ redirect_hops（每一跳的 redirect）
-                    └─ snapshots（落地頁快照 + WHOIS）
+                    ├─ （選填）網域情資：WHOIS／IP／ASN／intel_risk_tags／domain_enriched_at
+                    └─ snapshots（落地頁截圖／HTML／request domains／與頁面相關 risk_tags）
 ```
+
+掃描完成後即可寫入 **網域情資**（不必先有快照）。執行 Playwright 快照時，系統會再次合併 WHOIS 與頁面衍生旗標，並同步更新 `scan_runs` 與 `snapshots`。
 
 每個案件相互獨立。側邊欄可切換或新增案件。
 
@@ -115,7 +118,11 @@ cases（案件）
 
 #### 3-2. Investigate（調查）
 
-對已掃描的 URL 進行深度分析，包含落地頁快照與 WHOIS 查詢。
+對已掃描的 URL 進行深度分析：**網域情資（WHOIS／ASN）** 與 **落地頁快照** 可分開執行。
+
+**Domain intel queue（網域情資佇列）**
+
+列出「已掃描、但尚未寫入網域情資（`domain_enriched_at` 為空）」的 URL。提供 **WHOIS / ASN only — all pending** 一鍵：只查註冊商、建立日、解析 IP 與 ASN，**不使用瀏覽器**，速度遠快於全頁快照。
 
 **Snapshot Priority Queue（快照優先佇列）**
 
@@ -148,20 +155,22 @@ cases（案件）
 | status_code | HTTP 回應碼 |
 | location | 3xx 回應的 Location header 值 |
 
-**右欄：Snapshot & WHOIS**
+**右欄（上）：Domain & hosting（WHOIS / ASN）**
 
-點擊「Capture snapshot」後，系統執行：
+- **查詢網域情資（不需截圖）**：僅執行 WHOIS 與 IP／ASN 查詢，將結果寫入 `scan_runs`（若已存在 snapshot 列則一併更新該列）。
+- 顯示 Final Domain、IP、ASN／Hosting、Registrar、Domain Created；並合併 **Risk Flags**（見下方）。
+
+**右欄（下）：Snapshot（screenshot & page）**
+
+點擊「Capture snapshot」或「Re-capture」後，系統執行：
 1. 使用 Playwright 以無頭 Chromium 開啟 `final_url`
 2. 截取全頁截圖（`screenshot.png`）
 3. 擷取頁面 HTML（`page.html`）
 4. 記錄頁面載入過程中所有 request domains（第三方外部資源）
-5. 執行 WHOIS 查詢，取得 registrar 和網域創建日期
+5. 再次執行網域情資（與上方邏輯一致），並合併頁面衍生旗標
 
-快照完成後顯示：
+有快照時另顯示：
 - 截圖預覽（若成功）
-- Final Domain、IP Address、ASN / Hosting（hosting provider 名稱與國家）
-- Registrar、Domain Created（來自 WHOIS）
-- **Risk Flags**（風險旗標，見下方說明）
 - **Request Domains**：頁面載入時瀏覽器所接觸的所有外部 domain，可用於識別追蹤器、廣告網路、CDN
 
 ---
@@ -179,17 +188,22 @@ cases（案件）
 | `suspicious_download` | final URL 副檔名為 .exe / .zip / .apk / .dmg 等可執行或壓縮格式 |
 | `url_shortener_chain` | final domain 本身是已知短連結服務（掃描未穿透至真實目的地） |
 
-*快照時產生（snapshot-time flags，需 Playwright 成功執行）：*
+*網域情資產生（WHOIS 路徑，不需 Playwright）：*
 
 | 旗標 | 觸發條件 |
 |------|----------|
-| `new_domain` | 網域創建日期距貼文發布日期不足 180 天 |
+| `new_domain` | 網域創建日期距貼文發布日期不足 180 天（寫入 `intel_risk_tags` 並合併至展示用旗標） |
+
+*快照時額外產生（需 Playwright 執行頁面載入）：*
+
+| 旗標 | 觸發條件 |
+|------|----------|
 | `high_tracker_count` | 頁面載入過程中接觸的已知第三方追蹤器 >= 3 個 |
-| `capture_error` | Playwright 截圖失敗（WHOIS 和 IP/ASN 仍可能成功） |
+| `capture_error` | Playwright 截圖失敗（WHOIS 和 IP/ASN 仍可能已成功） |
 
 旗標說明：
 - `url_shortener_chain` 不代表惡意；它代表掃描工具在該短連結服務的 URL 前停住了，**真實的落地頁未知**，需手動確認或以瀏覽器開啟
-- `new_domain` 以貼文的 `posted_at` 為基準日計算；若 `posted_at` 無法解析，以執行快照當天為基準
+- `new_domain` 以貼文的 `posted_at` 為基準日計算；若 `posted_at` 無法解析，以執行情資／快照當天為基準
 - `high_tracker_count` 的門檻為 3 個，涵蓋 Google Analytics、Facebook Pixel、Hotjar 等常見追蹤服務
 
 ---
@@ -197,6 +211,10 @@ cases（案件）
 #### 3-3. Clusters（聚合分析）
 
 對掃描結果進行跨貼文的事實性聚合，不做意圖推斷。
+
+**案件洞察（規則式摘要）**
+
+頁面上方以可摺疊區塊呈現 **規則式、可稽核** 的摘要（非 LLM）：一句話總覽、數條重點（例如落地集中度、跨貼文參數、ASN 集中），以及資料缺口（尚無情資／尚無快照的筆數提示）。
 
 **Scanned Destinations（已掃描目的地）**
 
@@ -210,7 +228,7 @@ cases（案件）
 | posts | 涉及此 domain 的貼文數量 |
 | risk_flags | 各旗標及觸發次數，例如 `multi_hop ×2` |
 
-注意：`risk_flags` 是所有指向該 domain 的 URL 的旗標聯集，並附上各旗標的觸發次數。`flagged_urls` 欄位讓使用者清楚知道「210 個連結中只有 3 個有問題」，避免誤解整批連結皆有風險。
+注意：`risk_flags` 會合併 **snapshot 上的旗標** 與 **scan 層級的 `intel_risk_tags`**（例如僅執行 WHOIS 時得到的 `new_domain`），並附上各旗標的觸發次數。`flagged_urls` 欄位讓使用者清楚知道「210 個連結中只有 3 個有問題」，避免誤解整批連結皆有風險。
 
 Drill-down 展開後，URL 清單依旗標數量由多至少排序，每筆附上個別的旗標標示。
 
@@ -218,7 +236,7 @@ Drill-down 展開後，URL 清單依旗標數量由多至少排序，每筆附�
 
 **Hosting Infrastructure（主機基礎設施）**
 
-將所有已快照的落地頁 domain 依 ASN 分組，識別共用同一個 hosting provider 的多個 domain。
+將已有 **ASN 資料** 的落地 domain 依 ASN 分組（資料可來自 **網域情資** 或 **快照** 列，兩者擇一即可），識別共用同一個 hosting provider 的多個 domain。
 
 表格顯示：ASN 編號、機構名稱（as_org）、國家、domain 數量、URL 數量、flagged URL 數量、貼文數量、風險旗標分布。
 
@@ -250,7 +268,7 @@ Drill-down 展開後顯示：
 
 **Domain Registrars（網域註冊商）**
 
-快照完成後，從 WHOIS 資料擷取落地頁網域的註冊商資訊，顯示每個網域的 registrar 和創建日期。
+在已取得 WHOIS 的前提下（**只查網域情資** 或 **快照流程** 皆可），顯示落地網域的 registrar 與創建日期。
 
 此頁籤的用途：識別落地頁網域的管理方，作為發出 takedown 請求的對象清單。
 
@@ -271,7 +289,7 @@ case_{id}_{timestamp}.zip
 │   ├── messages.csv         ← 來源貼文（含 has_screenshot 欄位）
 │   └── screenshots/         ← 匯入時上傳的貼文截圖（若有）
 ├── urls/
-│   ├── urls.csv             ← 所有 URL（含 scan_run_id 供跨檔對照）
+│   ├── urls.csv             ← 所有 URL（含 scan_run_id；並含 scan 層 whois／asn／domain_enriched_at 等欄位）
 │   └── chains/
 │       └── url_{id}_hops.csv ← 各 URL 的 redirect chain 逐跳資料
 └── snapshots/

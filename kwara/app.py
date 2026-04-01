@@ -13,9 +13,22 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 from db import get_conn, init_db, migrate_db
 from ingestion import ingest_message, ingest_csv
-from pipeline import run_scan_only, run_snapshot
-from clustering import shared_destinations, shared_params, asn_clusters, KNOWN_SHORTLINK_DOMAINS
-from snapshots import SUSPICIOUS_EXTS as _SUSP_EXTS
+from pipeline import (
+    run_domain_intel_batch,
+    run_domain_intel_only,
+    run_scan_only,
+    run_snapshot,
+    run_snapshot_batch,
+)
+from clustering import (
+    _merge_risk_tags,
+    asn_clusters,
+    shared_destinations,
+    shared_params,
+    KNOWN_SHORTLINK_DOMAINS,
+)
+from insights import case_insights
+from snapshots import SUSPICIOUS_EXTS as _SUSP_EXTS, failed_capture_urls_csv
 from exporter import export_case
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "data", "kwara.db")
@@ -33,6 +46,9 @@ def _init_db_once():
 
 _init_db_once()
 conn = get_conn(DB_PATH)
+# Migrations must run on this connection: @st.cache_resource can skip re-running
+# _init_db_only when only db.migrate_db() changes, leaving new columns missing.
+migrate_db(conn)
 
 
 def now_utc() -> str:
@@ -384,6 +400,14 @@ with tab_analysis:
             """SELECT ua.id AS ua_id, ua.original_url, ua.domain,
                       sr.id AS scan_run_id, sr.status AS scan_status,
                       sr.final_url, sr.hop_count,
+                      sr.whois_registrar AS sr_whois_registrar,
+                      sr.whois_creation_date AS sr_whois_creation_date,
+                      sr.ip_address AS sr_ip_address,
+                      sr.asn AS sr_asn,
+                      sr.as_org AS sr_as_org,
+                      sr.as_country AS sr_as_country,
+                      sr.intel_risk_tags AS sr_intel_risk_tags,
+                      sr.domain_enriched_at AS sr_domain_enriched_at,
                       s.id   AS snapshot_id,
                       s.risk_tags AS snapshot_risk_tags
                FROM url_artifacts ua
@@ -403,6 +427,26 @@ with tab_analysis:
                 r for r in inv_rows
                 if r["scan_run_id"] and r["final_url"] and not r["snapshot_id"]
             ]
+            pending_intel_only = [
+                r for r in inv_rows
+                if r["scan_run_id"] and r["final_url"]
+                and (r["sr_domain_enriched_at"] is None or not str(r["sr_domain_enriched_at"]).strip())
+            ]
+            if pending_intel_only:
+                st.subheader(f"Domain intel queue ({len(pending_intel_only)} pending)")
+                st.caption(
+                    "Scanned URLs with no WHOIS/ASN on file yet. This is fast (no browser). "
+                    "Use this to populate Analysis **Hosting** and **Registrars** before screenshots."
+                )
+                if st.button(
+                    f"WHOIS / ASN only — all pending ({len(pending_intel_only)})",
+                    key="btn_intel_all",
+                ):
+                    with st.spinner("Querying WHOIS and ASN…"):
+                        run_domain_intel_batch(conn, [r["scan_run_id"] for r in pending_intel_only])
+                    st.rerun()
+                st.divider()
+
             if pending_snap:
                 priority_rows = []
                 for r in pending_snap:
@@ -428,13 +472,30 @@ with tab_analysis:
                     f"{len(pending_snap) * 15 // 60}–{len(pending_snap) * 30 // 60} minutes."
                 )
                 if st.button(f"Snapshot & WHOIS All ({len(pending_snap)} pending)", key="btn_snap_all"):
-                    prog = st.progress(0.0, text="Starting…")
                     total = len(pending_snap)
-                    for i, r in enumerate(pending_snap, 1):
-                        prog.progress(i / total, text=f"{i}/{total} — {r['original_url'][:70]}")
-                        run_snapshot(conn, r["scan_run_id"])
-                    prog.progress(1.0, text=f"Done — {total} snapshots captured")
+                    prog = st.progress(0.0, text="Starting…")
+                    all_snapshot_ids = []
+                    BATCH = 5
+                    for batch_start in range(0, total, BATCH):
+                        batch = pending_snap[batch_start:batch_start + BATCH]
+                        batch_end = min(batch_start + BATCH, total)
+                        prog.progress(
+                            batch_start / total,
+                            text=f"Capturing screenshots {batch_start + 1}–{batch_end} / {total}…",
+                        )
+                        sr_ids = [r["scan_run_id"] for r in batch]
+                        sids = run_snapshot_batch(conn, sr_ids)
+                        all_snapshot_ids.extend(sids)
+                    prog.progress(1.0, text=f"Done — {len(all_snapshot_ids)} snapshots captured")
                     st.rerun()
+
+                st.download_button(
+                    label="Download URLs needing manual capture (CSV)",
+                    data=failed_capture_urls_csv(conn, current_case_id),
+                    file_name=f"kwara_failed_snapshots_case_{current_case_id}.csv",
+                    mime="text/csv",
+                    key="dl_failed_snapshots_csv",
+                )
 
                 st.divider()
 
@@ -445,14 +506,29 @@ with tab_analysis:
                 if r["snapshot_id"]:
                     flags = json.loads(r["snapshot_risk_tags"] or "[]")
                 else:
-                    flags = _scan_flags(r["final_url"], r["hop_count"])
+                    flags = list(_scan_flags(r["final_url"], r["hop_count"]))
+                    try:
+                        intel = json.loads(r["sr_intel_risk_tags"] or "[]")
+                    except (ValueError, TypeError):
+                        intel = []
+                    for t in intel:
+                        if t not in flags:
+                            flags.append(t)
                 flag_str = " · " + ", ".join(flags) if flags else ""
                 return f"{r['original_url']}  [{scan} · {snap}{flag_str}]"
 
             def _flag_count(r):
                 if r["snapshot_id"]:
                     return len(json.loads(r["snapshot_risk_tags"] or "[]"))
-                return len(_scan_flags(r["final_url"], r["hop_count"]))
+                flags = list(_scan_flags(r["final_url"], r["hop_count"]))
+                try:
+                    intel = json.loads(r["sr_intel_risk_tags"] or "[]")
+                except (ValueError, TypeError):
+                    intel = []
+                for t in intel:
+                    if t not in flags:
+                        flags.append(t)
+                return len(flags)
 
             sorted_rows = sorted(inv_rows, key=lambda r: (_flag_count(r), r["ua_id"]), reverse=True)
             # Deduplicate by ua_id (keep all unique artifacts, even if same original_url)
@@ -493,7 +569,7 @@ with tab_analysis:
                         st.dataframe(pd.DataFrame([dict(h) for h in hops]), use_container_width=True, hide_index=True)
 
             with col_r:
-                st.subheader("Snapshot & WHOIS")
+                st.subheader("Domain & hosting (WHOIS / ASN)")
                 if not sel["scan_run_id"] or not sel["final_url"]:
                     st.info("Complete a scan first.")
                 else:
@@ -502,46 +578,92 @@ with tab_analysis:
                         (sel["scan_run_id"],),
                     ).fetchone()
 
-                    if st.button("Re-capture" if snap else "Capture snapshot", key="btn_snap"):
-                        st.session_state["inv_last_ua_id"] = sel["ua_id"]
-                        with st.spinner("Capturing screenshot + WHOIS..."):
-                            try:
-                                run_snapshot(conn, sel["scan_run_id"])
-                            except Exception as e:
-                                st.error(f"Snapshot failed: {e}")
-                                st.stop()
-                        st.rerun()
+                    def _coalesce_snap(key: str, sr_key: str):
+                        if snap and snap[key]:
+                            return snap[key]
+                        return sel[sr_key] if sel[sr_key] else None
 
-                    if snap:
+                    c_intel, c_cap = st.columns(2)
+                    with c_intel:
+                        if st.button("查詢網域情資（不需截圖）", key="btn_intel_only", help="WHOIS / ASN only; no browser."):
+                            st.session_state["inv_last_ua_id"] = sel["ua_id"]
+                            with st.spinner("WHOIS / ASN…"):
+                                try:
+                                    run_domain_intel_only(conn, sel["scan_run_id"])
+                                except Exception as e:
+                                    st.error(f"Domain intel failed: {e}")
+                                    st.stop()
+                            st.rerun()
+                    with c_cap:
+                        if st.button("Re-capture" if snap else "Capture snapshot", key="btn_snap"):
+                            st.session_state["inv_last_ua_id"] = sel["ua_id"]
+                            with st.spinner("Capturing screenshot + WHOIS / ASN…"):
+                                try:
+                                    run_snapshot(conn, sel["scan_run_id"])
+                                except Exception as e:
+                                    st.error(f"Snapshot failed: {e}")
+                                    st.stop()
+                            st.rerun()
+
+                    fd = (
+                        (snap["final_domain"] if snap and snap["final_domain"] else None)
+                        or (_urlparse(sel["final_url"]).hostname or "—")
+                    )
+                    st.write(f"**Final Domain:** {fd}")
+                    st.write(f"**IP Address:** {_coalesce_snap('ip_address', 'sr_ip_address') or '—'}")
+                    asn_v = _coalesce_snap("asn", "sr_asn")
+                    _asn_str = (
+                        f"AS{asn_v}  {_coalesce_snap('as_org', 'sr_as_org') or ''}  "
+                        f"({_coalesce_snap('as_country', 'sr_as_country') or '—'})"
+                        if asn_v else "—"
+                    )
+                    st.write(f"**ASN / Hosting:** {_asn_str}")
+                    st.write(f"**Registrar:** {_coalesce_snap('whois_registrar', 'sr_whois_registrar') or '—'}")
+                    st.write(f"**Domain Created:** {_coalesce_snap('whois_creation_date', 'sr_whois_creation_date') or '—'}")
+                    if sel["sr_domain_enriched_at"]:
+                        st.caption(f"Domain intel updated: `{sel['sr_domain_enriched_at']}`")
+
+                    tags = _merge_risk_tags(
+                        snap["risk_tags"] if snap else None,
+                        sel["sr_intel_risk_tags"],
+                    )
+                    tag_str = "  ".join(f"{TAG_COLORS.get(t,'⚪')} `{t}`" for t in tags)
+                    st.write(f"**Risk Flags:** {tag_str or '—'}")
+                    with st.expander("Risk flag legend"):
+                        st.markdown(
+                            "| Flag | Trigger |\n|------|---------|\n"
+                            "| `multi_hop` | redirect chain >= 3 hops |\n"
+                            "| `no_https` | final URL is http:// |\n"
+                            "| `new_domain` | domain created < 180 days before post date |\n"
+                            "| `suspicious_download` | final URL extension is .exe / .zip / .apk / .dmg etc. |\n"
+                            "| `high_tracker_count` | page loaded >= 3 distinct third-party tracker domains |\n"
+                            "| `url_shortener_chain` | final domain is itself a known shortlink service |\n"
+                            "| `capture_error` | Playwright screenshot failed |"
+                        )
+
+                st.divider()
+                st.subheader("Snapshot (screenshot & page)")
+                if not sel["scan_run_id"] or not sel["final_url"]:
+                    st.caption("Complete a scan first.")
+                else:
+                    snap = conn.execute(
+                        "SELECT * FROM snapshots WHERE scan_run_id = ? ORDER BY id DESC LIMIT 1",
+                        (sel["scan_run_id"],),
+                    ).fetchone()
+                    if not snap:
+                        st.info("No snapshot yet. Use **Capture snapshot** above for Playwright evidence, or fetch **domain intel** without a screenshot.")
+                    else:
+                        cap, cap_d = snap["capture_status"], snap["capture_detail"]
+                        if cap or cap_d:
+                            st.caption(
+                                f"Capture status: `{cap or '—'}`"
+                                + (f" — {cap_d}" if cap_d else "")
+                            )
+
                         if snap["screenshot_path"] and os.path.exists(snap["screenshot_path"]):
                             st.image(snap["screenshot_path"], use_container_width=True)
                         else:
                             st.warning("Screenshot file missing.")
-
-                        st.write(f"**Final Domain:** {snap['final_domain']}")
-                        st.write(f"**IP Address:** {snap['ip_address'] or '—'}")
-                        _asn_str = (
-                            f"AS{snap['asn']}  {snap['as_org'] or ''}  ({snap['as_country'] or '—'})"
-                            if snap["asn"] else "—"
-                        )
-                        st.write(f"**ASN / Hosting:** {_asn_str}")
-                        st.write(f"**Registrar:** {snap['whois_registrar'] or '—'}")
-                        st.write(f"**Domain Created:** {snap['whois_creation_date'] or '—'}")
-
-                        tags = json.loads(snap["risk_tags"] or "[]")
-                        tag_str = "  ".join(f"{TAG_COLORS.get(t,'⚪')} `{t}`" for t in tags)
-                        st.write(f"**Risk Flags:** {tag_str or '—'}")
-                        with st.expander("Risk flag legend"):
-                            st.markdown(
-                                "| Flag | Trigger |\n|------|---------|\n"
-                                "| `multi_hop` | redirect chain >= 3 hops |\n"
-                                "| `no_https` | final URL is http:// |\n"
-                                "| `new_domain` | domain created < 180 days before post date |\n"
-                                "| `suspicious_download` | final URL extension is .exe / .zip / .apk / .dmg etc. |\n"
-                                "| `high_tracker_count` | page loaded >= 3 distinct third-party tracker domains |\n"
-                                "| `url_shortener_chain` | final domain is itself a known shortlink service |\n"
-                                "| `capture_error` | Playwright screenshot failed |"
-                            )
 
                         domains = json.loads(snap["request_domains_json"] or "[]")
                         with st.expander(f"Request Domains ({len(domains)})"):
@@ -554,13 +676,53 @@ with tab_analysis:
                                     file_name=f"snapshot_{sel['scan_run_id']}.html",
                                     mime="text/html", key="dl_html")
 
-
+                        st.divider()
+                        st.caption("Upload a screenshot/HTML captured manually in your browser (e.g. when automation is blocked).")
+                        up_png = st.file_uploader("Replace screenshot (PNG)", type=["png"], key="manual_snap_png")
+                        up_html = st.file_uploader("Replace HTML (optional)", type=["html", "htm"], key="manual_snap_html")
+                        if st.button("Save manual evidence", key="btn_manual_snap"):
+                            if not up_png:
+                                st.warning("Choose a PNG file first.")
+                            else:
+                                base = os.path.join(os.path.dirname(__file__), "data", "snapshots", str(sel["scan_run_id"]))
+                                os.makedirs(base, exist_ok=True)
+                                png_path = os.path.join(base, "screenshot.png")
+                                with open(png_path, "wb") as f:
+                                    f.write(up_png.getbuffer())
+                                html_path = snap["html_path"] or os.path.join(base, "page.html")
+                                if up_html:
+                                    html_path = os.path.join(base, "page.html")
+                                    with open(html_path, "wb") as f:
+                                        f.write(up_html.getbuffer())
+                                tags = [t for t in json.loads(snap["risk_tags"] or "[]") if t != "capture_error"]
+                                conn.execute(
+                                    """UPDATE snapshots SET screenshot_path=?, html_path=?,
+                                           capture_status=?, capture_detail=?, risk_tags=?
+                                       WHERE id=?""",
+                                    (png_path, html_path, "manual", "user_upload", json.dumps(tags), snap["id"]),
+                                )
+                                conn.commit()
+                                st.session_state["inv_last_ua_id"] = sel["ua_id"]
+                                st.rerun()
 
     # Clusters
     with sub_clusters:
         destinations, unresolved_dests = shared_destinations(conn, current_case_id)
         params = shared_params(conn, current_case_id)
         asn_data = asn_clusters(conn, current_case_id)
+
+        ci = case_insights(conn, current_case_id)
+        with st.expander("案件洞察（規則式摘要）", expanded=True):
+            st.markdown(ci["headline"])
+            if ci["bullets"]:
+                for b in ci["bullets"]:
+                    st.markdown(f"- {b}")
+            if ci["gaps"]:
+                st.caption("資料缺口")
+                for g in ci["gaps"]:
+                    st.markdown(f"- {g}")
+
+        st.divider()
 
         # Scanned Destinations
         st.subheader("Scanned Destinations")
@@ -642,10 +804,13 @@ with tab_analysis:
 
         # Hosting Infrastructure
         st.subheader("Hosting Infrastructure")
-        st.caption("Abuse landing domains grouped by ASN (hosting provider). Populated after capturing snapshots in the Investigate tab.")
+        st.caption(
+            "Abuse landing domains grouped by ASN (hosting provider). "
+            "Populated after WHOIS/ASN lookup (Investigate: domain intel or snapshot)."
+        )
 
         if not asn_data:
-            st.info("No ASN data yet. Capture snapshots in the Investigate tab first.")
+            st.info("No ASN data yet. Run **查詢網域情資** or capture a snapshot in the Investigate tab.")
         else:
             asn_summary = []
             for a in asn_data:
@@ -708,15 +873,35 @@ with tab_providers:
     st.subheader("Shortlink Providers")
     st.caption("Services whose customers are distributing abusive shortlinks.")
 
+    # Detect shortlink providers: domains in the known list OR domains whose
+    # URLs redirect to a *different* domain (i.e. they act as redirectors).
     all_domains = conn.execute(
-        """SELECT domain AS provider, COUNT(*) AS url_count
-           FROM url_artifacts
-           WHERE case_id = ? AND domain IS NOT NULL
-           GROUP BY domain ORDER BY url_count DESC""",
+        """SELECT ua.domain AS provider, COUNT(*) AS url_count
+           FROM url_artifacts ua
+           LEFT JOIN scan_runs sr ON sr.url_artifact_id = ua.id
+               AND sr.id = (SELECT id FROM scan_runs WHERE url_artifact_id = ua.id ORDER BY id DESC LIMIT 1)
+           WHERE ua.case_id = ? AND ua.domain IS NOT NULL
+           GROUP BY ua.domain ORDER BY url_count DESC""",
         (current_case_id,),
     ).fetchall()
 
-    providers = [r for r in all_domains if r["provider"] in KNOWN_SHORTLINK_DOMAINS]
+    detected_redirectors = set()
+    redir_rows = conn.execute(
+        """SELECT DISTINCT ua.domain
+           FROM url_artifacts ua
+           JOIN scan_runs sr ON sr.url_artifact_id = ua.id AND sr.status = 'done'
+               AND sr.id = (SELECT id FROM scan_runs WHERE url_artifact_id = ua.id ORDER BY id DESC LIMIT 1)
+           WHERE ua.case_id = ? AND ua.domain IS NOT NULL
+             AND sr.final_url IS NOT NULL AND sr.hop_count >= 2""",
+        (current_case_id,),
+    ).fetchall()
+    for r in redir_rows:
+        detected_redirectors.add(r["domain"])
+
+    providers = [
+        r for r in all_domains
+        if r["provider"] in KNOWN_SHORTLINK_DOMAINS or r["provider"] in detected_redirectors
+    ]
 
     if providers:
         df_prov = pd.DataFrame([dict(r) for r in providers])
@@ -784,21 +969,32 @@ with tab_providers:
     st.caption("Registrars whose customers registered the abuse destination domains.")
 
     registrars = conn.execute(
-        """SELECT s.whois_registrar AS registrar,
-                  s.final_domain AS domain,
-                  s.whois_creation_date AS domain_created
-           FROM snapshots s
-           JOIN scan_runs sr ON sr.id = s.scan_run_id
-           JOIN url_artifacts ua ON ua.id = sr.url_artifact_id
-           WHERE ua.case_id = ? AND s.whois_registrar IS NOT NULL
-           ORDER BY s.whois_registrar, s.final_domain""",
+        """SELECT COALESCE(NULLIF(TRIM(sr.whois_registrar), ''), s.whois_registrar) AS registrar,
+                  s.final_domain AS snap_domain,
+                  sr.final_url AS scan_final_url,
+                  COALESCE(sr.whois_creation_date, s.whois_creation_date) AS domain_created
+           FROM url_artifacts ua
+           JOIN scan_runs sr ON sr.id = (
+               SELECT id FROM scan_runs WHERE url_artifact_id = ua.id ORDER BY id DESC LIMIT 1
+           )
+           LEFT JOIN snapshots s ON s.scan_run_id = sr.id
+               AND s.id = (SELECT id FROM snapshots WHERE scan_run_id = sr.id ORDER BY id DESC LIMIT 1)
+           WHERE ua.case_id = ?
+             AND COALESCE(NULLIF(TRIM(sr.whois_registrar), ''), s.whois_registrar) IS NOT NULL
+             AND TRIM(COALESCE(NULLIF(TRIM(sr.whois_registrar), ''), s.whois_registrar, '')) != ''
+           ORDER BY registrar, snap_domain, scan_final_url""",
         (current_case_id,),
     ).fetchall()
 
-    if registrars:
-        st.dataframe(pd.DataFrame([dict(r) for r in registrars]), use_container_width=True, hide_index=True)
+    reg_rows = []
+    for r in registrars:
+        dom = r["snap_domain"] or (_urlparse(r["scan_final_url"] or "").hostname or "—")
+        reg_rows.append({"registrar": r["registrar"], "domain": dom, "domain_created": r["domain_created"]})
+
+    if reg_rows:
+        st.dataframe(pd.DataFrame(reg_rows), use_container_width=True, hide_index=True)
     else:
-        st.info("No registrar data yet. Capture snapshots in the Analysis tab to populate WHOIS data.")
+        st.info("No registrar data yet. Run **查詢網域情資** or capture snapshots in Investigate to populate WHOIS.")
 
 # ===========================================================================
 # EXPORT

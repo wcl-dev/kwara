@@ -2,6 +2,17 @@
 
 kwara 是一個短連結／網域濫用證據調查工具。
 
+**Repository：** [github.com/wcl-dev/kwara](https://github.com/wcl-dev/kwara)
+
+## 功能摘要
+
+- **掃描（Scan）**：追蹤 HTTP redirect chain，記錄落地 `final_url`。
+- **網域情資**：掃描完成後可單獨執行 **WHOIS／ASN**（不必截圖），寫入 `scan_runs`；截圖仍透過 Playwright 取得頁面證據。
+- **分析（Analysis）**：規則式 **案件洞察**（摘要句與重點條列，不依賴 LLM）、目的地叢集、共用 URL 參數、依 ASN 的託管樣貌。
+- **匯出**：證據封包 ZIP（`urls.csv` 含 scan 層情資欄位）。
+
+詳見 [`kwara_說明文件.md`](kwara_說明文件.md)。
+
 ## 環境需求
 
 - **Python**：建議 **3.10+**（與依賴套件相容即可）。
@@ -30,7 +41,9 @@ streamlit run app.py
 
 或於 Windows 在**已安裝依賴**的前提下，從專案根目錄雙擊 `start_kwara.bat`（會進入 `kwara/` 並執行 `streamlit run app.py`）。
 
-> **重要**：未執行 `playwright install chromium` 時，介面中「快照／截圖」相關功能可能失敗；其餘 SQLite、掃描多數仍可運作。
+> **重要**：未執行 `playwright install chromium` 時，介面中「快照／截圖」相關功能可能失敗；掃描、WHOIS／ASN 情資與 SQLite 仍可運作。
+
+> **資料庫遷移**：每次啟動應用會對目前連線執行 `migrate_db`；從舊版升級後若遇欄位錯誤，請重新整理或重啟 Streamlit。
 
 ### 子專案 `whois_osint/`
 

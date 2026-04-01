@@ -80,7 +80,10 @@ def export_case(conn: sqlite3.Connection, case_id: int) -> str:
         urls = conn.execute(
             """SELECT ua.id, ua.original_url, ua.domain,
                       ua.message_id, ua.url_order,
-                      sr.id AS scan_run_id, sr.status AS scan_status, sr.final_url, sr.hop_count
+                      sr.id AS scan_run_id, sr.status AS scan_status, sr.final_url, sr.hop_count,
+                      sr.whois_registrar, sr.whois_creation_date,
+                      sr.ip_address, sr.asn, sr.as_org, sr.as_country,
+                      sr.domain_enriched_at, sr.intel_risk_tags
                FROM url_artifacts ua
                LEFT JOIN scan_runs sr ON sr.url_artifact_id = ua.id
                    AND sr.id = (SELECT id FROM scan_runs WHERE url_artifact_id = ua.id ORDER BY id DESC LIMIT 1)
@@ -89,7 +92,10 @@ def export_case(conn: sqlite3.Connection, case_id: int) -> str:
         ).fetchall()
 
         url_fields = ["id", "original_url", "domain", "message_id",
-                      "url_order", "scan_run_id", "scan_status", "final_url", "hop_count"]
+                      "url_order", "scan_run_id", "scan_status", "final_url", "hop_count",
+                      "whois_registrar", "whois_creation_date",
+                      "ip_address", "asn", "as_org", "as_country",
+                      "domain_enriched_at", "intel_risk_tags"]
         add(zf, "urls/urls.csv",
             _csv_bytes([dict(r) for r in urls], url_fields))
 
@@ -114,7 +120,8 @@ def export_case(conn: sqlite3.Connection, case_id: int) -> str:
                       s.screenshot_path, s.html_path,
                       s.ip_address, s.asn, s.as_org, s.as_country,
                       s.whois_registrar, s.whois_creation_date,
-                      s.risk_tags, s.request_domains_json, s.captured_at
+                      s.risk_tags, s.request_domains_json, s.captured_at,
+                      s.capture_status, s.capture_detail
                FROM snapshots s
                JOIN scan_runs sr ON sr.id = s.scan_run_id
                JOIN url_artifacts ua ON ua.id = sr.url_artifact_id
@@ -125,6 +132,11 @@ def export_case(conn: sqlite3.Connection, case_id: int) -> str:
         snap_meta = []
         for s in snaps:
             sid = s["scan_run_id"]
+            sr_row = conn.execute(
+                """SELECT whois_registrar, whois_creation_date, ip_address, asn, as_org, as_country
+                   FROM scan_runs WHERE id = ?""",
+                (sid,),
+            ).fetchone()
             screenshot_arc = ""
             html_arc = ""
             if s["screenshot_path"] and os.path.exists(s["screenshot_path"]):
@@ -135,21 +147,32 @@ def export_case(conn: sqlite3.Connection, case_id: int) -> str:
                 html_arc = f"snapshots/{sid}/page.html"
                 with open(s["html_path"], "rb") as f:
                     add(zf, html_arc, f.read())
+
+            def _coalesce_snap(k_snap: str, k_sr: str):
+                v = s[k_snap]
+                if v is not None and str(v).strip() != "":
+                    return v
+                if sr_row and sr_row[k_sr] is not None and str(sr_row[k_sr]).strip() != "":
+                    return sr_row[k_sr]
+                return v
+
             snap_meta.append({
                 "scan_run_id":        sid,
                 "final_url":          s["final_url"],
                 "final_domain":       s["final_domain"],
-                "ip_address":         s["ip_address"],
-                "asn":                s["asn"],
-                "as_org":             s["as_org"],
-                "as_country":         s["as_country"],
-                "whois_registrar":    s["whois_registrar"],
-                "whois_creation_date":s["whois_creation_date"],
+                "ip_address":         _coalesce_snap("ip_address", "ip_address"),
+                "asn":                _coalesce_snap("asn", "asn"),
+                "as_org":             _coalesce_snap("as_org", "as_org"),
+                "as_country":         _coalesce_snap("as_country", "as_country"),
+                "whois_registrar":    _coalesce_snap("whois_registrar", "whois_registrar"),
+                "whois_creation_date": _coalesce_snap("whois_creation_date", "whois_creation_date"),
                 "risk_tags":          s["risk_tags"],
                 "request_domains":    s["request_domains_json"],
                 "screenshot_file":    screenshot_arc,
                 "html_file":          html_arc,
                 "captured_at":        s["captured_at"],
+                "capture_status":     s["capture_status"] or "",
+                "capture_detail":     s["capture_detail"] or "",
             })
 
         if snap_meta:
@@ -157,7 +180,8 @@ def export_case(conn: sqlite3.Connection, case_id: int) -> str:
                            "ip_address", "asn", "as_org", "as_country",
                            "whois_registrar", "whois_creation_date",
                            "risk_tags", "request_domains",
-                           "screenshot_file", "html_file", "captured_at"]
+                           "screenshot_file", "html_file", "captured_at",
+                           "capture_status", "capture_detail"]
             add(zf, "snapshots/snapshots.csv",
                 _csv_bytes(snap_meta, snap_fields))
 
@@ -203,7 +227,10 @@ urls/
   urls.csv
     All URLs extracted from source posts.
     Columns: id, original_url, domain, message_id, url_order,
-             scan_run_id, scan_status, final_url, hop_count
+             scan_run_id, scan_status, final_url, hop_count,
+             whois_registrar, whois_creation_date,
+             ip_address, asn, as_org, as_country,
+             domain_enriched_at, intel_risk_tags
     scan_run_id links to snapshots/snapshots.csv.
     scan_status values: done, error, timeout, ssl_error,
                         loop_detected, max_hops, or blank if unscanned.
