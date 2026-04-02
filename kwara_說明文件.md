@@ -214,7 +214,13 @@ cases（案件）
 
 **案件洞察（規則式摘要）**
 
-頁面上方以可摺疊區塊呈現 **規則式、可稽核** 的摘要（非 LLM）：一句話總覽、數條重點（例如落地集中度、跨貼文參數、ASN 集中），以及資料缺口（尚無情資／尚無快照的筆數提示）。
+頁面上方以可摺疊區塊呈現 **規則式、可稽核** 的摘要（非 LLM）：一句話總覽、數條重點、以及資料缺口。重點條列涵蓋：
+
+- **落地集中度**：貼文覆蓋最高的目的地網域
+- **風險標記統計**：匯總所有目的地的 risk tag 出現次數與中文說明（例如 `high_tracker_count`（第三方追蹤器數量偏高）×100）
+- **跨貼文參數**：最常重複的 URL 參數，並標示參數歸屬平台（例如「歸屬 Google Analytics」；見下方「URL 參數歸屬辨識」）
+- **基礎設施**：以 URL 量計最大的 ASN 叢集
+- **資料缺口**：尚無情資／尚無快照的筆數提示
 
 **Scanned Destinations（已掃描目的地）**
 
@@ -254,7 +260,21 @@ Drill-down 展開後顯示：
 - 過濾規則：key 長度 <= 1 的忽略；value 超過 100 字元的忽略
 - 相同 key=value 在同一篇貼文的多個 URL 中重複出現，不計入跨貼文次數
 
-常見的 UTM 追蹤參數（`utm_source`、`utm_campaign`）或自訂的 ref 參數若大量重複出現，可能代表協調性的推廣行動。
+表格欄位含 `param_key`、`param_value`、`owner`（歸屬平台）、`purpose`（用途）、`domains`（出現在哪些網域）、`post_count`、`url_count`。
+
+**URL 參數歸屬辨識**
+
+系統內建已知追蹤平台的對照表，自動標示參數的歸屬與用途：
+
+| 參數範例 | 歸屬 | 用途 |
+|----------|------|------|
+| `utm_source`、`utm_term` 等 | Google Analytics | 流量來源、付費關鍵字等 |
+| `fbclid` | Meta / Facebook | 點擊 ID |
+| `gclid` | Google Ads | 點擊 ID |
+| `msclkid` | Microsoft Ads | 點擊 ID |
+| `ttclid` | TikTok Ads | 點擊 ID |
+
+不在對照表中的參數（如網站自訂的 `uid`、`ref` 等），`owner` 顯示「非屬已知追蹤平台」、`purpose` 顯示「未識別」，使用者可自行從 `domains` 欄位判斷其來源。此機制為資料驅動，不因特定案件而硬編碼。
 
 ---
 
@@ -346,9 +366,19 @@ Export（下載證據封包）
 | `pipeline.py` | 調度 scanner → snapshots → whois |
 | `snapshots.py` | Playwright 截圖、request domain 收集、風險旗標計算 |
 | `whois_lookup.py` | WHOIS 查詢與日期正規化 |
-| `clustering.py` | Scanned Destinations 與 Shared Parameters 聚合邏輯 |
+| `clustering.py` | Scanned Destinations、Shared Parameters 聚合邏輯、URL 參數歸屬辨識 |
+| `insights.py` | 規則式案件洞察（headline、bullets、gaps），含風險標記統計與參數歸屬摘要 |
 | `exporter.py` | ZIP 封包建置與 SHA-256 manifest |
 | `audit.py` | 操作紀錄寫入 |
+| `ip_lookup.py` | DNS 解析與 ASN 查詢 |
+| `wayback_fallback.py` | Playwright 截圖失敗時的 Internet Archive 備援 |
 | `utils/domain.py` | eTLD+1 網域擷取（支援 tldextract） |
+
+根目錄工具：
+
+| 元件 | 說明 |
+|------|------|
+| `restore_from_export.py` | 從匯出的 evidence pack 還原 SQLite 資料庫與 snapshot 檔案（跨裝置移轉用） |
+| `start_kwara.bat` | Windows 快速啟動（進入 `kwara/` 並執行 `streamlit run app.py`） |
 
 資料庫位置：`kwara/data/kwara.db`

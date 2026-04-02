@@ -7,6 +7,8 @@ isProject: false
 
 # Shortlink Abuse Evidence Kit（MVP）設計評估與實作計畫
 
+> **歷史文件**：本文件為專案初期的設計評估與規劃，部分方案（如 FastAPI、React/Vue 前端、ParameterFingerprint 資料表等）在後續實作中並未採用。實際採用的架構與功能請以 [`kwara_說明文件.md`](kwara_說明文件.md) 為準。
+
 ## 一、整體評價與原則對應
 
 
