@@ -1,30 +1,32 @@
+**[正體中文](README.zh-TW.md)**
+
 # kwara
 
-kwara 是一個短連結／網域濫用證據調查工具。
+kwara is a short-link / domain abuse evidence investigation tool.
 
-**Repository：** [github.com/wcl-dev/kwara](https://github.com/wcl-dev/kwara)
+**Repository:** [github.com/wcl-dev/kwara](https://github.com/wcl-dev/kwara)
 
-## 功能摘要
+## Feature Overview
 
-- **掃描（Scan）**：追蹤 HTTP redirect chain，記錄落地 `final_url`。
-- **網域情資**：掃描完成後可單獨執行 **WHOIS／ASN**（不必截圖），寫入 `scan_runs`；截圖仍透過 Playwright 取得頁面證據。
-- **分析（Analysis）**：規則式 **案件洞察**（摘要句與重點條列，含風險標記統計與參數歸屬，不依賴 LLM）、目的地叢集、共用 URL 參數（自動辨識 UTM / fbclid 等已知追蹤平台歸屬）、依 ASN 的託管樣貌。
-- **匯出**：證據封包 ZIP（`urls.csv` 含 scan 層情資欄位）。
-- **跨裝置移轉**：`restore_from_export.py` 可從匯出的 evidence pack 還原資料庫與 snapshot，方便在另一台裝置繼續作業。
-- **多語系（i18n）**：介面支援 English 與正體中文，側邊欄即時切換。
+- **Scan**: Trace HTTP redirect chains and record the landing `final_url`.
+- **Domain Intelligence**: After scanning, run **WHOIS / ASN** lookups independently (no screenshot required), writing results into `scan_runs`; screenshots are still captured via Playwright for page evidence.
+- **Analysis**: Rule-based **case insights** (summary sentences and key bullet points, including risk tag statistics and parameter attribution — no LLM dependency), destination clustering, shared URL parameters (auto-identifies known tracking platform attribution such as UTM / fbclid), and hosting profile by ASN.
+- **Export**: Evidence pack ZIP (`urls.csv` includes scan-level intelligence fields).
+- **Cross-device Transfer**: `restore_from_export.py` restores the database and snapshots from an exported evidence pack, making it easy to continue work on another machine.
+- **Internationalization (i18n)**: UI supports English and Traditional Chinese, switchable instantly from the sidebar.
 
-詳見 [`kwara_說明文件.md`](kwara_說明文件.md)。
+See [`kwara_guide.md`](kwara_guide.md) for details.
 
-## 環境需求
+## Requirements
 
-- **Python**：建議 **3.10+**（與依賴套件相容即可）。
-- **網路**：首次安裝後，`pip` 與 Playwright 下載瀏覽器需要連外；主程式使用時若需掃描／WHOIS 亦需網路。
+- **Python**: **3.10+** recommended (any version compatible with the dependencies).
+- **Network**: After initial installation, `pip` and Playwright browser downloads require internet access; scanning and WHOIS lookups also need network connectivity.
 
-## 快速開始
+## Quick Start
 
-### 主程式 `kwara/`（Streamlit）
+### Main App `kwara/` (Streamlit)
 
-在專案根目錄或 `kwara/` 內建立虛擬環境並安裝依賴：
+Create a virtual environment and install dependencies in the project root or inside `kwara/`:
 
 ```powershell
 cd kwara
@@ -35,47 +37,47 @@ python -m pip install -r requirements.txt
 python -m playwright install chromium
 ```
 
-接著啟動：
+Then start the app:
 
 ```powershell
 streamlit run app.py
 ```
 
-或於 Windows 在**已安裝依賴**的前提下，從專案根目錄雙擊 `start_kwara.bat`（會進入 `kwara/` 並執行 `streamlit run app.py`）。
+Alternatively, on Windows with dependencies already installed, double-click `start_kwara.bat` from the project root (it enters `kwara/` and runs `streamlit run app.py`).
 
-> **重要**：未執行 `playwright install chromium` 時，介面中「快照／截圖」相關功能可能失敗；掃描、WHOIS／ASN 情資與 SQLite 仍可運作。
+> **Important**: If `playwright install chromium` has not been run, snapshot / screenshot features may fail; scanning, WHOIS / ASN intelligence, and SQLite will still work.
 
-> **資料庫遷移**：每次啟動應用會對目前連線執行 `migrate_db`；從舊版升級後若遇欄位錯誤，請重新整理或重啟 Streamlit。
+> **Database Migration**: Each app launch runs `migrate_db` on the current connection; if you encounter column errors after upgrading from an older version, refresh or restart Streamlit.
 
-### 子專案 `whois_osint/`
+### Subproject `whois_osint/`
 
-見 [whois_osint/README.md](whois_osint/README.md)。
+See [whois_osint/README.md](whois_osint/README.md).
 
-### 執行自動測試（可選）
+### Running Tests (Optional)
 
-於專案根目錄（建議使用**同一個**或**另建**虛擬環境，並已安裝 `kwara` 依賴）：
+From the project root (use the **same** or a **separate** virtual environment with `kwara` dependencies installed):
 
 ```powershell
 python -m pip install -r kwara/requirements.txt -r requirements-dev.txt
 python -m pytest -v
 ```
 
-（測試涵蓋：SQLite 初始化、網域解析、Streamlit／Playwright 可匯入、`whois_domain_lookup.py -h`、以及 `kwara/` 與 `whois_osint/` 原始碼編譯檢查。）
+(Tests cover: SQLite initialization, domain parsing, Streamlit / Playwright importability, `whois_domain_lookup.py -h`, and source compilation checks for `kwara/` and `whois_osint/`.)
 
-## 子目錄
+## Subdirectories
 
-| 目錄 | 說明 |
-|------|------|
-| `kwara/` | 主應用程式（SQLite、掃描、匯出等） |
-| `whois_osint/` | 獨立的 WHOIS 批次查詢腳本；可單獨以 VS Code／Cursor 開啟此子資料夾使用。說明見 [whois_osint/README.md](whois_osint/README.md)。 |
+| Directory | Description |
+|-----------|-------------|
+| `kwara/` | Main application (SQLite, scanning, export, etc.) |
+| `whois_osint/` | Standalone WHOIS batch query script; can be opened independently in VS Code / Cursor as its own workspace. See [whois_osint/README.md](whois_osint/README.md). |
 
-## 從 GitHub fork / clone 後
+## After Forking / Cloning from GitHub
 
-- **不要**提交本機 `.venv`、`kwara/data/*.db`、快照目錄等；根目錄 `.gitignore` 已涵蓋常見產物。
-- 依序完成：**建立 venv** → **`pip install -r kwara/requirements.txt`** → **`python -m playwright install chromium`** → 執行 `streamlit run app.py`（路徑見上）。
-- **WHOIS 子專案**：於 `whois_osint/` 另建 venv 並 `pip install -r requirements.txt`（與主程式可完全獨立）。
+- **Do not** commit local `.venv`, `kwara/data/*.db`, snapshot directories, etc.; the root `.gitignore` already covers common artifacts.
+- Complete in order: **create venv** → **`pip install -r kwara/requirements.txt`** → **`python -m playwright install chromium`** → run `streamlit run app.py` (see paths above).
+- **WHOIS Subproject**: Create a separate venv inside `whois_osint/` and run `pip install -r requirements.txt` (fully independent from the main app).
 
-## 其他
+## Miscellaneous
 
-- 範例／測試資料：`test_data_youtube_shortlinks.csv`
-- MVP 設計評估紀錄：`shortlink_abuse_evidence_kit_mvp_8290f6f4.plan.md`
+- Sample / test data: `test_data_youtube_shortlinks.csv`
+- MVP design evaluation notes: `shortlink_abuse_evidence_kit_mvp_8290f6f4.plan.md`

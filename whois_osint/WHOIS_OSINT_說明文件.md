@@ -1,3 +1,5 @@
+**[English](whois_osint_guide.md)**
+
 # WHOIS OSINT 自動化查詢工具 — 技術說明文件
 
 ## 一、概述
