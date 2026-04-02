@@ -49,15 +49,12 @@ def ingest_message(
     urls = extract_urls_from_text(message_text)
     for order, url in enumerate(urls):
         domain = extract_domain_from_url(url)
-        try:
-            conn.execute(
-                """INSERT OR IGNORE INTO url_artifacts
-                   (message_id, case_id, original_url, domain, url_order, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
-                (message_id, case_id, url, domain, order, now),
-            )
-        except Exception:
-            pass
+        conn.execute(
+            """INSERT OR IGNORE INTO url_artifacts
+               (message_id, case_id, original_url, domain, url_order, created_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (message_id, case_id, url, domain, order, now),
+        )
 
     conn.commit()
     write_audit(conn, "ingest_message", case_id=case_id, meta={"message_id": message_id, "url_count": len(urls)})

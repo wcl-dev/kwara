@@ -11,6 +11,10 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 from db import get_conn, migrate_db
 from pipeline import run_snapshot_batch
+from snapshots import (
+    CAPTURE_OK, CAPTURE_MANUAL, CAPTURE_WAYBACK,
+    CAPTURE_CF, CAPTURE_ERROR, CAPTURE_TIMEOUT, CAPTURE_FILE_MISSING,
+)
 
 DB = os.path.join(os.path.dirname(__file__), "data", "kwara.db")
 MAX_BATCHES = int(os.environ.get("KWARA_MAX_SNAPSHOT_BATCHES", "999999"))
@@ -49,9 +53,9 @@ def main():
         if r["snap_id"] is None:
             pending.append(r["scan_run_id"])
             continue
-        if st in ("ok", "manual", "wayback"):
+        if st in (CAPTURE_OK, CAPTURE_MANUAL, CAPTURE_WAYBACK):
             continue
-        if st in ("cf_challenge", "error", "timeout", "file_missing"):
+        if st in (CAPTURE_CF, CAPTURE_ERROR, CAPTURE_TIMEOUT, CAPTURE_FILE_MISSING):
             pending.append(r["scan_run_id"])
             continue
         # legacy NULL status: need resnapshot only if file missing

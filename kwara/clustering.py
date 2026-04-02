@@ -348,7 +348,7 @@ def shared_params(conn: sqlite3.Connection, case_id: int) -> list:
             continue
         owner, purpose_key = identify_param(k)
         domains = sorted(param_domains[(k, v)])
-        if owner == "generic":
+        if not owner or owner == "generic":
             owner = t("param.unrecognized_platform")
             purpose = t("param.unidentified")
         else:
