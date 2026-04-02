@@ -370,6 +370,7 @@ Export（下載證據封包）
 | `insights.py` | 規則式案件洞察（headline、bullets、gaps），含風險標記統計與參數歸屬摘要 |
 | `exporter.py` | ZIP 封包建置與 SHA-256 manifest |
 | `audit.py` | 操作紀錄寫入 |
+| `i18n.py` | 多語系支援（English / 正體中文），提供 `t()` 翻譯函式與語言切換 |
 | `ip_lookup.py` | DNS 解析與 ASN 查詢 |
 | `wayback_fallback.py` | Playwright 截圖失敗時的 Internet Archive 備援 |
 | `utils/domain.py` | eTLD+1 網域擷取（支援 tldextract） |

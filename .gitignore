@@ -29,6 +29,9 @@ kwara/*.csv
 whois_osint/whois_results*
 whois_osint/whois_cache.csv
 
+# Claude Code 本機設定
+.claude/
+
 # 常見系統檔
 Thumbs.db
 .DS_Store

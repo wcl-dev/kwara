@@ -11,6 +11,7 @@ kwara 是一個短連結／網域濫用證據調查工具。
 - **分析（Analysis）**：規則式 **案件洞察**（摘要句與重點條列，含風險標記統計與參數歸屬，不依賴 LLM）、目的地叢集、共用 URL 參數（自動辨識 UTM / fbclid 等已知追蹤平台歸屬）、依 ASN 的託管樣貌。
 - **匯出**：證據封包 ZIP（`urls.csv` 含 scan 層情資欄位）。
 - **跨裝置移轉**：`restore_from_export.py` 可從匯出的 evidence pack 還原資料庫與 snapshot，方便在另一台裝置繼續作業。
+- **多語系（i18n）**：介面支援 English 與正體中文，側邊欄即時切換。
 
 詳見 [`kwara_說明文件.md`](kwara_說明文件.md)。
 
