@@ -8,8 +8,9 @@ kwara 是一個短連結／網域濫用證據調查工具。
 
 - **掃描（Scan）**：追蹤 HTTP redirect chain，記錄落地 `final_url`。
 - **網域情資**：掃描完成後可單獨執行 **WHOIS／ASN**（不必截圖），寫入 `scan_runs`；截圖仍透過 Playwright 取得頁面證據。
-- **分析（Analysis）**：規則式 **案件洞察**（摘要句與重點條列，不依賴 LLM）、目的地叢集、共用 URL 參數、依 ASN 的託管樣貌。
+- **分析（Analysis）**：規則式 **案件洞察**（摘要句與重點條列，含風險標記統計與參數歸屬，不依賴 LLM）、目的地叢集、共用 URL 參數（自動辨識 UTM / fbclid 等已知追蹤平台歸屬）、依 ASN 的託管樣貌。
 - **匯出**：證據封包 ZIP（`urls.csv` 含 scan 層情資欄位）。
+- **跨裝置移轉**：`restore_from_export.py` 可從匯出的 evidence pack 還原資料庫與 snapshot，方便在另一台裝置繼續作業。
 
 詳見 [`kwara_說明文件.md`](kwara_說明文件.md)。
 

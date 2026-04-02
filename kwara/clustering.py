@@ -1,14 +1,88 @@
 """
-clustering.py — Shared Destinations & Parameter Analysis
+clustering.py — Shared Destinations, Parameter Analysis & URL Parameter Attribution
 
-Two factual functions, no intent inference:
-  shared_destinations() : domains grouped by final destination, with risk tags if available
-  shared_params()       : query param key+value pairs seen across 2+ distinct posts
+Factual grouping functions (no intent inference):
+  shared_destinations() : domains grouped by final destination, with risk tags
+  shared_params()       : query param key+value pairs seen across 2+ distinct posts,
+                          with platform attribution (owner/purpose) for known trackers
+  asn_clusters()        : landing domains grouped by ASN
+  identify_param()      : map a URL parameter key to its known owner/purpose
 """
 import json
 import sqlite3
 from collections import defaultdict
 from urllib.parse import parse_qs, urlparse
+
+# ---------------------------------------------------------------------------
+# Known URL parameter attribution
+# ---------------------------------------------------------------------------
+# Exact-match table: param_key -> (owner, purpose)
+_PARAM_EXACT: dict[str, tuple[str, str]] = {
+    # Google Analytics / UTM (Urchin Tracking Module)
+    "utm_source":   ("Google Analytics", "流量來源"),
+    "utm_medium":   ("Google Analytics", "流量媒介"),
+    "utm_campaign": ("Google Analytics", "活動名稱"),
+    "utm_term":     ("Google Analytics", "付費關鍵字 / 追蹤碼"),
+    "utm_content":  ("Google Analytics", "廣告素材區分"),
+    "utm_id":       ("Google Analytics", "活動 ID"),
+    # Google Ads
+    "gclid":        ("Google Ads", "點擊 ID"),
+    "gclsrc":       ("Google Ads", "點擊來源類型"),
+    "gbraid":       ("Google Ads", "App 歸因 (iOS)"),
+    "wbraid":       ("Google Ads", "Web-to-app 歸因"),
+    "dclid":        ("Google Ads (DCM)", "DoubleClick 點擊 ID"),
+    # Facebook / Meta
+    "fbclid":       ("Meta / Facebook", "點擊 ID"),
+    "fb_action_ids":("Meta / Facebook", "動作 ID"),
+    # Twitter / X
+    "twclid":       ("X / Twitter", "點擊 ID"),
+    # Microsoft / Bing Ads
+    "msclkid":      ("Microsoft Ads", "點擊 ID"),
+    # TikTok
+    "ttclid":       ("TikTok Ads", "點擊 ID"),
+    # Yahoo
+    "yclid":        ("Yahoo Ads", "點擊 ID"),
+    # HubSpot
+    "hsa_cam":      ("HubSpot", "活動 ID"),
+    "hsa_grp":      ("HubSpot", "廣告群組 ID"),
+    "hsa_src":      ("HubSpot", "流量來源"),
+    "hsa_net":      ("HubSpot", "廣告網路"),
+    # Mailchimp
+    "mc_cid":       ("Mailchimp", "活動 ID"),
+    "mc_eid":       ("Mailchimp", "收件人 ID"),
+    # Common affiliate / tracking
+    "ref":          ("通用", "推薦來源 / 聯盟代碼"),
+    "aff":          ("通用", "聯盟代碼"),
+    "aff_id":       ("通用", "聯盟 ID"),
+    "affiliate_id": ("通用", "聯盟 ID"),
+    "uid":          ("通用", "使用者 / 聯盟追蹤 ID"),
+    "sid":          ("通用", "Session ID"),
+    "click_id":     ("通用", "點擊追蹤 ID"),
+    "tracking_id":  ("通用", "追蹤 ID"),
+    "campaign_id":  ("通用", "活動 ID"),
+    "source":       ("通用", "流量來源"),
+}
+
+# Prefix-match table: if the key starts with this prefix -> (owner, purpose)
+_PARAM_PREFIX: list[tuple[str, str, str]] = [
+    ("utm_",  "Google Analytics", "UTM 追蹤參數"),
+    ("hsa_",  "HubSpot",          "HubSpot 廣告參數"),
+    ("mc_",   "Mailchimp",        "Mailchimp 追蹤參數"),
+    ("fb_",   "Meta / Facebook",  "Facebook 追蹤參數"),
+    ("_ga",   "Google Analytics",  "GA 追蹤參數"),
+]
+
+
+def identify_param(key: str) -> tuple[str, str]:
+    """Return (owner, purpose) for a known URL parameter, or ('', '') if unknown."""
+    lower = key.lower()
+    exact = _PARAM_EXACT.get(lower)
+    if exact:
+        return exact
+    for prefix, owner, purpose in _PARAM_PREFIX:
+        if lower.startswith(prefix):
+            return owner, purpose
+    return "", ""
 
 # Domains that are themselves shortlink services.
 # When a scan's final_domain lands here it means the scan did not penetrate
@@ -245,14 +319,17 @@ def shared_params(conn: sqlite3.Connection, case_id: int) -> list:
         (case_id,),
     ).fetchall()
 
-    param_posts = defaultdict(set)
-    param_urls  = defaultdict(set)
+    param_posts   = defaultdict(set)
+    param_urls    = defaultdict(set)
+    param_domains = defaultdict(set)
 
     for r in rows:
         for url in (r["original_url"], r["final_url"]):
             if not url:
                 continue
-            for key, values in parse_qs(urlparse(url).query).items():
+            parsed = urlparse(url)
+            domain = parsed.hostname or ""
+            for key, values in parse_qs(parsed.query).items():
                 if len(key) <= 1:
                     continue
                 for val in values:
@@ -260,17 +337,25 @@ def shared_params(conn: sqlite3.Connection, case_id: int) -> list:
                         continue
                     param_posts[(key, val)].add(r["post_id"])
                     param_urls[(key, val)].add(url)
+                    param_domains[(key, val)].add(domain)
 
-    return sorted(
-        [
-            {
-                "param_key":   k,
-                "param_value": v,
-                "post_count":  len(posts),
-                "url_count":   len(param_urls[(k, v)]),
-            }
-            for (k, v), posts in param_posts.items()
-            if len(posts) >= 2
-        ],
-        key=lambda x: (-x["post_count"], -x["url_count"]),
-    )
+    results = []
+    for (k, v), posts in param_posts.items():
+        if len(posts) < 2:
+            continue
+        owner, purpose = identify_param(k)
+        domains = sorted(param_domains[(k, v)])
+        if owner == "通用":
+            owner = "非屬已知追蹤平台"
+            purpose = "未識別"
+        results.append({
+            "param_key":   k,
+            "param_value": v,
+            "owner":       owner,
+            "purpose":     purpose,
+            "domains":     ", ".join(domains),
+            "post_count":  len(posts),
+            "url_count":   len(param_urls[(k, v)]),
+        })
+    results.sort(key=lambda x: (-x["post_count"], -x["url_count"]))
+    return results

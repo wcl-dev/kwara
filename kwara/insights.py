@@ -4,9 +4,21 @@ Rule-based case insights from existing clustering outputs (auditable, no LLM).
 from __future__ import annotations
 
 import sqlite3
+from collections import Counter
 from typing import Any
 
 from clustering import asn_clusters, shared_destinations, shared_params
+
+# Human-readable descriptions for risk tags (used in insight bullets).
+_RISK_TAG_LABELS: dict[str, str] = {
+    "multi_hop":              "多次跳轉",
+    "no_https":               "未使用 HTTPS",
+    "new_domain":             "新註冊網域",
+    "suspicious_download":    "可疑下載行為",
+    "high_tracker_count":     "第三方追蹤器數量偏高",
+    "url_shortener_chain":    "短連結串接",
+    "capture_error":          "截圖失敗",
+}
 
 
 def case_insights(conn: sqlite3.Connection, case_id: int) -> dict[str, Any]:
@@ -110,6 +122,22 @@ def _build_bullets(
             for d in top
         ]
         out.append("**落地集中度：** 貼文覆蓋最高的目的地為 " + "、".join(bits) + "。")
+    # Risk tag summary across all destinations
+    if destinations:
+        all_tags: Counter[str] = Counter()
+        for d in destinations:
+            for tag, cnt in d.get("tag_counts", {}).items():
+                all_tags[tag] += cnt
+        if all_tags:
+            parts = []
+            for tag, cnt in all_tags.most_common():
+                label = _RISK_TAG_LABELS.get(tag, tag)
+                parts.append(f"`{tag}`（{label}）×{cnt}")
+            total_flagged = sum(d.get("flagged_url_count", 0) for d in destinations)
+            out.append(
+                f"**風險標記：** 共 {total_flagged} 條 URL 帶有風險標記。"
+                f"各標記統計：{'、'.join(parts)}。"
+            )
     if unresolved:
         out.append(
             f"**短連結未穿透：** {len(unresolved)} 個落地網域仍為已知短連結服務，"
@@ -117,14 +145,18 @@ def _build_bullets(
         )
     if params:
         p0 = params[0]
+        owner_note = f"，歸屬 {p0['owner']}" if p0.get("owner") else ""
         out.append(
             f"**跨貼文參數：** 最常重複的是 `{p0['param_key']}={str(p0['param_value'])[:80]}`"
+            f"{owner_note}"
             + (f"（出現在 {p0['post_count']} 則不同貼文）。" if p0.get("post_count") else "。")
         )
         if len(params) > 1:
             p1 = params[1]
+            owner_note1 = f"，歸屬 {p1['owner']}" if p1.get("owner") else ""
             out.append(
                 f"其次為 `{p1['param_key']}={str(p1['param_value'])[:80]}`"
+                f"{owner_note1}"
                 f"（{p1.get('post_count', 0)} 則貼文）。"
             )
     if asn_data:

@@ -21,8 +21,9 @@ kwara/data/*.db-*
 kwara/data/snapshots/
 kwara/data/exports/
 
-# 本機匯入／暫存 CSV（範例請放在版本庫根目錄，例如 test_data_*.csv）
+# 本機匯入／暫存資料（範例請放在版本庫根目錄，例如 test_data_*.csv）
 kwara/*.csv
+*.xlsx
 
 # whois_osint 執行輸出（可選）
 whois_osint/whois_results*
