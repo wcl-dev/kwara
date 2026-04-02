@@ -459,7 +459,7 @@ def _needs_manual_or_retry_capture(
     if snap_id is None:
         return True
     st = capture_status
-    if st in (CAPTURE_OK, "manual", CAPTURE_WAYBACK):
+    if st in (CAPTURE_OK, CAPTURE_MANUAL, CAPTURE_WAYBACK):
         return False
     if st in (CAPTURE_CF, CAPTURE_ERROR, CAPTURE_TIMEOUT, CAPTURE_FILE_MISSING):
         return True

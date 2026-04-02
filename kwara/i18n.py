@@ -358,6 +358,12 @@ _EN: dict[str, str] = {
     "export.btn_download": "Download ZIP",
     "export.previous": "Previous Exports",
     "export.no_exports": "No exports yet.",
+    "export.dl_previous": "Download  {label}",
+    "export.file_not_found": "{label}  _(file not found)_",
+
+    # ── Scan / Investigate labels ───────────────────────────────────────────
+    "scan.status_unscanned": "unscanned",
+    "inv.status_not_scanned": "not scanned",
 
     # ── Insights (used in insights.py) ──────────────────────────────────────
     "insights.headline_none": "No URLs in this case yet. Add content in the Input tab.",
@@ -595,6 +601,12 @@ _ZH: dict[str, str] = {
     "export.btn_download": "下載 ZIP",
     "export.previous": "歷史匯出",
     "export.no_exports": "尚無匯出紀錄。",
+    "export.dl_previous": "下載  {label}",
+    "export.file_not_found": "{label}  _（檔案不存在）_",
+
+    # ── Scan / Investigate labels ───────────────────────────────────────────
+    "scan.status_unscanned": "未掃描",
+    "inv.status_not_scanned": "未掃描",
 
     # ── Insights ────────────────────────────────────────────────────────────
     "insights.headline_none": "此案件尚無 URL，請先在「輸入」分頁匯入內容。",

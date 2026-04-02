@@ -375,6 +375,8 @@ Export (download evidence package)
 | `i18n.py` | Multi-language support (English / Traditional Chinese), provides `t()` translation function and language switching |
 | `ip_lookup.py` | DNS resolution and ASN queries |
 | `wayback_fallback.py` | Internet Archive fallback when Playwright screenshots fail |
+| `_snapshot_worker.py` | Subprocess worker invoked by `snapshots.py` for isolated Playwright capture |
+| `_run_pending.py` | CLI script to batch-run pending snapshots for the first case |
 | `utils/domain.py` | eTLD+1 domain extraction (supports tldextract) |
 
 Root directory tools:

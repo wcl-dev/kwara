@@ -12,7 +12,12 @@ def get_conn(db_path: str = "data/kwara.db") -> sqlite3.Connection:
 
 
 def migrate_db(conn: sqlite3.Connection) -> None:
-    """Add columns introduced after initial schema creation."""
+    """Add columns introduced after initial schema creation.
+
+    Note: column names are interpolated via f-string below. This is safe
+    because the values come from hardcoded lists in this function, never
+    from user input. SQLite does not support parameterized DDL.
+    """
     new_cols = [
         ("ip_address", "TEXT"),
         ("asn",        "TEXT"),

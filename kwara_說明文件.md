@@ -375,6 +375,8 @@ Export（下載證據封包）
 | `i18n.py` | 多語系支援（English / 正體中文），提供 `t()` 翻譯函式與語言切換 |
 | `ip_lookup.py` | DNS 解析與 ASN 查詢 |
 | `wayback_fallback.py` | Playwright 截圖失敗時的 Internet Archive 備援 |
+| `_snapshot_worker.py` | 由 `snapshots.py` 呼叫的子程序，負責隔離式 Playwright 截圖 |
+| `_run_pending.py` | CLI 腳本，批次執行第一個案件的待截圖項目 |
 | `utils/domain.py` | eTLD+1 網域擷取（支援 tldextract） |
 
 根目錄工具：

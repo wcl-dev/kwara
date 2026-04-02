@@ -78,7 +78,6 @@ with st.sidebar:
     st.title(t("sidebar.title"))
 
     lang_options = list(LANGUAGES.keys())
-    lang_labels = list(LANGUAGES.values())
     current_idx = lang_options.index(get_lang()) if get_lang() in lang_options else 0
     sel_lang = st.selectbox("🌐", lang_options, index=current_idx, format_func=lambda x: LANGUAGES[x], key="lang_sel", label_visibility="collapsed")
     if sel_lang != get_lang():
@@ -331,7 +330,7 @@ with tab_analysis:
             df_scan = pd.DataFrame([{
                 "url":    r["original_url"],
                 "domain": r["domain"] or "—",
-                "status": r["status"] or "unscanned",
+                "status": r["status"] or t("scan.status_unscanned"),
                 "hops":   r["hop_count"] if r["hop_count"] is not None else "—",
                 "final":  r["final_url"] or "—",
             } for r in url_rows])
@@ -456,35 +455,29 @@ with tab_analysis:
             st.divider()
 
             # ── URL selector ─────────────────────────────────────────────
-            def _label(r):
-                scan = r["scan_status"] or "not scanned"
-                snap = "snap ✓" if r["snapshot_id"] else "no snap"
+            def _merged_flags(r):
+                """Combine snapshot risk tags, scan-time flags, and intel tags."""
                 if r["snapshot_id"]:
-                    flags = json.loads(r["snapshot_risk_tags"] or "[]")
-                else:
-                    flags = list(_scan_flags(r["final_url"], r["hop_count"]))
-                    try:
-                        intel = json.loads(r["sr_intel_risk_tags"] or "[]")
-                    except (ValueError, TypeError):
-                        intel = []
-                    for t in intel:
-                        if t not in flags:
-                            flags.append(t)
-                flag_str = " · " + ", ".join(flags) if flags else ""
-                return f"{r['original_url']}  [{scan} · {snap}{flag_str}]"
-
-            def _flag_count(r):
-                if r["snapshot_id"]:
-                    return len(json.loads(r["snapshot_risk_tags"] or "[]"))
+                    return json.loads(r["snapshot_risk_tags"] or "[]")
                 flags = list(_scan_flags(r["final_url"], r["hop_count"]))
                 try:
                     intel = json.loads(r["sr_intel_risk_tags"] or "[]")
                 except (ValueError, TypeError):
                     intel = []
-                for t in intel:
-                    if t not in flags:
-                        flags.append(t)
-                return len(flags)
+                for tag in intel:
+                    if tag not in flags:
+                        flags.append(tag)
+                return flags
+
+            def _label(r):
+                scan = r["scan_status"] or t("inv.status_not_scanned")
+                snap = "snap ✓" if r["snapshot_id"] else "no snap"
+                flags = _merged_flags(r)
+                flag_str = " · " + ", ".join(flags) if flags else ""
+                return f"{r['original_url']}  [{scan} · {snap}{flag_str}]"
+
+            def _flag_count(r):
+                return len(_merged_flags(r))
 
             sorted_rows = sorted(inv_rows, key=lambda r: (_flag_count(r), r["ua_id"]), reverse=True)
             # Deduplicate by ua_id (keep all unique artifacts, even if same original_url)
@@ -591,10 +584,7 @@ with tab_analysis:
                 if not sel["scan_run_id"] or not sel["final_url"]:
                     st.caption(t("inv.scan_first_snap"))
                 else:
-                    snap = conn.execute(
-                        "SELECT * FROM snapshots WHERE scan_run_id = ? ORDER BY id DESC LIMIT 1",
-                        (sel["scan_run_id"],),
-                    ).fetchone()
+                    # Reuse `snap` from the WHOIS section above (same scan_run_id).
                     if not snap:
                         st.info(t("inv.no_snapshot"))
                     else:
@@ -998,11 +988,11 @@ with tab_export:
             if ex["zip_path"] and os.path.exists(ex["zip_path"]):
                 with open(ex["zip_path"], "rb") as f:
                     st.download_button(
-                        label=f"Download  {label}",
+                        label=t("export.dl_previous", label=label),
                         data=f.read(),
                         file_name=os.path.basename(ex["zip_path"]),
                         mime="application/zip",
                         key=f"dl_zip_{ex['id']}",
                     )
             else:
-                st.write(f"{label}  _(file not found)_")
+                st.write(t("export.file_not_found", label=label))
