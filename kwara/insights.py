@@ -8,17 +8,13 @@ from collections import Counter
 from typing import Any
 
 from clustering import asn_clusters, shared_destinations, shared_params
+from i18n import t
 
-# Human-readable descriptions for risk tags (used in insight bullets).
-_RISK_TAG_LABELS: dict[str, str] = {
-    "multi_hop":              "多次跳轉",
-    "no_https":               "未使用 HTTPS",
-    "new_domain":             "新註冊網域",
-    "suspicious_download":    "可疑下載行為",
-    "high_tracker_count":     "第三方追蹤器數量偏高",
-    "url_shortener_chain":    "短連結串接",
-    "capture_error":          "截圖失敗",
-}
+# Risk tag keys used for label lookup via t("risk.<tag>").
+_RISK_TAGS = (
+    "multi_hop", "no_https", "new_domain", "suspicious_download",
+    "high_tracker_count", "url_shortener_chain", "capture_error",
+)
 
 
 def case_insights(conn: sqlite3.Connection, case_id: int) -> dict[str, Any]:
@@ -89,21 +85,21 @@ def _build_headline(
     asn_data: list,
 ) -> str:
     if url_count == 0:
-        return "此案件尚無 URL，請先在 Input 匯入內容。"
+        return t("insights.headline_none")
     n_dest = len(destinations)
     n_un = len(unresolved)
-    parts = [
-        f"共 **{url_count}** 個短連結／URL，其中 **{scanned}** 筆已完成掃描（redirect 解析）。"
-    ]
+    parts = [t("insights.headline_counts", url_count=url_count, scanned=scanned)]
     if n_dest or n_un:
-        parts.append(
-            f"可辨識的落地網域 **{n_dest}** 個"
-            + (f"；另有 **{n_un}** 個目的地仍停在短連結服務本身（未穿透）。" if n_un else "。")
-        )
+        s = t("insights.headline_dest", n_dest=n_dest)
+        if n_un:
+            s += t("insights.headline_dest_unresolved", n_un=n_un)
+        else:
+            s += "."
+        parts.append(s)
     if params:
-        parts.append(f"偵測到 **{len(params)}** 組跨貼文重複的 URL 參數（可能與追蹤或投放有關）。")
+        parts.append(t("insights.headline_params", n=len(params)))
     if asn_data:
-        parts.append(f"託管／ASN 叢集 **{len(asn_data)}** 組（來自已解析 ASN 的落地網域）。")
+        parts.append(t("insights.headline_asn", n=len(asn_data)))
     return " ".join(parts)
 
 
@@ -117,11 +113,12 @@ def _build_bullets(
     out: list[str] = []
     if destinations:
         top = sorted(destinations, key=lambda d: (-d["post_count"], -d["url_count"]))[:3]
-        bits = [
-            f"`{d['final_domain']}`（{d['post_count']} 則貼文、{d['url_count']} 條 URL）"
+        bits = ", ".join(
+            t("insights.bullet_landing_item",
+              domain=d["final_domain"], posts=d["post_count"], urls=d["url_count"])
             for d in top
-        ]
-        out.append("**落地集中度：** 貼文覆蓋最高的目的地為 " + "、".join(bits) + "。")
+        )
+        out.append(t("insights.bullet_landing", bits=bits))
     # Risk tag summary across all destinations
     if destinations:
         all_tags: Counter[str] = Counter()
@@ -129,57 +126,43 @@ def _build_bullets(
             for tag, cnt in d.get("tag_counts", {}).items():
                 all_tags[tag] += cnt
         if all_tags:
-            parts = []
-            for tag, cnt in all_tags.most_common():
-                label = _RISK_TAG_LABELS.get(tag, tag)
-                parts.append(f"`{tag}`（{label}）×{cnt}")
-            total_flagged = sum(d.get("flagged_url_count", 0) for d in destinations)
-            out.append(
-                f"**風險標記：** 共 {total_flagged} 條 URL 帶有風險標記。"
-                f"各標記統計：{'、'.join(parts)}。"
+            parts = ", ".join(
+                t("insights.bullet_risk_item",
+                  tag=tag, label=t(f"risk.{tag}"), cnt=cnt)
+                for tag, cnt in all_tags.most_common()
             )
+            total_flagged = sum(d.get("flagged_url_count", 0) for d in destinations)
+            out.append(t("insights.bullet_risk", flagged=total_flagged, parts=parts))
     if unresolved:
-        out.append(
-            f"**短連結未穿透：** {len(unresolved)} 個落地網域仍為已知短連結服務，"
-            "真實目的地未知——建議重新掃描或手動開啟連結確認。"
-        )
+        out.append(t("insights.bullet_unresolved", n=len(unresolved)))
     if params:
         p0 = params[0]
-        owner_note = f"，歸屬 {p0['owner']}" if p0.get("owner") else ""
-        out.append(
-            f"**跨貼文參數：** 最常重複的是 `{p0['param_key']}={str(p0['param_value'])[:80]}`"
-            f"{owner_note}"
-            + (f"（出現在 {p0['post_count']} 則不同貼文）。" if p0.get("post_count") else "。")
-        )
+        owner_note = t("insights.bullet_param_owner", owner=p0["owner"]) if p0.get("owner") else ""
+        out.append(t("insights.bullet_param",
+                      key=p0["param_key"], value=str(p0["param_value"])[:80],
+                      owner=owner_note, posts=p0.get("post_count", 0)))
         if len(params) > 1:
             p1 = params[1]
-            owner_note1 = f"，歸屬 {p1['owner']}" if p1.get("owner") else ""
-            out.append(
-                f"其次為 `{p1['param_key']}={str(p1['param_value'])[:80]}`"
-                f"{owner_note1}"
-                f"（{p1.get('post_count', 0)} 則貼文）。"
-            )
+            owner_note1 = t("insights.bullet_param_owner", owner=p1["owner"]) if p1.get("owner") else ""
+            out.append(t("insights.bullet_param2",
+                          key=p1["param_key"], value=str(p1["param_value"])[:80],
+                          owner=owner_note1, posts=p1.get("post_count", 0)))
     if asn_data:
         a0 = asn_data[0]
-        out.append(
-            f"**基礎設施：** 以流量／URL 量來看，**AS{a0['asn']}**（{a0['as_org']}）"
-            f"涵蓋最多落地網域與短連結（{a0['domain_count']} 網域、{a0['url_count']} 條 URL）。"
-        )
+        out.append(t("insights.bullet_infra",
+                      asn=a0["asn"], org=a0["as_org"],
+                      domains=a0["domain_count"], urls=a0["url_count"]))
     if scanned == 0 and not out:
-        out.append("尚無完成掃描的 URL——請到 **Scan** 分頁執行掃描後，此處會出現模式摘要。")
+        out.append(t("insights.bullet_no_scans"))
     return out[:7]
 
 
 def _build_gaps(no_intel: int, no_snap: int, scanned: int, url_count: int) -> list[str]:
     g: list[str] = []
     if no_intel and scanned:
-        g.append(
-            f"**{no_intel}** 筆已完成掃描但尚未執行網域情資（WHOIS／ASN）——可在 Investigate 使用「只查 WHOIS/ASN」不必截圖。"
-        )
+        g.append(t("insights.gap_intel", n=no_intel))
     if no_snap and scanned:
-        g.append(
-            f"**{no_snap}** 筆尚無 snapshot 列（可能未截圖或僅有情資）；若需頁面證據請補截圖或手動上傳。"
-        )
+        g.append(t("insights.gap_snap", n=no_snap))
     if url_count and scanned < url_count:
-        g.append(f"**{url_count - scanned}** 條 URL 尚未完成掃描或最新一次掃描未標記為 done。")
+        g.append(t("insights.gap_unscanned", n=url_count - scanned))
     return g

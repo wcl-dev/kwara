@@ -13,75 +13,78 @@ import sqlite3
 from collections import defaultdict
 from urllib.parse import parse_qs, urlparse
 
+from i18n import t
+
 # ---------------------------------------------------------------------------
 # Known URL parameter attribution
 # ---------------------------------------------------------------------------
-# Exact-match table: param_key -> (owner, purpose)
+# Exact-match table: param_key -> (owner, i18n_key for purpose)
+# Purpose values are i18n keys looked up at display time via t().
 _PARAM_EXACT: dict[str, tuple[str, str]] = {
     # Google Analytics / UTM (Urchin Tracking Module)
-    "utm_source":   ("Google Analytics", "流量來源"),
-    "utm_medium":   ("Google Analytics", "流量媒介"),
-    "utm_campaign": ("Google Analytics", "活動名稱"),
-    "utm_term":     ("Google Analytics", "付費關鍵字 / 追蹤碼"),
-    "utm_content":  ("Google Analytics", "廣告素材區分"),
-    "utm_id":       ("Google Analytics", "活動 ID"),
+    "utm_source":   ("Google Analytics", "param.traffic_source"),
+    "utm_medium":   ("Google Analytics", "param.traffic_medium"),
+    "utm_campaign": ("Google Analytics", "param.campaign_name"),
+    "utm_term":     ("Google Analytics", "param.paid_keyword"),
+    "utm_content":  ("Google Analytics", "param.ad_creative"),
+    "utm_id":       ("Google Analytics", "param.campaign_id"),
     # Google Ads
-    "gclid":        ("Google Ads", "點擊 ID"),
-    "gclsrc":       ("Google Ads", "點擊來源類型"),
-    "gbraid":       ("Google Ads", "App 歸因 (iOS)"),
-    "wbraid":       ("Google Ads", "Web-to-app 歸因"),
-    "dclid":        ("Google Ads (DCM)", "DoubleClick 點擊 ID"),
+    "gclid":        ("Google Ads", "param.click_id"),
+    "gclsrc":       ("Google Ads", "param.click_source_type"),
+    "gbraid":       ("Google Ads", "param.app_attribution_ios"),
+    "wbraid":       ("Google Ads", "param.web_to_app"),
+    "dclid":        ("Google Ads (DCM)", "param.doubleclick_click_id"),
     # Facebook / Meta
-    "fbclid":       ("Meta / Facebook", "點擊 ID"),
-    "fb_action_ids":("Meta / Facebook", "動作 ID"),
+    "fbclid":       ("Meta / Facebook", "param.click_id"),
+    "fb_action_ids":("Meta / Facebook", "param.action_id"),
     # Twitter / X
-    "twclid":       ("X / Twitter", "點擊 ID"),
+    "twclid":       ("X / Twitter", "param.click_id"),
     # Microsoft / Bing Ads
-    "msclkid":      ("Microsoft Ads", "點擊 ID"),
+    "msclkid":      ("Microsoft Ads", "param.click_id"),
     # TikTok
-    "ttclid":       ("TikTok Ads", "點擊 ID"),
+    "ttclid":       ("TikTok Ads", "param.click_id"),
     # Yahoo
-    "yclid":        ("Yahoo Ads", "點擊 ID"),
+    "yclid":        ("Yahoo Ads", "param.click_id"),
     # HubSpot
-    "hsa_cam":      ("HubSpot", "活動 ID"),
-    "hsa_grp":      ("HubSpot", "廣告群組 ID"),
-    "hsa_src":      ("HubSpot", "流量來源"),
-    "hsa_net":      ("HubSpot", "廣告網路"),
+    "hsa_cam":      ("HubSpot", "param.campaign_id"),
+    "hsa_grp":      ("HubSpot", "param.ad_group_id"),
+    "hsa_src":      ("HubSpot", "param.traffic_source"),
+    "hsa_net":      ("HubSpot", "param.ad_network"),
     # Mailchimp
-    "mc_cid":       ("Mailchimp", "活動 ID"),
-    "mc_eid":       ("Mailchimp", "收件人 ID"),
+    "mc_cid":       ("Mailchimp", "param.campaign_id"),
+    "mc_eid":       ("Mailchimp", "param.recipient_id"),
     # Common affiliate / tracking
-    "ref":          ("通用", "推薦來源 / 聯盟代碼"),
-    "aff":          ("通用", "聯盟代碼"),
-    "aff_id":       ("通用", "聯盟 ID"),
-    "affiliate_id": ("通用", "聯盟 ID"),
-    "uid":          ("通用", "使用者 / 聯盟追蹤 ID"),
-    "sid":          ("通用", "Session ID"),
-    "click_id":     ("通用", "點擊追蹤 ID"),
-    "tracking_id":  ("通用", "追蹤 ID"),
-    "campaign_id":  ("通用", "活動 ID"),
-    "source":       ("通用", "流量來源"),
+    "ref":          ("generic", "param.referral_affiliate"),
+    "aff":          ("generic", "param.affiliate_code"),
+    "aff_id":       ("generic", "param.affiliate_id"),
+    "affiliate_id": ("generic", "param.affiliate_id"),
+    "uid":          ("generic", "param.user_tracking_id"),
+    "sid":          ("generic", "param.session_id"),
+    "click_id":     ("generic", "param.click_tracking_id"),
+    "tracking_id":  ("generic", "param.tracking_id"),
+    "campaign_id":  ("generic", "param.campaign_id"),
+    "source":       ("generic", "param.traffic_source"),
 }
 
-# Prefix-match table: if the key starts with this prefix -> (owner, purpose)
+# Prefix-match table: if the key starts with this prefix -> (owner, i18n_key)
 _PARAM_PREFIX: list[tuple[str, str, str]] = [
-    ("utm_",  "Google Analytics", "UTM 追蹤參數"),
-    ("hsa_",  "HubSpot",          "HubSpot 廣告參數"),
-    ("mc_",   "Mailchimp",        "Mailchimp 追蹤參數"),
-    ("fb_",   "Meta / Facebook",  "Facebook 追蹤參數"),
-    ("_ga",   "Google Analytics",  "GA 追蹤參數"),
+    ("utm_",  "Google Analytics", "param.utm_tracking"),
+    ("hsa_",  "HubSpot",          "param.hubspot_ad"),
+    ("mc_",   "Mailchimp",        "param.mailchimp_tracking"),
+    ("fb_",   "Meta / Facebook",  "param.facebook_tracking"),
+    ("_ga",   "Google Analytics",  "param.ga_tracking"),
 ]
 
 
 def identify_param(key: str) -> tuple[str, str]:
-    """Return (owner, purpose) for a known URL parameter, or ('', '') if unknown."""
+    """Return (owner, purpose_i18n_key) for a known URL parameter, or ('', '') if unknown."""
     lower = key.lower()
     exact = _PARAM_EXACT.get(lower)
     if exact:
         return exact
-    for prefix, owner, purpose in _PARAM_PREFIX:
+    for prefix, owner, purpose_key in _PARAM_PREFIX:
         if lower.startswith(prefix):
-            return owner, purpose
+            return owner, purpose_key
     return "", ""
 
 # Domains that are themselves shortlink services.
@@ -343,11 +346,13 @@ def shared_params(conn: sqlite3.Connection, case_id: int) -> list:
     for (k, v), posts in param_posts.items():
         if len(posts) < 2:
             continue
-        owner, purpose = identify_param(k)
+        owner, purpose_key = identify_param(k)
         domains = sorted(param_domains[(k, v)])
-        if owner == "通用":
-            owner = "非屬已知追蹤平台"
-            purpose = "未識別"
+        if owner == "generic":
+            owner = t("param.unrecognized_platform")
+            purpose = t("param.unidentified")
+        else:
+            purpose = t(purpose_key) if purpose_key else ""
         results.append({
             "param_key":   k,
             "param_value": v,
