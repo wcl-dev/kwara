@@ -1,8 +1,10 @@
-# WHOIS OSINT 自動化（Cursor Python 擴充使用方式）
+**[正體中文](README.zh-TW.md)**
 
-## 從 Git 取得專案後（fork / clone）
+# WHOIS OSINT Automation (Cursor Python Extension Usage)
 
-本目錄的 `.venv` **不會**在版本庫中；請在本機建立一次：
+## After Cloning the Project (fork / clone)
+
+The `.venv` directory in this folder is **not** tracked by version control; create it locally once:
 
 ```powershell
 cd whois_osint
@@ -11,45 +13,45 @@ python -m venv .venv
 python -m pip install -r requirements.txt
 ```
 
-（若僅用 **cmd**：`.\.venv\Scripts\activate.bat`）完成後在 Cursor 選擇解譯器為 `.venv` 即可，與下方「用 Cursor 的 Python 擴充跑起來」相同。
+(If using **cmd** only: `.\.venv\Scripts\activate.bat`) Once done, select the `.venv` interpreter in Cursor — same as the "Run with Cursor's Python Extension" section below.
 
-## 用 Cursor 的 Python 擴充跑起來
+## Run with Cursor's Python Extension
 
-1. **在 Cursor 開啟此資料夾**  
-   檔案 → 開啟資料夾 → 選 `whois_osint`（不要只開上層）。
+1. **Open this folder in Cursor**  
+   File → Open Folder → select `whois_osint` (do not open the parent directory).
 
-2. **建立虛擬環境（必做，只做一次）**  
-   - 按 `Ctrl+Shift+P` → **Python: Select Interpreter**，先選一個系統上的 Python（否則下面任務找不到 python）。  
-   - 再按 `Ctrl+Shift+P` → **Tasks: Run Task** → 選 **建立虛擬環境 (.venv)**，等它跑完。  
-   - 再按 **Python: Select Interpreter**，清單裡會出現 **`.venv` (Python 3.x)**，選它。之後 Cursor 就會用這個虛擬環境。
+2. **Create a virtual environment (required, one-time setup)**  
+   - Press `Ctrl+Shift+P` → **Python: Select Interpreter**, first pick a system Python (otherwise the task below cannot find python).  
+   - Press `Ctrl+Shift+P` → **Tasks: Run Task** → select **建立虛擬環境 (.venv)**, wait for it to finish.  
+   - Press **Python: Select Interpreter** again — you should see **`.venv` (Python 3.x)** in the list; select it. Cursor will use this virtual environment from now on.
 
-3. **安裝依賴（只用做一次）**  
-   - `Ctrl+Shift+P` → **Tasks: Run Task** → 選 **whois_osint: 安裝依賴 (pip install)**（會直接用 .venv 的 python，不需啟用腳本）。  
-   若要在終端機手動啟用 .venv 卻出現「無法載入 Activate.ps1」：在 PowerShell 執行一次  
+3. **Install dependencies (one-time)**  
+   - `Ctrl+Shift+P` → **Tasks: Run Task** → select **whois_osint: 安裝依賴 (pip install)** (it uses .venv's python directly, no activation script needed).  
+   If manually activating .venv in the terminal causes "cannot load Activate.ps1": run once in PowerShell  
    `Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser`
 
-4. **執行腳本（三選一）**  
-   - **方式 A**：在 `whois_domain_lookup.py` 編輯器右上角按 **▶ 執行**（無參數時會自動用範例 URL）。  
-   - **方式 B**：左側「執行與偵錯」→ 選 **WHOIS 範例（google.com）** → 按綠色 ▶。  
-   - **方式 C**：`Ctrl+Shift+P` → **Tasks: Run Task** → **執行 WHOIS 範例**。
+4. **Run the script (pick one)**  
+   - **Option A**: Click the **▶ Run** button in the top-right corner of the `whois_domain_lookup.py` editor (runs with sample URL when no arguments are given).  
+   - **Option B**: Go to "Run and Debug" in the sidebar → select **WHOIS 範例（google.com）** → click the green ▶.  
+   - **Option C**: `Ctrl+Shift+P` → **Tasks: Run Task** → **執行 WHOIS 範例**.
 
-執行後會在同目錄產生 `whois_results.csv`。
+Results are saved to `whois_results.csv` in the same directory.
 
-## 指令列用法（在 Cursor 終端機）
+## Command-Line Usage (in Cursor Terminal)
 
 ```bash
-# 啟用虛擬環境後（若已設 python.terminal.activateEnvironment 會自動啟用）
+# After activating the virtual environment (auto-activated if python.terminal.activateEnvironment is set)
 python whois_domain_lookup.py "https://www.google.com/search?q=google.com"
 python whois_domain_lookup.py -o out.csv example.com https://github.com
 python whois_domain_lookup.py -f urls.txt
 ```
 
-## 輸出欄位
+## Output Fields
 
-| 欄位 | 說明 |
-|------|------|
-| Domain | 主網域 |
-| Registrar | 註冊商（無法取得時為 Unknown/Private） |
-| Creation_Date | 註冊日 YYYY-MM-DD |
-| Last_Checked_Timestamp | 查詢時間 |
-| Error_Reason | 錯誤原因（連線被拒、Rate Limited 等） |
+| Field | Description |
+|-------|-------------|
+| Domain | Primary domain |
+| Registrar | Domain registrar (shown as Unknown/Private when unavailable) |
+| Creation_Date | Registration date in YYYY-MM-DD format |
+| Last_Checked_Timestamp | Query timestamp |
+| Error_Reason | Error details (Connection Refused, Rate Limited, etc.) |
