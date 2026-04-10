@@ -13,6 +13,7 @@ import sqlite3
 from collections import defaultdict
 from urllib.parse import parse_qs, urlparse
 
+from config import KNOWN_SHORTLINK_DOMAINS
 from i18n import t
 
 # ---------------------------------------------------------------------------
@@ -111,20 +112,6 @@ def _merge_risk_tags(snap_json, intel_json) -> list:
             seen.add(t)
             out.append(t)
     return out
-
-
-KNOWN_SHORTLINK_DOMAINS = {
-    "bit.ly", "bitly.com", "t.co", "tinyurl.com", "ow.ly", "goo.gl", "short.io",
-    "rebrand.ly", "bl.ink", "buff.ly", "dlvr.it", "ift.tt",
-    "lnkd.in", "fb.me", "youtu.be", "amzn.to", "tiny.cc",
-    "is.gd", "v.gd", "cutt.ly", "shrtco.de", "clck.ru",
-    "s.id", "rb.gy", "short.link", "tiny.one",
-    # Regional / common redirect landing hosts
-    "reurl.cc", "ppt.cc", "picsee.co", "trib.al",
-    "vm.tiktok.com", "ig.me",
-    # Not listed: generic content/image landing sites (e.g. picelse) — those are
-    # surfaced via hop_count>=2 redirector detection in app.py, not as "shortlink SaaS".
-}
 
 
 def shared_destinations(conn: sqlite3.Connection, case_id: int) -> tuple:

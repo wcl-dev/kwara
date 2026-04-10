@@ -1,15 +1,15 @@
+import json
+import socket
 import sqlite3
+import ssl
 from datetime import datetime, timezone
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 import requests
 import requests.exceptions
 
 from audit import write_audit
-
-MAX_HOPS   = 20
-TIMEOUT    = 10
-USER_AGENT = "Mozilla/5.0 (compatible; kwara-scanner/1.0)"
+from config import HTTP_TIMEOUT as TIMEOUT, MAX_HOPS, SCANNER_USER_AGENT as USER_AGENT
 
 
 def _now() -> str:
@@ -23,6 +23,72 @@ def _insert_hop(conn, scan_run_id, hop_order, url, status_code, location, resolv
            VALUES (?, ?, ?, ?, ?, ?, ?)""",
         (scan_run_id, hop_order, url, status_code, location, resolved_url, _now()),
     )
+
+
+def _grab_tls_info(url: str, timeout: int) -> dict | None:
+    """Fetch TLS certificate from the final landing URL via a fresh TLS handshake.
+
+    Returns a dict with issuer, subject, notBefore, notAfter, serialNumber,
+    subjectAltName, and the raw PEM-decoded fields. Returns None if the URL
+    is not HTTPS or if the handshake fails.
+    """
+    parsed = urlparse(url)
+    if parsed.scheme != "https":
+        return None
+    host = parsed.hostname
+    port = parsed.port or 443
+    if not host:
+        return None
+
+    ctx = ssl.create_default_context()
+    try:
+        with socket.create_connection((host, port), timeout=timeout) as raw_sock:
+            with ctx.wrap_socket(raw_sock, server_hostname=host) as ssock:
+                cert = ssock.getpeercert()
+    except Exception:
+        return None
+
+    if not cert:
+        return None
+
+    def _dn_to_str(dn_tuple):
+        """Convert a ((('commonName', 'example.com'),),) structure to a dict."""
+        out = {}
+        for rdn in dn_tuple:
+            for attr_type, attr_value in rdn:
+                if attr_type in out:
+                    existing = out[attr_type]
+                    if isinstance(existing, list):
+                        existing.append(attr_value)
+                    else:
+                        out[attr_type] = [existing, attr_value]
+                else:
+                    out[attr_type] = attr_value
+        return out
+
+    san_list = []
+    for san_type, san_value in cert.get("subjectAltName", ()):
+        san_list.append(f"{san_type}:{san_value}")
+
+    return {
+        "subject": _dn_to_str(cert.get("subject", ())),
+        "issuer": _dn_to_str(cert.get("issuer", ())),
+        "notBefore": cert.get("notBefore"),
+        "notAfter": cert.get("notAfter"),
+        "serialNumber": cert.get("serialNumber"),
+        "subjectAltName": san_list,
+        "version": cert.get("version"),
+    }
+
+
+def _headers_to_json(resp: requests.Response) -> str | None:
+    """Serialize response headers as a JSON string.
+
+    Headers can have multiple values for the same key (e.g. Set-Cookie),
+    so we store as a list of [key, value] pairs to preserve duplicates.
+    """
+    pairs = [[k, v] for k, v in resp.headers.items()]
+    return json.dumps(pairs, ensure_ascii=False) if pairs else None
 
 
 def scan_url(
@@ -59,6 +125,7 @@ def scan_url(
     final_url   = original_url
     status      = "done"
     notes       = None
+    final_resp  = None      # last non-3xx response
 
     try:
         while hop_order < max_hops:
@@ -103,6 +170,7 @@ def scan_url(
                 # Non-3xx → end of chain
                 _insert_hop(conn, scan_run_id, hop_order, current_url, sc, location, None)
                 final_url = current_url
+                final_resp = resp
                 hop_order += 1
                 break
         else:
@@ -114,11 +182,24 @@ def scan_url(
         status = "error"
         notes  = str(exc)[:500]
 
+    # ── TLS certificate + response headers (best-effort) ─────────────
+    tls_json = None
+    headers_json = None
+
+    if final_resp is not None:
+        headers_json = _headers_to_json(final_resp)
+
+    if status == "done" and final_url:
+        tls_info = _grab_tls_info(final_url, timeout)
+        if tls_info:
+            tls_json = json.dumps(tls_info, ensure_ascii=False)
+
     conn.execute(
         """UPDATE scan_runs
-           SET final_url = ?, hop_count = ?, status = ?, notes = ?
+           SET final_url = ?, hop_count = ?, status = ?, notes = ?,
+               tls_info_json = ?, final_response_headers_json = ?
            WHERE id = ?""",
-        (final_url, hop_order, status, notes, scan_run_id),
+        (final_url, hop_order, status, notes, tls_json, headers_json, scan_run_id),
     )
 
     write_audit(

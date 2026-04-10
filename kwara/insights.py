@@ -65,9 +65,33 @@ def case_insights(conn: sqlite3.Connection, case_id: int) -> dict[str, Any]:
         (case_id,),
     ).fetchone()["n"]
 
+    no_tls = conn.execute(
+        """SELECT COUNT(*) AS n FROM url_artifacts ua
+           JOIN scan_runs sr ON sr.url_artifact_id = ua.id
+               AND sr.id = (
+                   SELECT id FROM scan_runs WHERE url_artifact_id = ua.id
+                   ORDER BY id DESC LIMIT 1
+               )
+           WHERE ua.case_id = ? AND sr.status = 'done'
+             AND sr.final_url LIKE 'https%%'
+             AND (sr.tls_info_json IS NULL OR TRIM(sr.tls_info_json) = '')""",
+        (case_id,),
+    ).fetchone()["n"]
+    no_corr = conn.execute(
+        """SELECT COUNT(*) AS n FROM url_artifacts ua
+           JOIN scan_runs sr ON sr.url_artifact_id = ua.id
+               AND sr.id = (
+                   SELECT id FROM scan_runs WHERE url_artifact_id = ua.id
+                   ORDER BY id DESC LIMIT 1
+               )
+           WHERE ua.case_id = ? AND sr.status = 'done'
+             AND (sr.corroboration_json IS NULL OR TRIM(sr.corroboration_json) = '')""",
+        (case_id,),
+    ).fetchone()["n"]
+
     headline = _build_headline(url_count, scanned, destinations, unresolved, params, asn_data)
     bullets = _build_bullets(destinations, unresolved, params, asn_data, scanned)
-    gaps = _build_gaps(no_intel, no_snap, scanned, url_count)
+    gaps = _build_gaps(no_intel, no_snap, no_tls, no_corr, scanned, url_count)
 
     return {
         "headline": headline,
@@ -157,12 +181,17 @@ def _build_bullets(
     return out[:7]
 
 
-def _build_gaps(no_intel: int, no_snap: int, scanned: int, url_count: int) -> list[str]:
+def _build_gaps(no_intel: int, no_snap: int, no_tls: int, no_corr: int,
+                scanned: int, url_count: int) -> list[str]:
     g: list[str] = []
     if no_intel and scanned:
         g.append(t("insights.gap_intel", n=no_intel))
     if no_snap and scanned:
         g.append(t("insights.gap_snap", n=no_snap))
+    if no_tls and scanned:
+        g.append(t("insights.gap_tls", n=no_tls))
+    if no_corr and scanned:
+        g.append(t("insights.gap_corr", n=no_corr))
     if url_count and scanned < url_count:
         g.append(t("insights.gap_unscanned", n=url_count - scanned))
     return g

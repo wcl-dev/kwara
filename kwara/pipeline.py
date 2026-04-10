@@ -8,12 +8,12 @@ import sqlite3
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
+from config import NEW_DOMAIN_DAYS
+from corroboration import corroborate_url
 from scanner import scan_url as _scan
 from snapshots import snapshot_url as _snapshot, snapshot_batch as _snapshot_batch
 from whois_lookup import query_whois, UNKNOWN
 from ip_lookup import lookup_ip
-
-NEW_DOMAIN_DAYS = 180
 
 _POSTED_AT_FMTS = [
     "%Y-%m-%d %H:%M:%S",
@@ -40,7 +40,47 @@ def _intel_now() -> str:
 
 
 def run_scan_only(conn: sqlite3.Connection, url_artifact_id: int) -> int:
-    return _scan(conn, url_artifact_id)
+    scan_run_id = _scan(conn, url_artifact_id)
+    _try_corroborate(conn, scan_run_id)
+    return scan_run_id
+
+
+def _try_corroborate(conn: sqlite3.Connection, scan_run_id: int) -> None:
+    """Best-effort third-party corroboration after a successful scan."""
+    row = conn.execute(
+        "SELECT final_url, status, corroboration_json FROM scan_runs WHERE id = ?",
+        (scan_run_id,),
+    ).fetchone()
+    if not row or row["status"] != "done" or not row["final_url"]:
+        return
+    if row["corroboration_json"]:
+        return  # already corroborated
+    try:
+        results = corroborate_url(row["final_url"])
+        conn.execute(
+            "UPDATE scan_runs SET corroboration_json = ? WHERE id = ?",
+            (json.dumps(results, ensure_ascii=False), scan_run_id),
+        )
+        conn.commit()
+    except Exception:
+        pass  # best-effort — never block the scan pipeline
+
+
+def run_corroborate(conn: sqlite3.Connection, scan_run_id: int) -> dict | None:
+    """Force (re-)corroborate a scan run. Called from UI retry button."""
+    row = conn.execute(
+        "SELECT final_url, status FROM scan_runs WHERE id = ?",
+        (scan_run_id,),
+    ).fetchone()
+    if not row or row["status"] != "done" or not row["final_url"]:
+        return None
+    results = corroborate_url(row["final_url"])
+    conn.execute(
+        "UPDATE scan_runs SET corroboration_json = ? WHERE id = ?",
+        (json.dumps(results, ensure_ascii=False), scan_run_id),
+    )
+    conn.commit()
+    return results
 
 
 def _latest_snapshot_id(conn: sqlite3.Connection, scan_run_id: int) -> int | None:
@@ -151,15 +191,18 @@ def run_domain_intel_batch(conn: sqlite3.Connection, scan_run_ids: list[int]) ->
         run_domain_intel_only(conn, sr_id)
 
 
-def run_snapshot(conn: sqlite3.Connection, scan_run_id: int) -> int:
-    snapshot_id = _snapshot(conn, scan_run_id)
+def run_snapshot(conn: sqlite3.Connection, scan_run_id: int,
+                 env_override: dict[str, str] | None = None) -> int:
+    snapshot_id = _snapshot(conn, scan_run_id, env_override=env_override)
     _enrich_domain_for_scan_run(conn, scan_run_id, snapshot_id=snapshot_id)
+    _try_corroborate(conn, scan_run_id)
     return snapshot_id
 
 
-def run_snapshot_batch(conn: sqlite3.Connection, scan_run_ids: list[int]) -> list[int]:
+def run_snapshot_batch(conn: sqlite3.Connection, scan_run_ids: list[int],
+                       env_override: dict[str, str] | None = None) -> list[int]:
     """Capture screenshots for multiple URLs in one subprocess, then enrich."""
-    snapshot_ids = _snapshot_batch(conn, scan_run_ids)
+    snapshot_ids = _snapshot_batch(conn, scan_run_ids, env_override=env_override)
     for sid in snapshot_ids:
         row = conn.execute(
             "SELECT scan_run_id FROM snapshots WHERE id = ?", (sid,)
