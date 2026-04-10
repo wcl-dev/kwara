@@ -2,82 +2,81 @@
 
 # kwara
 
-kwara is a short-link / domain abuse evidence investigation tool.
+Digital evidence collection and corroboration toolkit for investigating URL shortlink abuse, domain fraud, and online scams.
 
 **Repository:** [github.com/wcl-dev/kwara](https://github.com/wcl-dev/kwara)
 
-## Feature Overview
+## What kwara does
 
-- **Scan**: Trace HTTP redirect chains and record the landing `final_url`.
-- **Domain Intelligence**: After scanning, run **WHOIS / ASN** lookups independently (no screenshot required), writing results into `scan_runs`; screenshots are still captured via Playwright for page evidence.
-- **Analysis**: Rule-based **case insights** (summary sentences and key bullet points, including risk tag statistics and parameter attribution — no LLM dependency), destination clustering, shared URL parameters (auto-identifies known tracking platform attribution such as UTM / fbclid), and hosting profile by ASN.
-- **Export**: Evidence pack ZIP (`urls.csv` includes scan-level intelligence fields).
-- **Cross-device Transfer**: `restore_from_export.py` restores the database and snapshots from an exported evidence pack, making it easy to continue work on another machine.
-- **Internationalization (i18n)**: UI supports English and Traditional Chinese, switchable instantly from the sidebar.
+kwara takes suspicious URLs from social media posts and walks them through a six-step evidence chain:
 
-See [`kwara_guide.md`](kwara_guide.md) for details.
+1. **Scan** — follow redirect chains to the real landing page
+2. **Network** — record TLS certificates, HTTP headers, and the full redirect path
+3. **Domain** — look up WHOIS registration, IP, and ASN hosting
+4. **Page** — capture browser screenshots, HTML source, and HAR network logs
+5. **Corroboration** — archive the landing page on Internet Archive, submit to urlscan.io, and obtain an RFC 3161 trusted timestamp
+6. **Insights** — generate rule-based case summaries with risk flags, parameter attribution, and infrastructure clustering
+
+All evidence is stored locally in SQLite and can be exported as a ZIP evidence pack with SHA-256 manifest and optional HMAC signature.
+
+## Key features
+
+- **Evidence chain workflow** — six analysis sub-tabs guide you from scan to corroboration
+- **Third-party proof** — Wayback Machine, urlscan.io, and RFC 3161 timestamps provide independent records
+- **Per-case locale** — set victim's region so screenshots reflect what they actually saw (defeats geo-cloaking)
+- **URL parameter attribution** — auto-identifies 50+ tracking parameters (UTM, fbclid, gclid, etc.)
+- **Bilingual UI** — English and Traditional Chinese, switchable from the sidebar
+- **Evidence pack export** — ZIP with CSVs, screenshots, HTML, HAR, audit log, SHA-256 manifest, and bilingual README
+- **Fully offline-capable** — all data stored in local SQLite; third-party services are optional
 
 ## Requirements
 
-- **Python**: **3.10+** recommended (any version compatible with the dependencies).
-- **Network**: After initial installation, `pip` and Playwright browser downloads require internet access; scanning and WHOIS lookups also need network connectivity.
+- **Python 3.10+**
+- **Network** — needed for pip install, Playwright browser download, scanning, and WHOIS lookups
 
 ## Quick Start
 
-### Main App `kwara/` (Streamlit)
-
-Create a virtual environment and install dependencies in the project root or inside `kwara/`:
-
-```powershell
+```bash
 cd kwara
 python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -U pip
+.venv/Scripts/activate    # Windows
 python -m pip install -r requirements.txt
 python -m playwright install chromium
-```
-
-Then start the app:
-
-```powershell
 streamlit run app.py
 ```
 
-Alternatively, on Windows with dependencies already installed, double-click `start_kwara.bat` from the project root (it enters `kwara/` and runs `streamlit run app.py`).
+On Windows with dependencies already installed, double-click `start_kwara.bat` from the project root.
 
-> **Important**: If `playwright install chromium` has not been run, snapshot / screenshot features may fail; scanning, WHOIS / ASN intelligence, and SQLite will still work.
+> If `playwright install chromium` has not been run, screenshot features won't work but scanning, WHOIS, and analysis still function.
 
-> **Database Migration**: Each app launch runs `migrate_db` on the current connection; if you encounter column errors after upgrading from an older version, refresh or restart Streamlit.
+## Optional environment variables
 
-### Subproject `whois_osint/`
+| Variable | Default | Purpose |
+|---|---|---|
+| `KWARA_LANG` | `en` | Default UI language (`en` or `zh`) |
+| `KWARA_BROWSER_LOCALE` | `zh-TW` | Playwright browser locale for screenshots |
+| `KWARA_BROWSER_TIMEZONE` | `Asia/Taipei` | Playwright browser timezone |
+| `KWARA_HMAC_KEY` | *(unset)* | HMAC key for signing evidence pack manifest |
+| `KWARA_URLSCAN_API_KEY` | *(unset)* | urlscan.io API key (free community tier) |
+| `KWARA_HTTP_TIMEOUT` | `10` | Scanner per-request timeout (seconds) |
+| `KWARA_MAX_HOPS` | `20` | Redirect chain hop limit |
+| `KWARA_NEW_DOMAIN_DAYS` | `180` | "New domain" risk flag threshold (days) |
 
-See [whois_osint/README.md](whois_osint/README.md).
-
-### Running Tests (Optional)
-
-From the project root (use the **same** or a **separate** virtual environment with `kwara` dependencies installed):
-
-```powershell
-python -m pip install -r kwara/requirements.txt -r requirements-dev.txt
-python -m pytest -v
-```
-
-(Tests cover: SQLite initialization, domain parsing, Streamlit / Playwright importability, `whois_domain_lookup.py -h`, and source compilation checks for `kwara/` and `whois_osint/`.)
-
-## Subdirectories
+## Project structure
 
 | Directory | Description |
-|-----------|-------------|
-| `kwara/` | Main application (SQLite, scanning, export, etc.) |
-| `whois_osint/` | Standalone WHOIS batch query script; can be opened independently in VS Code / Cursor as its own workspace. See [whois_osint/README.md](whois_osint/README.md). |
+|---|---|
+| `kwara/` | Main application (Streamlit UI, SQLite, scanning, export) |
+| `kwara/views/` | UI tab modules (one file per tab for easy editing) |
+| `kwara/config.py` | Centralized configuration and environment variable defaults |
+| `kwara/corroboration.py` | Third-party evidence services (Wayback, urlscan, RFC 3161) |
+| `whois_osint/` | Standalone WHOIS batch query script ([README](whois_osint/README.md)) |
+| `restore_from_export.py` | Restore database from an exported evidence pack ZIP |
 
-## After Forking / Cloning from GitHub
+## After cloning
 
-- **Do not** commit local `.venv`, `kwara/data/*.db`, snapshot directories, etc.; the root `.gitignore` already covers common artifacts.
-- Complete in order: **create venv** → **`pip install -r kwara/requirements.txt`** → **`python -m playwright install chromium`** → run `streamlit run app.py` (see paths above).
-- **WHOIS Subproject**: Create a separate venv inside `whois_osint/` and run `pip install -r requirements.txt` (fully independent from the main app).
+1. Create venv → `pip install -r kwara/requirements.txt` → `python -m playwright install chromium`
+2. Run `streamlit run app.py` inside `kwara/`
+3. Do **not** commit `.venv`, `kwara/data/`, or snapshot directories (covered by `.gitignore`)
 
-## Miscellaneous
-
-- Sample / test data: `test_data_youtube_shortlinks.csv`
-- MVP design evaluation notes: `shortlink_abuse_evidence_kit_mvp_8290f6f4.plan.md`
+See [`kwara_guide.md`](kwara_guide.md) for detailed usage instructions.

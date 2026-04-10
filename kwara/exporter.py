@@ -8,6 +8,7 @@ export_case(conn, case_id) -> str
 """
 import csv
 import hashlib
+import hmac
 import io
 import json
 import os
@@ -16,6 +17,7 @@ import zipfile
 from datetime import datetime, timezone
 
 from audit import write_audit
+from config import HMAC_KEY
 
 EXPORTS_DIR = os.path.join(os.path.dirname(__file__), "data", "exports")
 
@@ -33,7 +35,8 @@ def _csv_bytes(rows: list[dict], fieldnames: list[str]) -> bytes:
     w = csv.DictWriter(buf, fieldnames=fieldnames, extrasaction="ignore", lineterminator="\n")
     w.writeheader()
     w.writerows(rows)
-    return buf.getvalue().encode("utf-8")
+    # utf-8-sig: BOM so Excel on Windows opens Chinese/Latin text as UTF-8, not system code page
+    return buf.getvalue().encode("utf-8-sig")
 
 
 def export_case(conn: sqlite3.Connection, case_id: int) -> str:
@@ -83,7 +86,9 @@ def export_case(conn: sqlite3.Connection, case_id: int) -> str:
                       sr.id AS scan_run_id, sr.status AS scan_status, sr.final_url, sr.hop_count,
                       sr.whois_registrar, sr.whois_creation_date,
                       sr.ip_address, sr.asn, sr.as_org, sr.as_country,
-                      sr.domain_enriched_at, sr.intel_risk_tags
+                      sr.domain_enriched_at, sr.intel_risk_tags,
+                      sr.tls_info_json, sr.final_response_headers_json,
+                      sr.corroboration_json
                FROM url_artifacts ua
                LEFT JOIN scan_runs sr ON sr.url_artifact_id = ua.id
                    AND sr.id = (SELECT id FROM scan_runs WHERE url_artifact_id = ua.id ORDER BY id DESC LIMIT 1)
@@ -95,7 +100,9 @@ def export_case(conn: sqlite3.Connection, case_id: int) -> str:
                       "url_order", "scan_run_id", "scan_status", "final_url", "hop_count",
                       "whois_registrar", "whois_creation_date",
                       "ip_address", "asn", "as_org", "as_country",
-                      "domain_enriched_at", "intel_risk_tags"]
+                      "domain_enriched_at", "intel_risk_tags",
+                      "tls_info_json", "final_response_headers_json",
+                      "corroboration_json"]
         add(zf, "urls/urls.csv",
             _csv_bytes([dict(r) for r in urls], url_fields))
 
@@ -230,7 +237,15 @@ urls/
              scan_run_id, scan_status, final_url, hop_count,
              whois_registrar, whois_creation_date,
              ip_address, asn, as_org, as_country,
-             domain_enriched_at, intel_risk_tags
+             domain_enriched_at, intel_risk_tags,
+             tls_info_json, final_response_headers_json
+    tls_info_json: JSON with issuer, subject, notBefore, notAfter,
+                   serialNumber, subjectAltName (from final landing page
+                   TLS certificate); null if HTTP or handshake failed.
+    final_response_headers_json: JSON array of [key, value] pairs for
+                   all HTTP response headers from the final landing page
+                   (preserves duplicates e.g. Set-Cookie); null if scan
+                   terminated before reaching a non-3xx response.
     scan_run_id links to snapshots/snapshots.csv.
     scan_status values: done, error, timeout, ssl_error,
                         loop_detected, max_hops, or blank if unscanned.
@@ -274,6 +289,11 @@ manifest.json
   SHA-256 hash of every file in this ZIP.
   Use to verify integrity of the evidence pack.
 
+manifest.sig  (present only when KWARA_HMAC_KEY is set)
+  HMAC-SHA256 signature of manifest.json.
+  Proves the evidence pack has not been tampered with since export.
+  Verify: hmac.new(key_bytes, manifest_json_bytes, 'sha256').hexdigest()
+
 ────────────────────────────────────────────────────────────
 CROSS-REFERENCE
 ────────────────────────────────────────────────────────────
@@ -283,6 +303,24 @@ CROSS-REFERENCE
             └─ urls/chains/url_{{id}}_hops.csv  (redirect chain)
             └─ snapshots.csv  scan_run_id  (landing page analysis)
                   └─ snapshots/{{scan_run_id}}/  (screenshot + HTML)
+
+────────────────────────────────────────────────────────────
+正體中文摘要
+────────────────────────────────────────────────────────────
+
+此 ZIP 為 kwara 證據封存包。
+案件 ID：{case_id}　匯出時間：{_now()}
+
+包含內容：
+  messages/    — 來源貼文及截圖
+  urls/        — 所有擷取的 URL、掃描結果、redirect chain
+  snapshots/   — 落地頁截圖、HTML、WHOIS/ASN、風險旗標
+  audit.csv    — 完整操作紀錄
+  manifest.json — 所有檔案的 SHA-256 雜湊值（驗證完整性）
+  manifest.sig  — HMAC 簽章（若有設定密鑰）
+
+各 CSV 以 id / scan_run_id / message_id 互相對應，
+詳細欄位說明請參閱上方英文段落。
 """
         add(zf, "README.txt", readme.encode("utf-8"))
 
@@ -294,6 +332,16 @@ CROSS-REFERENCE
             "files":     manifest,
         }, indent=2, ensure_ascii=False).encode("utf-8")
         zf.writestr("manifest.json", manifest_data)
+
+        # ── manifest.sig (HMAC-SHA256, optional) ────────────────────
+        if HMAC_KEY:
+            sig = hmac.new(HMAC_KEY.encode("utf-8"), manifest_data, hashlib.sha256).hexdigest()
+            sig_payload = json.dumps({
+                "algorithm": "HMAC-SHA256",
+                "signature": sig,
+                "note": "Verify with: hmac.new(key, manifest_json_bytes, 'sha256').hexdigest()",
+            }, indent=2).encode("utf-8")
+            zf.writestr("manifest.sig", sig_payload)
 
     # Write export_runs record
     manifest_json = json.dumps({"zip_name": zip_name, "file_count": len(manifest)})

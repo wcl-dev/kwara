@@ -25,6 +25,7 @@ def migrate_db(conn: sqlite3.Connection) -> None:
         ("as_country", "TEXT"),
         ("capture_status", "TEXT"),
         ("capture_detail", "TEXT"),
+        ("har_path", "TEXT"),
     ]
     for col, defn in new_cols:
         try:
@@ -40,10 +41,22 @@ def migrate_db(conn: sqlite3.Connection) -> None:
         ("as_country", "TEXT"),
         ("intel_risk_tags", "TEXT"),
         ("domain_enriched_at", "TEXT"),
+        ("tls_info_json", "TEXT"),
+        ("final_response_headers_json", "TEXT"),
+        ("corroboration_json", "TEXT"),
     ]
     for col, defn in scan_run_cols:
         try:
             conn.execute(f"ALTER TABLE scan_runs ADD COLUMN {col} {defn}")
+        except sqlite3.OperationalError:
+            pass
+    cases_cols = [
+        ("browser_locale", "TEXT"),
+        ("browser_timezone", "TEXT"),
+    ]
+    for col, defn in cases_cols:
+        try:
+            conn.execute(f"ALTER TABLE cases ADD COLUMN {col} {defn}")
         except sqlite3.OperationalError:
             pass
     conn.commit()

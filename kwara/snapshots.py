@@ -7,18 +7,12 @@ from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 from audit import write_audit
-from clustering import KNOWN_SHORTLINK_DOMAINS
-
-SUSPICIOUS_EXTS = {'.exe', '.zip', '.apk', '.dmg', '.msi', '.bat', '.sh', '.ps1', '.jar', '.rar', '.7z'}
-
-TRACKER_DOMAINS = {
-    'google-analytics.com', 'googletagmanager.com', 'facebook.net',
-    'doubleclick.net', 'googlesyndication.com', 'hotjar.com',
-    'mixpanel.com', 'segment.com', 'amplitude.com', 'clarity.ms',
-    'adnxs.com', 'taboola.com', 'outbrain.com',
-}
-
-HIGH_TRACKER_THRESHOLD = 3
+from config import (
+    HIGH_TRACKER_THRESHOLD,
+    KNOWN_SHORTLINK_DOMAINS,
+    SUSPICIOUS_EXTS,
+    TRACKER_DOMAINS,
+)
 
 CAPTURE_OK = "ok"
 CAPTURE_CF = "cf_challenge"
@@ -90,7 +84,8 @@ def _compute_subprocess_timeout(n: int, timeout: int, mode: str) -> int:
     return int(n * (timeout + 50) + 360)
 
 
-def _run_worker_phase(urls_info: list[dict], timeout: int, mode: str) -> list[dict]:
+def _run_worker_phase(urls_info: list[dict], timeout: int, mode: str,
+                      env_override: dict[str, str] | None = None) -> list[dict]:
     import subprocess
     import tempfile
 
@@ -107,6 +102,11 @@ def _run_worker_phase(urls_info: list[dict], timeout: int, mode: str) -> list[di
     venv_python = os.path.join(os.path.dirname(__file__), '.venv', 'Scripts', 'python.exe')
     python_exe = venv_python if os.path.exists(venv_python) else sys.executable
 
+    # Pass per-case locale to the subprocess via environment variables
+    sub_env = dict(os.environ)
+    if env_override:
+        sub_env.update(env_override)
+
     overall_timeout = _compute_subprocess_timeout(len(urls_info), timeout, mode)
     proc = None
     try:
@@ -114,6 +114,7 @@ def _run_worker_phase(urls_info: list[dict], timeout: int, mode: str) -> list[di
             [python_exe, script, input_file, result_file],
             timeout=overall_timeout,
             capture_output=True, text=True,
+            env=sub_env,
         )
     except subprocess.TimeoutExpired:
         return _error_results(urls_info, "subprocess timed out")
@@ -143,12 +144,13 @@ def _run_worker_phase(urls_info: list[dict], timeout: int, mode: str) -> list[di
     return results
 
 
-def _capture_in_subprocess(urls_info: list[dict], timeout: int = 30) -> list[dict]:
+def _capture_in_subprocess(urls_info: list[dict], timeout: int = 30,
+                           env_override: dict[str, str] | None = None) -> list[dict]:
     """Two-phase: headless batch, then headed only for URLs still blocked."""
     if not urls_info:
         return []
 
-    r1 = _run_worker_phase(urls_info, timeout, "headless_only")
+    r1 = _run_worker_phase(urls_info, timeout, "headless_only", env_override=env_override)
     if len(r1) != len(urls_info):
         return r1
 
@@ -160,7 +162,7 @@ def _capture_in_subprocess(urls_info: list[dict], timeout: int = 30) -> list[dic
             retry_jobs.append(job)
 
     if retry_jobs:
-        r2 = _run_worker_phase(retry_jobs, timeout, "headed_only")
+        r2 = _run_worker_phase(retry_jobs, timeout, "headed_only", env_override=env_override)
         if len(r2) != len(retry_jobs):
             for i, r in enumerate(r1):
                 if r.get("headed_retry"):
@@ -303,7 +305,8 @@ def _prepare_insert_row(
     )
 
 
-def snapshot_url(conn: sqlite3.Connection, scan_run_id: int, timeout: int = 30) -> int:
+def snapshot_url(conn: sqlite3.Connection, scan_run_id: int, timeout: int = 30,
+                 env_override: dict[str, str] | None = None) -> int:
     row = conn.execute(
         """SELECT sr.final_url, sr.hop_count, ua.case_id, ua.id AS url_artifact_id
            FROM scan_runs sr
@@ -329,22 +332,23 @@ def snapshot_url(conn: sqlite3.Connection, scan_run_id: int, timeout: int = 30) 
         "final_url": final_url,
         "screenshot_path": screenshot_path,
         "html_path": html_path,
-    }], timeout=timeout)
+    }], timeout=timeout, env_override=env_override)
     r = results[0]
 
     (request_domains, error_note, screenshot_path, html_path, tags,
      cap_status, cap_detail) = _prepare_insert_row(final_url, hop_count, r)
 
+    _har_path = r.get("har_path") if r.get("har_path") and os.path.exists(r.get("har_path", "")) else None
     conn.execute(
         """INSERT INTO snapshots
                (scan_run_id, final_url, final_domain,
-                screenshot_path, html_path,
+                screenshot_path, html_path, har_path,
                 request_domains_json, risk_tags, captured_at,
                 capture_status, capture_detail)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             scan_run_id, final_url, final_domain,
-            screenshot_path, html_path,
+            screenshot_path, html_path, _har_path,
             json.dumps(request_domains),
             json.dumps(tags),
             _now(),
@@ -371,7 +375,8 @@ def snapshot_url(conn: sqlite3.Connection, scan_run_id: int, timeout: int = 30) 
 
 
 def snapshot_batch(conn: sqlite3.Connection, scan_run_ids: list[int],
-                   timeout: int = 30) -> list[int]:
+                   timeout: int = 30,
+                   env_override: dict[str, str] | None = None) -> list[int]:
     jobs = []
     meta_map = {}
     for sr_id in scan_run_ids:
@@ -405,7 +410,7 @@ def snapshot_batch(conn: sqlite3.Connection, scan_run_ids: list[int],
         return []
 
     jobs = _round_robin_by_apex(jobs)
-    results = _capture_in_subprocess(jobs, timeout=timeout)
+    results = _capture_in_subprocess(jobs, timeout=timeout, env_override=env_override)
 
     by_sr = {j["scan_run_id"]: r for j, r in zip(jobs, results)}
     snapshot_ids = []
@@ -418,16 +423,17 @@ def snapshot_batch(conn: sqlite3.Connection, scan_run_ids: list[int],
         (request_domains, error_note, screenshot_path, html_path, tags,
          cap_status, cap_detail) = _prepare_insert_row(m["final_url"], m["hop_count"], r)
 
+        _har_p = r.get("har_path") if r.get("har_path") and os.path.exists(r.get("har_path", "")) else None
         conn.execute(
             """INSERT INTO snapshots
                    (scan_run_id, final_url, final_domain,
-                    screenshot_path, html_path,
+                    screenshot_path, html_path, har_path,
                     request_domains_json, risk_tags, captured_at,
                     capture_status, capture_detail)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 sr_id, m["final_url"], m["final_domain"],
-                screenshot_path, html_path,
+                screenshot_path, html_path, _har_p,
                 json.dumps(request_domains), json.dumps(tags), _now(),
                 cap_status, cap_detail,
             ),

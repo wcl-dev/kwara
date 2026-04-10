@@ -9,6 +9,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
 
+from config import DB_PATH as DB
 from db import get_conn, migrate_db
 from pipeline import run_snapshot_batch
 from snapshots import (
@@ -16,7 +17,6 @@ from snapshots import (
     CAPTURE_CF, CAPTURE_ERROR, CAPTURE_TIMEOUT, CAPTURE_FILE_MISSING,
 )
 
-DB = os.path.join(os.path.dirname(__file__), "data", "kwara.db")
 MAX_BATCHES = int(os.environ.get("KWARA_MAX_SNAPSHOT_BATCHES", "999999"))
 
 
