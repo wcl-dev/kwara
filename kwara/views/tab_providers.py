@@ -1,10 +1,11 @@
-"""Providers tab — shortlink services and domain registrars."""
+"""Providers tab — shortlink services, registrars, hosting, CAs, ad platforms."""
 import json
 from urllib.parse import urlparse as _urlparse
 
 import pandas as pd
 import streamlit as st
 
+from clustering import asn_clusters
 from config import KNOWN_SHORTLINK_DOMAINS
 from i18n import t
 from views._shared import TAG_COLORS, scan_flags
@@ -134,3 +135,41 @@ def render(conn, case_id):
         st.dataframe(pd.DataFrame(reg_rows), use_container_width=True, hide_index=True)
     else:
         st.info(t("prov.no_registrars"))
+
+    st.divider()
+
+    _hosting_section(conn, case_id)
+
+
+def _hosting_section(conn, case_id):
+    """Hosting providers (ASN-based) — accountability lens on infra."""
+    st.subheader(t("prov.hosting"))
+    st.caption(t("prov.hosting_caption"))
+
+    clusters = asn_clusters(conn, case_id)
+    if not clusters:
+        st.info(t("prov.no_hosting"))
+        return
+
+    summary = []
+    for c in clusters:
+        summary.append({
+            "asn":     f"AS{c['asn']}",
+            "as_org":  c["as_org"],
+            "country": c["as_country"],
+            "domains": c["domain_count"],
+            "urls":    c["url_count"],
+        })
+    st.dataframe(pd.DataFrame(summary), use_container_width=True, hide_index=True)
+
+    sel = st.selectbox(
+        t("prov.drill_hosting"),
+        [c["asn"] for c in clusters],
+        format_func=lambda asn: f"AS{asn}  {next(c['as_org'] for c in clusters if c['asn'] == asn)}",
+        key="prov_hosting_sel",
+    )
+    sel_c = next(c for c in clusters if c["asn"] == sel)
+
+    with st.container(border=True):
+        st.write(t("prov.hosting_domains", asn=sel, n=len(sel_c["domains"])))
+        st.dataframe(pd.DataFrame(sel_c["domains"]), use_container_width=True, hide_index=True)
