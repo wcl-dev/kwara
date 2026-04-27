@@ -911,6 +911,90 @@ def certificate_authorities(conn: sqlite3.Connection, case_id: int) -> list:
     return out
 
 
+def shared_tracking_ids(conn: sqlite3.Connection, case_id: int) -> list:
+    """Cross-domain tracking-ID clusters — strongest operator-attribution signal.
+
+    Reads tracking_ids_json from each snapshot (populated by
+    fingerprints.extract_tracking_ids_from_file at capture time) and finds
+    every (platform, ID) pair that appears on 2 or more distinct landing
+    domains within this case.
+
+    A pixel/GA/GTM ID belongs to exactly one underlying account. When the
+    same ID is embedded in HTML across multiple landing domains, those
+    domains are tracked from the same operator's account — a very hard
+    signal to spoof and immune to Cloudflare/CDN fronting because it lives
+    in the page itself.
+
+    Returns list sorted by domain_count desc, then by platform name:
+      [{platform, tracking_id, domain_count, url_count, post_count, domains}]
+    Singletons (ID seen on only one domain) are excluded.
+    """
+    rows = conn.execute(
+        """SELECT s.tracking_ids_json,
+                  COALESCE(s.final_domain, '') AS final_domain,
+                  ua.id AS ua_id,
+                  me.id AS post_id
+           FROM url_artifacts ua
+           JOIN message_evidence me ON me.id = ua.message_id
+           JOIN scan_runs sr ON sr.id = (
+               SELECT id FROM scan_runs
+               WHERE url_artifact_id = ua.id AND status = 'done'
+               ORDER BY id DESC LIMIT 1
+           )
+           JOIN snapshots s ON s.id = (
+               SELECT id FROM snapshots WHERE scan_run_id = sr.id
+               ORDER BY id DESC LIMIT 1
+           )
+           WHERE ua.case_id = ?
+             AND s.tracking_ids_json IS NOT NULL
+             AND TRIM(s.tracking_ids_json) != ''""",
+        (case_id,),
+    ).fetchall()
+
+    # (platform, tracking_id) -> {domains, urls, posts}
+    by_id: dict[tuple[str, str], dict] = {}
+    for r in rows:
+        try:
+            ids_by_platform = json.loads(r["tracking_ids_json"])
+        except (ValueError, TypeError):
+            continue
+        if not isinstance(ids_by_platform, dict):
+            continue
+        domain = (r["final_domain"] or "").lower()
+        if not domain:
+            continue
+        for platform, ids in ids_by_platform.items():
+            if not isinstance(ids, list):
+                continue
+            for ident in ids:
+                if not ident:
+                    continue
+                key = (platform, ident)
+                entry = by_id.setdefault(key, {
+                    "domains": set(),
+                    "urls":    set(),
+                    "posts":   set(),
+                })
+                entry["domains"].add(domain)
+                entry["urls"].add(r["ua_id"])
+                entry["posts"].add(r["post_id"])
+
+    out: list[dict] = []
+    for (platform, ident), e in by_id.items():
+        if len(e["domains"]) < 2:
+            continue
+        out.append({
+            "platform":     platform,
+            "tracking_id":  ident,
+            "domain_count": len(e["domains"]),
+            "url_count":    len(e["urls"]),
+            "post_count":   len(e["posts"]),
+            "domains":      sorted(e["domains"]),
+        })
+    out.sort(key=lambda x: (-x["domain_count"], x["platform"]))
+    return out
+
+
 def ad_tracking_platforms(conn: sqlite3.Connection, case_id: int) -> list:
     """List ad / analytics platforms with footprint on this case's URLs.
 
