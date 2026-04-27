@@ -233,7 +233,7 @@ def test_pixel_with_all_same_digit_id_treated_as_placeholder():
 # ---------------------------------------------------------------------------
 # Placeholder helper
 # ---------------------------------------------------------------------------
-def test_looks_like_placeholder_recognises_all_x():
+def test_looks_like_placeholder_recognises_all_alphabetic_repeats():
     assert _looks_like_placeholder("G-XXXXXXXX")
     assert _looks_like_placeholder("GTM-XXXXXXX")
     assert _looks_like_placeholder("UA-XXXXX-X")
@@ -252,6 +252,16 @@ def test_looks_like_placeholder_passes_real_ids():
     assert not _looks_like_placeholder("GTM-ABC1234")
     assert not _looks_like_placeholder("UA-1234567-12")
     assert not _looks_like_placeholder("AW-1234567890")
+
+
+def test_looks_like_placeholder_does_NOT_reject_repeated_digit_ids():
+    """Codex2 #3: repeated-digit IDs (AW-1111111111, UA-1111111-1) are
+    syntactically valid even if rare. Only alphabetic repeats are
+    treated as placeholders."""
+    assert not _looks_like_placeholder("AW-1111111111")
+    assert not _looks_like_placeholder("UA-1111111-1")
+    assert not _looks_like_placeholder("GTM-0000000")
+    assert not _looks_like_placeholder("G-99999999")
 
 
 # ---------------------------------------------------------------------------
