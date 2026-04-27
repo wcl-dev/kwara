@@ -14,6 +14,7 @@ from config import (
     TRACKER_DOMAINS,
 )
 from fingerprints import extract_tracking_ids_from_file
+from lightweight_fetch import CAPTURE_METHOD_PLAYWRIGHT
 
 CAPTURE_OK = "ok"
 CAPTURE_CF = "cf_challenge"
@@ -347,8 +348,9 @@ def snapshot_url(conn: sqlite3.Connection, scan_run_id: int, timeout: int = 30,
                (scan_run_id, final_url, final_domain,
                 screenshot_path, html_path, har_path,
                 request_domains_json, risk_tags, captured_at,
-                capture_status, capture_detail, tracking_ids_json)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                capture_status, capture_detail, tracking_ids_json,
+                capture_method)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             scan_run_id, final_url, final_domain,
             screenshot_path, html_path, _har_path,
@@ -358,6 +360,7 @@ def snapshot_url(conn: sqlite3.Connection, scan_run_id: int, timeout: int = 30,
             cap_status,
             cap_detail,
             tracking_ids_json,
+            CAPTURE_METHOD_PLAYWRIGHT,
         ),
     )
     conn.commit()
@@ -436,13 +439,15 @@ def snapshot_batch(conn: sqlite3.Connection, scan_run_ids: list[int],
                    (scan_run_id, final_url, final_domain,
                     screenshot_path, html_path, har_path,
                     request_domains_json, risk_tags, captured_at,
-                    capture_status, capture_detail, tracking_ids_json)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    capture_status, capture_detail, tracking_ids_json,
+                    capture_method)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 sr_id, m["final_url"], m["final_domain"],
                 screenshot_path, html_path, _har_p,
                 json.dumps(request_domains), json.dumps(tags), _now(),
                 cap_status, cap_detail, tracking_ids_json,
+                CAPTURE_METHOD_PLAYWRIGHT,
             ),
         )
         conn.commit()

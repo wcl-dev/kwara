@@ -5,7 +5,7 @@ import os
 import streamlit as st
 
 from i18n import t
-from pipeline import run_snapshot, run_snapshot_batch
+from pipeline import run_lightweight_fetch_batch, run_snapshot, run_snapshot_batch
 from snapshots import failed_capture_urls_csv
 from views._shared import fetch_evidence_rows, url_selector
 
@@ -49,6 +49,40 @@ def render(conn, case_id, case_locale=None, case_tz=None):
     if _failed_csv.strip():
         st.download_button(t("page.btn_dl_failed"), _failed_csv,
             file_name=f"kwara_failed_case_{case_id}.csv", mime="text/csv", key="dl_failed_csv")
+
+    # ── Lightweight HTML-only fetch (Phase 3 ticket C) ─────────
+    # Fast alternative path: requests.get + fingerprint extraction, no
+    # browser. Default target = scans without any snapshot yet. Scans
+    # that already have a snapshot are gated behind an expander with
+    # an explicit shadowing warning.
+    st.divider()
+    st.subheader(t("page.lightweight_header"))
+    st.caption(t("page.lightweight_caption"))
+
+    unsnapped = [r for r in scanned if r["final_url"] and not r["snapshot_id"]]
+    snapped   = [r for r in scanned if r["final_url"] and r["snapshot_id"]]
+
+    if unsnapped:
+        if st.button(
+            t("page.btn_lightweight", n=len(unsnapped)),
+            key="btn_lightweight_unsnapped",
+        ):
+            sr_ids = [r["scan_run_id"] for r in unsnapped]
+            run_lightweight_fetch_batch(conn, sr_ids)
+            st.rerun()
+    else:
+        st.caption(t("page.lightweight_none_unsnapped"))
+
+    if snapped:
+        with st.expander(t("page.lightweight_advanced_expander", n=len(snapped))):
+            st.warning(t("page.lightweight_shadow_warning"))
+            if st.button(
+                t("page.btn_lightweight_already_snapped", n=len(snapped)),
+                key="btn_lightweight_snapped",
+            ):
+                sr_ids = [r["scan_run_id"] for r in snapped]
+                run_lightweight_fetch_batch(conn, sr_ids)
+                st.rerun()
 
     if not scanned:
         st.info(t("page.scan_first"))

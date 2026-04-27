@@ -56,6 +56,19 @@ def run_scan_with_corroboration(conn: sqlite3.Connection, url_artifact_id: int) 
     return scan_run_id
 
 
+def run_lightweight_fetch_batch(
+    conn: sqlite3.Connection,
+    scan_run_ids: list[int],
+) -> list[int]:
+    """Lightweight HTML-only fetch — no Playwright, no screenshot, no HAR.
+
+    Wraps lightweight_fetch.fetch_html_only_batch(). See that module's
+    docstring for trade-offs vs the full Playwright snapshot path.
+    """
+    from lightweight_fetch import fetch_html_only_batch
+    return fetch_html_only_batch(conn, scan_run_ids)
+
+
 def _try_corroborate(conn: sqlite3.Connection, scan_run_id: int) -> None:
     """Best-effort third-party corroboration after a successful scan."""
     row = conn.execute(
