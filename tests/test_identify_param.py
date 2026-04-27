@@ -6,7 +6,11 @@ Foodpanda, etc.), and Klaviyo. Each new entry must:
   2. Resolve to a documented purpose i18n key
   3. NOT collide with existing well-known platforms
 """
-from clustering import _PARAM_EXACT, _PARAM_PREFIX, identify_param
+from param_attribution import (
+    PARAM_EXACT as _PARAM_EXACT,
+    PARAM_PREFIX as _PARAM_PREFIX,
+    identify_param,
+)
 
 
 def test_liff_id_recognised_as_line():

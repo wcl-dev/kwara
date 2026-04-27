@@ -12,7 +12,7 @@ future visualisation work.
 import pandas as pd
 import streamlit as st
 
-from clustering import account_content_matrix
+from clustering_url import account_content_matrix
 from i18n import t
 
 

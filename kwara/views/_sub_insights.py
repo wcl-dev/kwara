@@ -2,13 +2,15 @@
 import pandas as pd
 import streamlit as st
 
-from clustering import (
+from clustering_infra import (
     asn_clusters,
     shared_certificates,
+    shared_tracking_ids,
+)
+from clustering_url import (
     shared_destinations,
     shared_param_keys,
     shared_params,
-    shared_tracking_ids,
 )
 from i18n import t
 from insights import case_insights
