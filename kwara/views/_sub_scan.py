@@ -7,7 +7,7 @@ import streamlit as st
 from config import DB_PATH
 from db import get_conn
 from i18n import t
-from pipeline import run_scan_only
+from pipeline import run_scan_with_corroboration
 
 
 def render(conn, case_id):
@@ -52,7 +52,7 @@ def render(conn, case_id):
         time.sleep(random.uniform(0, 2))
         c = get_conn(DB_PATH)
         try:
-            run_scan_only(c, ua_id)
+            run_scan_with_corroboration(c, ua_id)
         except Exception as e:
             return ua_id, str(e)
         finally:
@@ -91,5 +91,5 @@ def render(conn, case_id):
                 label = t("scan.btn_scan") if r["scan_run_id"] is None else t("scan.btn_rescan")
                 if st.button(label, key=f"scan_{r['id']}"):
                     with st.spinner(t("scan.spinner")):
-                        run_scan_only(conn, r["id"])
+                        run_scan_with_corroboration(conn, r["id"])
                     st.rerun()
