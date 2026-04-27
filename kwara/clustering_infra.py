@@ -22,6 +22,9 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from urllib.parse import parse_qs, urlparse
 
+import ipaddress
+
+from config import HAR_NOISE_HOSTS
 from param_attribution import (
     PLATFORM_GOOGLE_ADS,
     PLATFORM_GOOGLE_ANALYTICS,
@@ -32,6 +35,31 @@ from param_attribution import (
     identify_param,
     merge_risk_tags,
 )
+
+
+def _is_direct_ip(host: str) -> bool:
+    """True if host looks like a literal IPv4/IPv6 address rather than DNS."""
+    try:
+        ipaddress.ip_address(host)
+        return True
+    except (ValueError, TypeError):
+        return False
+
+
+def _is_noise_endpoint(host: str) -> bool:
+    """Common CDNs / fonts / analytics — legitimate baseline web infra
+    that virtually every page loads. Filtered out of cross-domain
+    third-party aggregation.
+
+    Matches both exact hostname AND any subdomain of an entry in
+    config.HAR_NOISE_HOSTS — so listing 'doubleclick.net' also filters
+    'cm.g.doubleclick.net', 'googleads.g.doubleclick.net' etc.
+    """
+    h = host.lower()
+    for noise in HAR_NOISE_HOSTS:
+        if h == noise or h.endswith("." + noise):
+            return True
+    return False
 
 
 def asn_clusters(conn: sqlite3.Connection, case_id: int) -> list:
@@ -637,4 +665,88 @@ def ad_tracking_platforms(conn: sqlite3.Connection, case_id: int) -> list:
             "domains":       sorted(e["domains"]),
         })
     out.sort(key=lambda x: (-x["url_count"], -x["domain_count"], _SOURCE_RANK[x["signal_source"]]))
+    return out
+
+
+def shared_endpoints(conn: sqlite3.Connection, case_id: int) -> list:
+    """Cross-domain third-party endpoint aggregation (Phase 3 ticket A).
+
+    For each landing domain in the case, read the snapshot's request
+    hostnames (snapshots.request_domains_json — populated by Playwright
+    captures only; lightweight HTTP fetches contribute nothing here).
+    Find endpoints called by 2 or more distinct landing domains, and
+    drop noise endpoints listed in config.HAR_NOISE_HOSTS.
+
+    Direct-IP endpoints (no DNS hostname) are flagged ``is_direct_ip``
+    — particularly suspicious because they typically bypass CDN/proxy
+    routing and reveal real backend infrastructure.
+
+    Snapshot selection follows the same latest-usable pattern as
+    shared_tracking_ids (codex review fix #2): newest snapshot per
+    scan_run with capture_status='ok' and a non-empty
+    request_domains_json. A later failed re-capture doesn't erase
+    earlier good data.
+
+    Returns list sorted by domain_count desc, with direct-IP entries
+    floated to the top of each tier.
+    """
+    rows = conn.execute(
+        """SELECT s.request_domains_json,
+                  COALESCE(s.final_domain, '') AS final_domain
+           FROM url_artifacts ua
+           JOIN scan_runs sr ON sr.id = (
+               SELECT id FROM scan_runs
+               WHERE url_artifact_id = ua.id AND status = 'done'
+               ORDER BY id DESC LIMIT 1
+           )
+           JOIN snapshots s ON s.id = (
+               SELECT id FROM snapshots
+               WHERE scan_run_id = sr.id
+                 AND capture_status = 'ok'
+                 AND request_domains_json IS NOT NULL
+                 AND TRIM(request_domains_json) != ''
+               ORDER BY id DESC LIMIT 1
+           )
+           WHERE ua.case_id = ?""",
+        (case_id,),
+    ).fetchall()
+
+    endpoint_to_landings: dict[str, set] = defaultdict(set)
+
+    for r in rows:
+        landing = (r["final_domain"] or "").lower()
+        if not landing:
+            continue
+        try:
+            domains = json.loads(r["request_domains_json"])
+        except (ValueError, TypeError):
+            continue
+        if not isinstance(domains, list):
+            continue
+        for raw in domains:
+            host = (raw or "").strip().lower()
+            if not host:
+                continue
+            # Skip the landing's own domain (and immediate subdomains) —
+            # not third-party.
+            if host == landing or host.endswith("." + landing):
+                continue
+            if _is_noise_endpoint(host):
+                continue
+            endpoint_to_landings[host].add(landing)
+
+    out: list[dict] = []
+    for endpoint, landings in endpoint_to_landings.items():
+        if len(landings) < 2:
+            continue
+        out.append({
+            "endpoint":     endpoint,
+            "domain_count": len(landings),
+            "domains":      sorted(landings),
+            "is_direct_ip": _is_direct_ip(endpoint),
+        })
+    # Sort: domain_count desc, direct-IP first within tier (flag = True
+    # surfaces these as priority signals — direct IPs reveal real
+    # backend infrastructure that bypasses CDN routing).
+    out.sort(key=lambda x: (-x["domain_count"], not x["is_direct_ip"], x["endpoint"]))
     return out
