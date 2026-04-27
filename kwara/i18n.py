@@ -147,7 +147,9 @@ _EN: dict[str, str] = {
     # ── Tabs ────────────────────────────────────────────────────────────────
     "tab.input": "Input",
     "tab.collected": "Collected",
-    "tab.analysis": "Analysis",
+    "tab.investigate": "🔍 Investigate",
+    "tab.preserve": "📦 Preserve",
+    "tab.analyze": "🧩 Analyze",
     "tab.providers": "Providers",
     "tab.export": "Export",
     "tab.scan": "Scan",
@@ -521,7 +523,9 @@ _ZH: dict[str, str] = {
     # ── Tabs ────────────────────────────────────────────────────────────────
     "tab.input": "輸入",
     "tab.collected": "已收集",
-    "tab.analysis": "分析",
+    "tab.investigate": "🔍 探查",
+    "tab.preserve": "📦 證據保全",
+    "tab.analyze": "🧩 分析",
     "tab.providers": "服務提供商",
     "tab.export": "匯出",
     "tab.scan": "掃描",

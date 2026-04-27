@@ -189,13 +189,26 @@ _case_locale = (_case_row["browser_locale"] if _case_row and _case_row["browser_
 _case_tz = (_case_row["browser_timezone"] if _case_row and _case_row["browser_timezone"] else None)
 
 # ---------------------------------------------------------------------------
-# Tabs — each delegates to its own module in pages/
+# Tabs — each delegates to its own module in views/
+# Three-stage workflow: Investigate → Preserve → Analyze.
 # ---------------------------------------------------------------------------
-from views import tab_input, tab_evidence, tab_analysis, tab_providers, tab_export
-
-tab_in, tab_ev, tab_an, tab_pr, tab_ex = st.tabs(
-    [t("tab.input"), t("tab.collected"), t("tab.analysis"), t("tab.providers"), t("tab.export")]
+from views import (
+    tab_analyze,
+    tab_evidence,
+    tab_export,
+    tab_input,
+    tab_investigate,
+    tab_preserve,
 )
+
+tab_in, tab_ev, tab_iv, tab_pv, tab_az, tab_ex = st.tabs([
+    t("tab.input"),
+    t("tab.collected"),
+    t("tab.investigate"),
+    t("tab.preserve"),
+    t("tab.analyze"),
+    t("tab.export"),
+])
 
 with tab_in:
     tab_input.render(conn, current_case_id)
@@ -203,11 +216,14 @@ with tab_in:
 with tab_ev:
     tab_evidence.render(conn, current_case_id)
 
-with tab_an:
-    tab_analysis.render(conn, current_case_id, case_locale=_case_locale, case_tz=_case_tz)
+with tab_iv:
+    tab_investigate.render(conn, current_case_id)
 
-with tab_pr:
-    tab_providers.render(conn, current_case_id)
+with tab_pv:
+    tab_preserve.render(conn, current_case_id, case_locale=_case_locale, case_tz=_case_tz)
+
+with tab_az:
+    tab_analyze.render(conn, current_case_id)
 
 with tab_ex:
     tab_export.render(conn, current_case_id)
