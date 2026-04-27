@@ -40,6 +40,17 @@ def _intel_now() -> str:
 
 
 def run_scan_only(conn: sqlite3.Connection, url_artifact_id: int) -> int:
+    """Pure scan — redirect chain + TLS + headers. No third-party network calls.
+
+    Use run_scan_with_corroboration() to additionally submit to Wayback /
+    urlscan / RFC 3161 in the same step, or call run_corroborate() later.
+    """
+    return _scan(conn, url_artifact_id)
+
+
+def run_scan_with_corroboration(conn: sqlite3.Connection, url_artifact_id: int) -> int:
+    """Scan, then best-effort third-party corroboration. Failures in
+    corroboration do not surface — see _try_corroborate()."""
     scan_run_id = _scan(conn, url_artifact_id)
     _try_corroborate(conn, scan_run_id)
     return scan_run_id
