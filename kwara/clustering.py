@@ -360,7 +360,10 @@ def shared_params(conn: sqlite3.Connection, case_id: int) -> list:
         k, _cmp = bucket
         owner, purpose_key = identify_param(k)
         domains = sorted(param_domains[bucket])
-        if not owner or owner == "generic":
+        if owner == "generic":
+            owner = t("param.unattributed_tracker")
+            purpose = t(purpose_key) if purpose_key else t("param.unattributed_purpose")
+        elif not owner:
             owner = t("param.unrecognized_platform")
             purpose = t("param.unidentified")
         else:

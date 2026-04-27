@@ -480,6 +480,8 @@ _EN: dict[str, str] = {
     "param.ga_tracking": "GA tracking parameter",
     "param.unrecognized_platform": "unrecognized platform",
     "param.unidentified": "unidentified",
+    "param.unattributed_tracker": "Unattributed Tracker",
+    "param.unattributed_purpose": "tracking parameter (operator unknown)",
 }
 
 _ZH: dict[str, str] = {
@@ -814,6 +816,8 @@ _ZH: dict[str, str] = {
     "param.ga_tracking": "GA 追蹤參數",
     "param.unrecognized_platform": "非屬已知追蹤平台",
     "param.unidentified": "未識別",
+    "param.unattributed_tracker": "未歸屬追蹤碼",
+    "param.unattributed_purpose": "追蹤碼（無法歸屬到特定平台）",
 }
 
 _TRANSLATIONS: dict[str, dict[str, str]] = {
