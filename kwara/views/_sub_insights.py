@@ -12,7 +12,7 @@ from clustering import (
 )
 from i18n import t
 from insights import case_insights
-from views._shared import TAG_COLORS
+from views._shared import TAG_COLORS, localize_owner, localize_purpose
 
 
 def _short_serial(serial: str, head: int = 8, tail: int = 4) -> str:
@@ -119,7 +119,18 @@ def render(conn, case_id):
     if not params:
         st.info(t("clusters.no_params"))
     else:
-        st.dataframe(pd.DataFrame(params), use_container_width=True, hide_index=True)
+        param_rows = []
+        for p in params:
+            param_rows.append({
+                "param_key":   p["param_key"],
+                "param_value": p["param_value"],
+                "owner":       localize_owner(p),
+                "purpose":     localize_purpose(p),
+                "domains":     p["domains"],
+                "post_count":  p["post_count"],
+                "url_count":   p["url_count"],
+            })
+        st.dataframe(pd.DataFrame(param_rows), use_container_width=True, hide_index=True)
 
     st.divider()
 
@@ -134,8 +145,8 @@ def render(conn, case_id):
         for pk in param_keys:
             pk_rows.append({
                 "param_key":        pk["param_key"],
-                "owner":            pk["owner"],
-                "purpose":          pk["purpose"],
+                "owner":            localize_owner(pk),
+                "purpose":          localize_purpose(pk),
                 "distinct_posts":   pk["distinct_posts"],
                 "distinct_values":  pk["distinct_values"],
                 "distinct_domains": pk["distinct_domains"],

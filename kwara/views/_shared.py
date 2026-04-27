@@ -5,7 +5,40 @@ import json
 import sqlite3
 from urllib.parse import urlparse as _urlparse
 
+from clustering import (
+    OWNER_KIND_GENERIC,
+    OWNER_KIND_PLATFORM,
+)
 from config import KNOWN_SHORTLINK_DOMAINS, SUSPICIOUS_EXTS as _SUSP_EXTS
+from i18n import t
+
+
+def localize_owner(row: dict) -> str:
+    """Translate clustering's owner_kind/owner into a user-facing label.
+
+    Clustering returns language-agnostic identifiers (owner_kind enum +
+    raw owner string). The view layer translates here so cached clustering
+    results stay correct when the user switches language.
+    """
+    kind = row.get("owner_kind", "")
+    if kind == OWNER_KIND_PLATFORM:
+        # owner is the raw vendor name (e.g. "Google Analytics") — already
+        # a stable identifier and intentionally not translated.
+        return row.get("owner") or ""
+    if kind == OWNER_KIND_GENERIC:
+        return t("param.unattributed_tracker")
+    return t("param.unrecognized_platform")
+
+
+def localize_purpose(row: dict) -> str:
+    """Translate clustering's purpose_key into a user-facing label."""
+    pk = row.get("purpose_key") or ""
+    kind = row.get("owner_kind", "")
+    if pk:
+        return t(pk)
+    if kind == OWNER_KIND_GENERIC:
+        return t("param.unattributed_purpose")
+    return t("param.unidentified")
 
 TAG_COLORS = {
     "multi_hop":            "🔴",

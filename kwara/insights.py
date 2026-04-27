@@ -8,6 +8,8 @@ from collections import Counter
 from typing import Any
 
 from clustering import (
+    OWNER_KIND_GENERIC,
+    OWNER_KIND_PLATFORM,
     asn_clusters,
     shared_certificates,
     shared_destinations,
@@ -15,6 +17,21 @@ from clustering import (
     shared_params,
     shared_tracking_ids,
 )
+
+
+def _bullet_owner_note(row: dict) -> str:
+    """Build the parenthetical 'attributed to X' fragment for a param bullet.
+
+    Mirrors views._shared.localize_owner() but kept inline here to avoid a
+    circular dependency (insights.py is not a view layer).
+    """
+    kind = row.get("owner_kind", "")
+    if kind == OWNER_KIND_PLATFORM:
+        owner = row.get("owner") or ""
+        return t("insights.bullet_param_owner", owner=owner) if owner else ""
+    if kind == OWNER_KIND_GENERIC:
+        return t("insights.bullet_param_owner", owner=t("param.unattributed_tracker"))
+    return ""
 from i18n import t
 
 # Risk tag keys used for label lookup via t("risk.<tag>").
@@ -174,21 +191,18 @@ def _build_bullets(
         out.append(t("insights.bullet_unresolved", n=len(unresolved)))
     if params:
         p0 = params[0]
-        owner_note = t("insights.bullet_param_owner", owner=p0["owner"]) if p0.get("owner") else ""
         out.append(t("insights.bullet_param",
                       key=p0["param_key"], value=str(p0["param_value"])[:80],
-                      owner=owner_note, posts=p0.get("post_count", 0)))
+                      owner=_bullet_owner_note(p0), posts=p0.get("post_count", 0)))
         if len(params) > 1:
             p1 = params[1]
-            owner_note1 = t("insights.bullet_param_owner", owner=p1["owner"]) if p1.get("owner") else ""
             out.append(t("insights.bullet_param2",
                           key=p1["param_key"], value=str(p1["param_value"])[:80],
-                          owner=owner_note1, posts=p1.get("post_count", 0)))
+                          owner=_bullet_owner_note(p1), posts=p1.get("post_count", 0)))
     if param_keys:
         pk0 = param_keys[0]
-        owner_note = t("insights.bullet_param_owner", owner=pk0["owner"]) if pk0.get("owner") else ""
         out.append(t("insights.bullet_param_key",
-                      key=pk0["param_key"], owner=owner_note,
+                      key=pk0["param_key"], owner=_bullet_owner_note(pk0),
                       posts=pk0["distinct_posts"], values=pk0["distinct_values"],
                       domains=pk0["distinct_domains"]))
     if tracking_ids:
