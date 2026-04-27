@@ -16,7 +16,13 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from urllib.parse import parse_qs, urlparse
 
-from config import KNOWN_SHORTLINK_DOMAINS, PARAM_VALUE_HASH_THRESHOLD
+from config import (
+    KNOWN_SHORTLINK_DOMAINS,
+    PARAM_KEY_MAX_DOMAINS,
+    PARAM_KEY_MIN_POSTS,
+    PARAM_KEY_MIN_VALUES,
+    PARAM_VALUE_HASH_THRESHOLD,
+)
 from i18n import t
 
 # ---------------------------------------------------------------------------
@@ -391,6 +397,95 @@ def shared_params(conn: sqlite3.Connection, case_id: int) -> list:
             "url_count":   len(param_urls[bucket]),
         })
     results.sort(key=lambda x: (-x["post_count"], -x["url_count"]))
+    return results
+
+
+def shared_param_keys(conn: sqlite3.Connection, case_id: int) -> list:
+    """Operator-level coordination signal — sibling to shared_params().
+
+    shared_params() compares (key, value) pairs and catches "same campaign,
+    same URL". It misses sophisticated operators who give each victim/post
+    a unique tracking ID (e.g. ?aff_id=A1, ?aff_id=A2, ?aff_id=A3 …) — no
+    single value clusters even though they're clearly the same system.
+
+    shared_param_keys() compares the KEY itself: a key appearing in many
+    posts with several different values, confined to few domains, suggests
+    the same operator's backend is on the other end. Thresholds in
+    config.py:
+      PARAM_KEY_MIN_POSTS   posts must contain the key
+      PARAM_KEY_MIN_VALUES  distinct values must be observed
+      PARAM_KEY_MAX_DOMAINS domains must not exceed (filters out keys like
+                            ?q= that appear everywhere)
+
+    Returns list sorted by distinct_posts desc, distinct_values desc.
+    """
+    rows = conn.execute(
+        """SELECT ua.original_url, sr.final_url, me.id AS post_id
+           FROM url_artifacts ua
+           JOIN message_evidence me ON me.id = ua.message_id
+           LEFT JOIN scan_runs sr ON sr.url_artifact_id = ua.id
+               AND sr.id = (
+                   SELECT id FROM scan_runs WHERE url_artifact_id = ua.id
+                   ORDER BY id DESC LIMIT 1
+               )
+           WHERE ua.case_id = ?""",
+        (case_id,),
+    ).fetchall()
+
+    key_posts:    defaultdict[str, set] = defaultdict(set)
+    key_values:   defaultdict[str, set] = defaultdict(set)
+    key_domains:  defaultdict[str, set] = defaultdict(set)
+    # Insertion-ordered list of display values (deduped against key_values).
+    key_value_displays: defaultdict[str, list] = defaultdict(list)
+
+    for r in rows:
+        for url in (r["original_url"], r["final_url"]):
+            if not url:
+                continue
+            parsed = urlparse(url)
+            domain = parsed.hostname or ""
+            for key, values in parse_qs(parsed.query).items():
+                if not key:
+                    continue
+                for val in values:
+                    cmp_val, display_val = _normalize_param_value(val)
+                    if cmp_val not in key_values[key]:
+                        key_values[key].add(cmp_val)
+                        key_value_displays[key].append(display_val)
+                    key_posts[key].add(r["post_id"])
+                    key_domains[key].add(domain)
+
+    results: list = []
+    for key, posts in key_posts.items():
+        if len(posts) < PARAM_KEY_MIN_POSTS:
+            continue
+        if len(key_values[key]) < PARAM_KEY_MIN_VALUES:
+            continue
+        if len(key_domains[key]) > PARAM_KEY_MAX_DOMAINS:
+            continue
+
+        owner, purpose_key = identify_param(key)
+        if owner == "generic":
+            owner = t("param.unattributed_tracker")
+            purpose = t(purpose_key) if purpose_key else t("param.unattributed_purpose")
+        elif not owner:
+            owner = t("param.unrecognized_platform")
+            purpose = t("param.unidentified")
+        else:
+            purpose = t(purpose_key) if purpose_key else ""
+
+        results.append({
+            "param_key":        key,
+            "owner":            owner,
+            "purpose":          purpose,
+            "distinct_posts":   len(posts),
+            "distinct_values":  len(key_values[key]),
+            "distinct_domains": len(key_domains[key]),
+            "top_values":       key_value_displays[key][:5],
+            "domains":          sorted(key_domains[key]),
+        })
+
+    results.sort(key=lambda x: (-x["distinct_posts"], -x["distinct_values"]))
     return results
 
 
