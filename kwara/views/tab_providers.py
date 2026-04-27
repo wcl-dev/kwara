@@ -216,9 +216,10 @@ def _ca_section(conn, case_id):
 
 
 _SOURCE_LABEL_KEYS = {
-    "both":          "prov.signal_both",
-    "html_embedded": "prov.signal_html",
-    "url_param":     "prov.signal_url",
+    "both":              "prov.signal_both",
+    "mixed_nonoverlap":  "prov.signal_mixed",
+    "html_embedded":     "prov.signal_html",
+    "url_param":         "prov.signal_url",
 }
 
 

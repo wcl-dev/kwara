@@ -597,29 +597,34 @@ def ad_tracking_platforms(conn: sqlite3.Connection, case_id: int) -> list:
                     if snap_domain:
                         e["html_domains"].add(snap_domain)
 
-    _SOURCE_RANK = {"both": 0, "html_embedded": 1, "url_param": 2}
+    _SOURCE_RANK = {
+        "both":              0,
+        "mixed_nonoverlap":  1,
+        "html_embedded":     2,
+        "url_param":         3,
+    }
     out: list[dict] = []
     for platform_id, e in by_platform.items():
-        # signal_source = 'both' only when URL and HTML evidence intersect on
-        # at least one ua_id or domain (fix #3 from codex review). Without
-        # this check, a URL with utm_source on one URL and a Pixel on a
-        # *different* URL would falsely promote the row to 'both', overstating
-        # cross-confirmation.
+        # signal_source semantics (codex review fix #3 + follow-up):
+        #   both              URL and HTML evidence intersect on at least one
+        #                     ua_id or domain — independent confirmation.
+        #   mixed_nonoverlap  URL and HTML evidence both present in this case
+        #                     but never on the same ua_id or domain. Weaker
+        #                     than 'both' but still notable; kept as a
+        #                     distinct label so the UI doesn't have to lie
+        #                     in either direction.
+        #   html_embedded     HTML pixel only.
+        #   url_param         URL parameter only.
         url_overlaps_html = bool(
             (e["url_uas"] & e["html_uas"])
             or (e["url_domains"] & e["html_domains"])
         )
-        if e["has_url"] and e["has_html"] and url_overlaps_html:
-            source = "both"
-        elif e["has_html"] and not e["has_url"]:
+        if e["has_url"] and e["has_html"]:
+            source = "both" if url_overlaps_html else "mixed_nonoverlap"
+        elif e["has_html"]:
             source = "html_embedded"
-        elif e["has_url"] and not e["has_html"]:
-            source = "url_param"
         else:
-            # Both signals present but no overlap — keep them visible as
-            # separate rows would be too noisy; mark as html_embedded since
-            # HTML evidence is the stronger one when present.
-            source = "html_embedded" if e["has_html"] else "url_param"
+            source = "url_param"
         out.append({
             "platform_id":   platform_id,
             "owner_kind":    classify_owner(platform_id),
