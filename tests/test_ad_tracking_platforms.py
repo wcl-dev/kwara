@@ -142,12 +142,15 @@ def test_both_signals_on_same_url_marks_both():
     assert "1234567890123456" in meta["tracking_ids"]
 
 
-def test_signals_on_different_urls_DO_NOT_falsely_merge_to_both():
-    """Codex review fix #3: two unrelated URLs in the same case must not produce 'both'.
+def test_signals_on_different_urls_marked_mixed_nonoverlap():
+    """Codex review fix #3 (and follow-up): two unrelated URLs in the same
+    case must not produce 'both' — but they also shouldn't masquerade as
+    pure 'html_embedded' or 'url_param' since both kinds of evidence exist.
+    The honest label is 'mixed_nonoverlap'.
 
     URL A carries fbclid; URL B's snapshot has Meta Pixel. Both contribute
     to the Meta / Facebook bucket but the signals never overlap on the same
-    ua_id or domain — claiming 'both' would overstate cross-confirmation.
+    ua_id or domain.
     """
     conn = _make_db()
     case_id = _make_case(conn)
@@ -160,11 +163,15 @@ def test_signals_on_different_urls_DO_NOT_falsely_merge_to_both():
                        {"Meta Pixel": ["1234567890123456"]})
     res = ad_tracking_platforms(conn, case_id)
     meta = next(r for r in res if r["platform_id"] == PLATFORM_META_FACEBOOK)
-    # Both has_url and has_html are True, but no overlap → must NOT be 'both'
-    assert meta["signal_source"] != "both", (
-        "URL-param and HTML signals on different URLs/domains must not "
-        "falsely promote the row to 'both'"
+    assert meta["signal_source"] == "mixed_nonoverlap", (
+        f"Expected 'mixed_nonoverlap' for non-intersecting URL+HTML "
+        f"evidence, got {meta['signal_source']!r}. The row carries both "
+        f"param_keys={meta['param_keys']} and tracking_ids={meta['tracking_ids']}, "
+        f"so calling it pure html_embedded or url_param would be misleading."
     )
+    # Sanity: row really does carry both kinds of evidence, just not co-located
+    assert "fbclid" in meta["param_keys"]
+    assert "1234567890123456" in meta["tracking_ids"]
 
 
 def test_html_platform_label_mapping():

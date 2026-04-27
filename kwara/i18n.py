@@ -427,6 +427,7 @@ _EN: dict[str, str] = {
     "prov.drill_ad_tracking": "Drill into platform",
     "prov.ad_tracking_domains": "**Domains carrying `{owner}` signals ({n} total):**",
     "prov.signal_both":          "both",
+    "prov.signal_mixed":         "mixed (no overlap)",
     "prov.signal_html":          "html",
     "prov.signal_url":           "url",
 
@@ -804,6 +805,7 @@ _ZH: dict[str, str] = {
     "prov.drill_ad_tracking": "展開平台",
     "prov.ad_tracking_domains": "**有 `{owner}` 訊號的網域（共 {n} 個）：**",
     "prov.signal_both":          "兩者",
+    "prov.signal_mixed":         "兩種訊號未交集",
     "prov.signal_html":          "HTML",
     "prov.signal_url":           "URL",
 
