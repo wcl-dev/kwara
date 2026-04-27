@@ -63,6 +63,24 @@ def test_ga4_in_gtagjs_loader_url():
     assert extract_tracking_ids(html) == {"Google Analytics 4": ["G-XYZ123ABC"]}
 
 
+def test_ga4_in_collect_endpoint_url():
+    html = """<img src="https://www.google-analytics.com/g/collect?v=2&tid=G-MEASURE9876&cid=...">"""
+    assert extract_tracking_ids(html) == {"Google Analytics 4": ["G-MEASURE9876"]}
+
+
+def test_ga4_query_id_NOT_on_google_host_does_NOT_match():
+    """Codex2 #2: ?id=G-… in some unrelated URL must not match — only
+    google-analytics.com / googletagmanager.com URLs are recognised."""
+    html = """<a href="https://random-blog.example/post?id=G-T5N9K2Q7W3">read more</a>"""
+    assert extract_tracking_ids(html) == {}
+
+
+def test_ga4_id_in_random_json_blob_does_NOT_match():
+    """A JSON blob mentioning G-… without a Google URL host must not match."""
+    html = """<script>var cfg = {"some_key": "G-AB12CD34", "id": "G-WHATEVER1"};</script>"""
+    assert extract_tracking_ids(html) == {}
+
+
 def test_ga4_bare_token_in_plaintext_does_NOT_match():
     """Codex review fix #1: bare G-… in plain text was previously matched.
     Without an invocation context it must not become evidence."""
@@ -111,6 +129,12 @@ def test_ua_placeholder_xxxxx_rejected():
 def test_gtm_in_standard_snippet():
     html = """j.src='//www.googletagmanager.com/gtm.js?id=GTM-ABC1234';"""
     assert extract_tracking_ids(html) == {"Google Tag Manager": ["GTM-ABC1234"]}
+
+
+def test_gtm_query_id_NOT_on_google_host_does_NOT_match():
+    """Codex2 #2: ?id=GTM-… on a non-Google host must not be picked up."""
+    html = """<a href="https://example.com/redirect?id=GTM-ABC1234">click</a>"""
+    assert extract_tracking_ids(html) == {}
 
 
 def test_gtm_in_quoted_container_id():
