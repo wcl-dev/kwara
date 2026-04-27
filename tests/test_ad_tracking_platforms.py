@@ -70,6 +70,101 @@ def test_known_platform_aggregated():
     assert ga["url_count"] == 2
     assert "utm_source" in ga["param_keys"]
     assert "utm_term" in ga["param_keys"]
+    assert ga["signal_source"] == "url_param"
+    assert ga["tracking_ids"] == []  # no HTML signal
+
+
+def _add_with_snapshot(conn, case_id, url, final_url, final_domain, tracking_ids: dict):
+    """Add post + url + scan + snapshot with HTML tracking IDs populated."""
+    import json
+    from datetime import datetime, timezone
+    now = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    cur = conn.execute(
+        """INSERT INTO message_evidence (case_id, platform, permalink, actor_label,
+           posted_at, message_text, screenshot_path, ingested_at)
+           VALUES (?, '', '', '', '', ?, '', ?)""",
+        (case_id, url, now),
+    )
+    pid = cur.lastrowid
+    cur = conn.execute(
+        "INSERT INTO url_artifacts (message_id, case_id, original_url, domain, "
+        "url_order, created_at) VALUES (?, ?, ?, '', 0, ?)",
+        (pid, case_id, url, now),
+    )
+    ua_id = cur.lastrowid
+    cur = conn.execute(
+        "INSERT INTO scan_runs (url_artifact_id, run_at, final_url, hop_count, status) "
+        "VALUES (?, ?, ?, 0, 'done')",
+        (ua_id, now, final_url),
+    )
+    sr_id = cur.lastrowid
+    conn.execute(
+        """INSERT INTO snapshots (scan_run_id, final_url, final_domain,
+           captured_at, capture_status, tracking_ids_json)
+           VALUES (?, ?, ?, ?, 'ok', ?)""",
+        (sr_id, final_url, final_domain, now, json.dumps(tracking_ids)),
+    )
+    conn.commit()
+
+
+def test_html_only_signal():
+    """Snapshot with Meta Pixel but URL has no tracking params → html_embedded only."""
+    set_lang("en")
+    conn = _make_db()
+    case_id = _make_case(conn)
+    _add_with_snapshot(conn, case_id, "https://a.com/", "https://a.com/", "a.com",
+                       {"Meta Pixel": ["1234567890123456"]})
+    res = ad_tracking_platforms(conn, case_id)
+    meta = next(r for r in res if r["owner"] == "Meta / Facebook")
+    assert meta["signal_source"] == "html_embedded"
+    assert meta["tracking_ids"] == ["1234567890123456"]
+    assert meta["param_keys"] == []
+
+
+def test_both_signals_merge_into_same_owner():
+    """fbclid in URL + Meta Pixel in HTML → one row, signal_source='both'."""
+    set_lang("en")
+    conn = _make_db()
+    case_id = _make_case(conn)
+    _add_with_snapshot(conn, case_id,
+                       "https://a.com/?fbclid=ABC",
+                       "https://a.com/?fbclid=ABC", "a.com",
+                       {"Meta Pixel": ["1234567890123456"]})
+    res = ad_tracking_platforms(conn, case_id)
+    meta_rows = [r for r in res if r["owner"] == "Meta / Facebook"]
+    assert len(meta_rows) == 1, "URL+HTML signals must collapse into ONE row"
+    meta = meta_rows[0]
+    assert meta["signal_source"] == "both"
+    assert "fbclid" in meta["param_keys"]
+    assert "1234567890123456" in meta["tracking_ids"]
+
+
+def test_html_platform_label_mapping():
+    """Google Analytics 4 (HTML) and utm_source (URL) collapse to 'Google Analytics'."""
+    set_lang("en")
+    conn = _make_db()
+    case_id = _make_case(conn)
+    _add_with_snapshot(conn, case_id,
+                       "https://a.com/?utm_source=fb",
+                       "https://a.com/?utm_source=fb", "a.com",
+                       {"Google Analytics 4": ["G-ABCD1234"]})
+    res = ad_tracking_platforms(conn, case_id)
+    ga = next(r for r in res if r["owner"] == "Google Analytics")
+    assert ga["signal_source"] == "both"
+    assert "G-ABCD1234" in ga["tracking_ids"]
+
+
+def test_gtm_html_only_keeps_distinct_label():
+    """GTM has no URL-param equivalent — its label stands alone."""
+    set_lang("en")
+    conn = _make_db()
+    case_id = _make_case(conn)
+    _add_with_snapshot(conn, case_id, "https://a.com/", "https://a.com/", "a.com",
+                       {"Google Tag Manager": ["GTM-ABCDEF"]})
+    res = ad_tracking_platforms(conn, case_id)
+    gtm = next(r for r in res if r["owner"] == "Google Tag Manager")
+    assert gtm["signal_source"] == "html_embedded"
+    assert gtm["tracking_ids"] == ["GTM-ABCDEF"]
 
 
 def test_generic_keys_use_unattributed_label():
