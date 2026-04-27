@@ -130,8 +130,13 @@ def _looks_like_placeholder(ident: str) -> bool:
     """Heuristic: reject ``G-XXXXXXXX``, ``GTM-EXAMPLE``, ``UA-XXXXX-X`` etc.
 
     A real operator's tracking ID should not collapse to a single repeated
-    character within any of its segments, nor match the canonical
-    placeholder labels seen in vendor documentation.
+    *alphabetic* character within any of its segments, nor match the
+    canonical placeholder labels seen in vendor documentation. The
+    repeated-character check is restricted to alphabetic runs because
+    repeated-digit IDs (e.g. ``AW-1111111111``, ``UA-1111111-1``) are
+    syntactically valid and have been observed in the wild — rare, but we
+    don't want to silently lose attribution evidence over a heuristic
+    (codex2 #3).
     """
     parts = ident.upper().split("-")
     if len(parts) < 2:
@@ -139,8 +144,10 @@ def _looks_like_placeholder(ident: str) -> bool:
     for part in parts[1:]:
         if not part:
             continue
-        if len(part) >= 3 and len(set(part)) == 1:
-            return True  # XXXX, ZZZ, 1111
+        # Repeated-character check — only when ALL chars are letters.
+        # XXXX / ZZZZ / VVVV trip; 1111 / 0000 / 9999 do not.
+        if len(part) >= 3 and len(set(part)) == 1 and part.isalpha():
+            return True
         if part in _PLACEHOLDER_TAILS:
             return True
     return False
