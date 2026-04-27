@@ -380,6 +380,11 @@ _EN: dict[str, str] = {
     "clusters.drill_asn": "Drill into ASN",
     "clusters.domains_asn": "**Domains hosted on AS{asn} ({n} total):**",
     "clusters.shortlinks_asn": "**Shortlinks pointing to this infrastructure ({total} total, {flagged} flagged):**",
+    "clusters.tls": "Shared TLS Certificates",
+    "clusters.tls_caption": "Landing domains that share a TLS certificate, or whose certificates were issued within a 24-hour window. Same-cert is the strongest cross-domain link (one server / one operator). Same-window suggests batch provisioning.",
+    "clusters.no_tls": "No shared TLS evidence found across landing domains.",
+    "clusters.tls_by_cert": "Same certificate covers multiple landing domains in this case",
+    "clusters.tls_by_window": "Distinct certs issued within 24 hours of each other",
 
     # ── Providers ───────────────────────────────────────────────────────────
     "prov.shortlinks": "Shortlink Providers",
@@ -426,6 +431,8 @@ _EN: dict[str, str] = {
     "insights.bullet_param": "**Cross-post parameters:** Most repeated is `{key}={value}`{owner} (found in {posts} distinct posts).",
     "insights.bullet_param_owner": ", attributed to {owner}",
     "insights.bullet_param2": "Followed by `{key}={value}`{owner} ({posts} posts).",
+    "insights.bullet_tls_cert": "**Shared TLS cert:** {n_certs} certificate(s) cover 2+ landing domains in this case (top: 1 cert → {domains} domains, issued by {issuer}). Strongest cross-domain link — same server / same operator.",
+    "insights.bullet_tls_window": "**Same-window cert issuance:** {n_windows} cluster(s) of certs issued within 24h (top: {certs} certs → {domains} domains). Suggests batch provisioning.",
     "insights.bullet_infra": "**Infrastructure:** By URL volume, **AS{asn}** ({org}) covers the most landing domains and shortlinks ({domains} domains, {urls} URLs).",
     "insights.bullet_no_scans": "No scanned URLs yet — run scans in the **Scan** tab to generate pattern summaries here.",
     "insights.gap_intel": "**{n}** scanned URLs still lack domain intel (WHOIS/ASN) — go to the **Domain** tab to query.",
@@ -707,6 +714,11 @@ _ZH: dict[str, str] = {
     "clusters.drill_asn": "展開 ASN",
     "clusters.domains_asn": "**託管於 AS{asn} 的網域（共 {n} 個）：**",
     "clusters.shortlinks_asn": "**指向此基礎設施的短連結（共 {total} 條，{flagged} 條有旗標）：**",
+    "clusters.tls": "共用 TLS 憑證",
+    "clusters.tls_caption": "共用 TLS 憑證、或憑證於 24 小時內陸續簽發的落地網域。共用同一張憑證是跨網域關聯最強的訊號（同一台伺服器／同一操作者）；同窗口簽發則提示批量上線。",
+    "clusters.no_tls": "未發現跨網域的 TLS 憑證關聯。",
+    "clusters.tls_by_cert": "同一張憑證涵蓋多個本案的落地網域",
+    "clusters.tls_by_window": "不同憑證於 24 小時內陸續簽發",
 
     # ── Providers ───────────────────────────────────────────────────────────
     "prov.shortlinks": "短連結服務商",
@@ -753,6 +765,8 @@ _ZH: dict[str, str] = {
     "insights.bullet_param": "**跨貼文參數：** 最常重複的是 `{key}={value}`{owner}（出現在 {posts} 則不同貼文）。",
     "insights.bullet_param_owner": "，歸屬 {owner}",
     "insights.bullet_param2": "其次為 `{key}={value}`{owner}（{posts} 則貼文）。",
+    "insights.bullet_tls_cert": "**共用 TLS 憑證：** 偵測到 {n_certs} 張憑證涵蓋 2 個以上落地網域（最多者：1 張憑證 → {domains} 個網域，由 {issuer} 簽發）。跨網域關聯最強訊號——同一台伺服器／同一操作者。",
+    "insights.bullet_tls_window": "**同窗口簽發憑證：** {n_windows} 組憑證於 24 小時內陸續簽發（最多者：{certs} 張憑證 → {domains} 個網域），提示批量上線。",
     "insights.bullet_infra": "**基礎設施：** 以流量／URL 量來看，**AS{asn}**（{org}）涵蓋最多落地網域與短連結（{domains} 網域、{urls} 條 URL）。",
     "insights.bullet_no_scans": "尚無完成掃描的 URL——請到 **掃描** 分頁執行掃描後，此處會出現模式摘要。",
     "insights.gap_intel": "**{n}** 筆已完成掃描但尚未執行網域情資（WHOIS／ASN）——請到「網域情報」分頁查詢。",

@@ -6,11 +6,13 @@ Factual grouping functions (no intent inference):
   shared_params()       : query param key+value pairs seen across 2+ distinct posts,
                           with platform attribution (owner/purpose) for known trackers
   asn_clusters()        : landing domains grouped by ASN
+  shared_certificates() : domains grouped by shared TLS cert / same-day issuance
   identify_param()      : map a URL parameter key to its known owner/purpose
 """
 import json
 import sqlite3
 from collections import defaultdict
+from datetime import datetime, timedelta
 from urllib.parse import parse_qs, urlparse
 
 from config import KNOWN_SHORTLINK_DOMAINS
@@ -351,3 +353,180 @@ def shared_params(conn: sqlite3.Connection, case_id: int) -> list:
         })
     results.sort(key=lambda x: (-x["post_count"], -x["url_count"]))
     return results
+
+
+# ---------------------------------------------------------------------------
+# Shared TLS certificates
+# ---------------------------------------------------------------------------
+# OpenSSL textual date: "Apr 27 00:00:00 2026 GMT". Single-digit days come back
+# with a doubled space ("Apr  7 ...") so we normalise whitespace before parsing.
+_OPENSSL_DATE_FORMATS = (
+    "%b %d %H:%M:%S %Y %Z",
+    "%b %d %H:%M:%S %Y",
+)
+
+
+def _parse_openssl_date(s: str | None) -> datetime | None:
+    if not s:
+        return None
+    normalised = " ".join(s.split())
+    for fmt in _OPENSSL_DATE_FORMATS:
+        try:
+            return datetime.strptime(normalised, fmt)
+        except (ValueError, TypeError):
+            continue
+    return None
+
+
+def _issuer_label(issuer_dict: dict | None) -> str:
+    """Friendly issuer label from a cert issuer DN dict."""
+    if not isinstance(issuer_dict, dict):
+        return ""
+    org = issuer_dict.get("organizationName") or ""
+    cn = issuer_dict.get("commonName") or ""
+    if isinstance(org, list):
+        org = org[0] if org else ""
+    if isinstance(cn, list):
+        cn = cn[0] if cn else ""
+    if org and cn and org != cn:
+        return f"{org} ({cn})"
+    return org or cn or ""
+
+
+def shared_certificates(conn: sqlite3.Connection, case_id: int) -> dict:
+    """
+    Group landing URLs by TLS certificate evidence.
+
+    Returns a dict with two cluster lists:
+      by_cert    : a single cert (same issuer + serialNumber) covers 2+ distinct
+                   landing domains in this case. Strongest signal — same server /
+                   same operator.
+      by_issuance: 2+ distinct certs were issued within a 24-hour window covering
+                   2+ distinct landing domains in this case. Suggests batch
+                   provisioning, even if certs are not literally the same.
+
+    Cluster order: by_cert sorted by domain_count desc; by_issuance sorted by
+    domain_count desc then cert_count desc.
+    """
+    rows = conn.execute(
+        """SELECT sr.tls_info_json, sr.final_url,
+                  ua.id AS ua_id,
+                  me.id AS post_id
+           FROM url_artifacts ua
+           JOIN message_evidence me ON me.id = ua.message_id
+           JOIN scan_runs sr ON sr.id = (
+               SELECT id FROM scan_runs
+               WHERE url_artifact_id = ua.id AND status = 'done'
+               ORDER BY id DESC LIMIT 1
+           )
+           WHERE ua.case_id = ?
+             AND sr.tls_info_json IS NOT NULL
+             AND TRIM(sr.tls_info_json) != ''""",
+        (case_id,),
+    ).fetchall()
+
+    cert_data: dict[tuple[str, str], dict] = {}
+
+    for r in rows:
+        try:
+            tls = json.loads(r["tls_info_json"])
+        except (ValueError, TypeError):
+            continue
+        if not isinstance(tls, dict):
+            continue
+        serial = (tls.get("serialNumber") or "").strip()
+        if not serial:
+            continue
+        domain = (urlparse(r["final_url"] or "").hostname or "").lower()
+        if not domain:
+            continue
+        issuer = _issuer_label(tls.get("issuer"))
+        key = (issuer, serial)
+
+        entry = cert_data.get(key)
+        if entry is None:
+            entry = {
+                "issuer":     issuer,
+                "serial":     serial,
+                "not_before": tls.get("notBefore") or "",
+                "not_after":  tls.get("notAfter") or "",
+                "san_list":   tls.get("subjectAltName") or [],
+                "domains":    set(),
+                "urls":       set(),
+                "posts":      set(),
+            }
+            cert_data[key] = entry
+        entry["domains"].add(domain)
+        entry["urls"].add(r["ua_id"])
+        entry["posts"].add(r["post_id"])
+
+    # ── Cluster A: same cert covering 2+ distinct domains ──────────────
+    by_cert: list[dict] = []
+    for entry in cert_data.values():
+        if len(entry["domains"]) < 2:
+            continue
+        by_cert.append({
+            "issuer":       entry["issuer"] or "—",
+            "serial":       entry["serial"],
+            "not_before":   entry["not_before"],
+            "not_after":    entry["not_after"],
+            "san_count":    len(entry["san_list"]),
+            "domains":      sorted(entry["domains"]),
+            "domain_count": len(entry["domains"]),
+            "url_count":    len(entry["urls"]),
+            "post_count":   len(entry["posts"]),
+        })
+    by_cert.sort(key=lambda x: (-x["domain_count"], -x["url_count"]))
+
+    # ── Cluster B: distinct certs issued within a 24h window ───────────
+    cert_records = []
+    for entry in cert_data.values():
+        nb = _parse_openssl_date(entry["not_before"])
+        if nb is None:
+            continue
+        cert_records.append({
+            "issuer":         entry["issuer"] or "—",
+            "serial":         entry["serial"],
+            "not_before_dt":  nb,
+            "not_before_str": entry["not_before"],
+            "domains":        sorted(entry["domains"]),
+        })
+    cert_records.sort(key=lambda x: x["not_before_dt"])
+
+    window_clusters: list[list[dict]] = []
+    current: list[dict] = []
+    for rec in cert_records:
+        if not current:
+            current = [rec]
+            continue
+        if rec["not_before_dt"] - current[0]["not_before_dt"] <= timedelta(hours=24):
+            current.append(rec)
+        else:
+            if len(current) >= 2:
+                window_clusters.append(current)
+            current = [rec]
+    if len(current) >= 2:
+        window_clusters.append(current)
+
+    by_issuance: list[dict] = []
+    for cluster in window_clusters:
+        all_domains: set[str] = set()
+        for rec in cluster:
+            all_domains.update(rec["domains"])
+        if len(all_domains) < 2:
+            continue
+        issuers = sorted({rec["issuer"] for rec in cluster})
+        by_issuance.append({
+            "window_start": cluster[0]["not_before_str"],
+            "window_end":   cluster[-1]["not_before_str"],
+            "cert_count":   len(cluster),
+            "domain_count": len(all_domains),
+            "domains":      sorted(all_domains),
+            "issuers":      ", ".join(issuers),
+        })
+    by_issuance.sort(key=lambda x: (-x["domain_count"], -x["cert_count"]))
+
+    return {
+        "by_cert":     by_cert,
+        "by_issuance": by_issuance,
+    }
