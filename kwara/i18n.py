@@ -406,6 +406,11 @@ _EN: dict[str, str] = {
     "prov.registrars": "Domain Registrars",
     "prov.registrars_caption": "Registrars whose customers registered the abuse destination domains.",
     "prov.no_registrars": "No registrar data yet. Query WHOIS in the **Domain** tab to populate.",
+    "prov.hosting": "Hosting Providers (ASN)",
+    "prov.hosting_caption": "Hosting providers / ASNs whose infrastructure currently hosts the landing domains. Use this to identify whom to escalate abuse reports to.",
+    "prov.no_hosting": "No ASN data yet. Run domain enrichment in the **Domain** tab.",
+    "prov.drill_hosting": "Drill into hosting provider",
+    "prov.hosting_domains": "**Domains hosted on AS{asn} ({n} total):**",
 
     # ── Export ──────────────────────────────────────────────────────────────
     "export.title": "Evidence Pack Export",
@@ -759,6 +764,11 @@ _ZH: dict[str, str] = {
     "prov.registrars": "網域註冊商",
     "prov.registrars_caption": "註冊了濫用落地網域的註冊商。",
     "prov.no_registrars": "尚無註冊商資料。請先到「網域情報」分頁查詢 WHOIS。",
+    "prov.hosting": "託管服務商（ASN）",
+    "prov.hosting_caption": "目前承載落地網域的託管商／ASN。可用來判斷該向哪個業者檢舉、發 abuse report。",
+    "prov.no_hosting": "尚無 ASN 資料。請先到「網域情報」分頁執行 enrichment。",
+    "prov.drill_hosting": "展開託管商",
+    "prov.hosting_domains": "**託管於 AS{asn} 的網域（共 {n} 個）：**",
 
     # ── Export ──────────────────────────────────────────────────────────────
     "export.title": "證據封包匯出",
