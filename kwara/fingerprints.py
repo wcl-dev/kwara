@@ -1,63 +1,103 @@
 """HTML tracking-ID extraction (kwara Phase 2).
 
-Pure-regex extraction of platform-specific tracking IDs embedded in
-landing-page HTML. No dependency on a JS engine or DOM parser — we
-match against the literal text of the saved HTML, which is sufficient
-because the standard pixel snippets all hard-code the ID as a string
-literal (``fbq('init', 'NNN…')``, ``gtag('config', 'G-…')``, etc).
+Regex extraction of platform-specific tracking IDs embedded in landing-page
+HTML. No JS engine or DOM parser dependency — the canonical pixel snippets
+all hard-code the ID as a string literal in a recognisable invocation
+context (``fbq('init', '…')``, ``gtag('config', '…')``, etc), so a
+context-anchored regex is sufficient and far cheaper.
 
 When *the same* tracking ID appears across multiple landing domains in
 a case, it identifies the operator's underlying ad / analytics account
 — a far harder signal to spoof than URL parameters or ASN, and the
 strongest evidence we can collect short of seizure.
 
-LIMITATION: extracts only what's visible in the captured HTML at
-snapshot time. Misses:
-  - IDs that JS builds at runtime from concatenated fragments
-    (rare — almost all pixel snippets ship the ID as a literal)
-  - IDs inside iframes whose document we did not capture
-  - IDs loaded after the capture timeout fired
+LIMITATIONS:
+  - Only what's visible in the captured HTML at snapshot time. Misses
+    IDs that JS builds at runtime from concatenated fragments (rare —
+    almost all pixel snippets ship the ID as a literal).
+  - IDs inside iframes whose document we did not capture.
+  - IDs loaded after the capture timeout fired.
+
+DESIGN NOTE — context anchoring (codex review fix #1):
+Earlier versions matched bare tokens like ``G-AB12CD34``. That's fine
+for UI hinting, but unsafe when the same string is later used as
+"same ID across multiple domains = same operator account" evidence
+because vendor docs, help pages, and code comments routinely contain
+plausible placeholders. Every pattern below now requires the ID to
+appear inside a real invocation (gtag/ga/fbq/ttq/gtm.js URL/quoted
+GTM container literal). Obvious placeholders (G-XXXXXXXX, GTM-EXAMPLE,
+all-same-char IDs) are filtered post-match.
 """
 from __future__ import annotations
 
 import re
 
 # Each entry: (platform_label, compiled regex, capturing-group index).
-# Order matters only for documentation; matches are independent.
+# A platform may appear multiple times — each row is one invocation
+# context that the same platform is matched against.
 _PATTERNS: list[tuple[str, re.Pattern, int]] = [
-    # Meta Pixel: fbq('init', '1234567890123456')
-    # Pixel IDs are numeric, length typically 15–17 digits.
+    # ── Meta Pixel ─────────────────────────────────────────────────────
+    # fbq('init', '1234567890123456')  — Pixel IDs are 15-17 digit numerics.
     (
         "Meta Pixel",
         re.compile(r"""fbq\s*\(\s*['"]init['"]\s*,\s*['"](\d{15,17})['"]"""),
         1,
     ),
-    # Google Analytics 4 measurement ID: G-XXXXXXXXXX
+    # ── Google Analytics 4 — measurement ID G-XXXXXXXX ─────────────────
+    # gtag('config', 'G-…')  / ga('create', 'G-…')
     (
         "Google Analytics 4",
-        re.compile(r"""\bG-[A-Z0-9]{6,12}\b"""),
-        0,
+        re.compile(
+            r"""(?:gtag|ga)\s*\(\s*['"](?:config|create)['"]\s*,\s*['"](G-[A-Z0-9]{6,12})['"]"""
+        ),
+        1,
     ),
-    # Universal Analytics tracking ID (legacy): UA-12345-1
+    # gtag.js loader URL: ?id=G-… ; collect URL: ?tid=G-…
+    (
+        "Google Analytics 4",
+        re.compile(r"""[?&](?:id|tid)=(G-[A-Z0-9]{6,12})\b"""),
+        1,
+    ),
+    # ── Google Analytics Universal (legacy UA-12345-1) ─────────────────
     (
         "Google Analytics (UA)",
-        re.compile(r"""\bUA-\d{4,12}-\d{1,4}\b"""),
-        0,
+        re.compile(
+            r"""(?:gtag|ga)\s*\(\s*['"](?:config|create)['"]\s*,\s*['"](UA-\d{4,12}-\d{1,4})['"]"""
+        ),
+        1,
     ),
-    # Google Tag Manager container: GTM-XXXXXX
+    (
+        "Google Analytics (UA)",
+        re.compile(r"""[?&]tid=(UA-\d{4,12}-\d{1,4})\b"""),
+        1,
+    ),
+    # ── Google Tag Manager — GTM-XXXXXX container ──────────────────────
+    # Standard snippet quotes the ID:
+    #   (function(w,d,s,l,i){...})(window,document,'script','dataLayer','GTM-XXXXXX');
     (
         "Google Tag Manager",
-        re.compile(r"""\bGTM-[A-Z0-9]{4,8}\b"""),
-        0,
+        re.compile(r"""['"](GTM-[A-Z0-9]{4,8})['"]"""),
+        1,
     ),
-    # Google Ads conversion ID: AW-1234567890
+    # Loader / noscript URLs: gtm.js?id=GTM-… , ns.html?id=GTM-…
+    (
+        "Google Tag Manager",
+        re.compile(r"""[?&]id=(GTM-[A-Z0-9]{4,8})\b"""),
+        1,
+    ),
+    # ── Google Ads conversion ID AW-XXXXXXXXX ──────────────────────────
     (
         "Google Ads",
-        re.compile(r"""\bAW-\d{9,12}\b"""),
-        0,
+        re.compile(r"""gtag\s*\(\s*['"]config['"]\s*,\s*['"](AW-\d{9,12})['"]"""),
+        1,
     ),
-    # TikTok Pixel: ttq.load('XXXXXXXXXXXXXXXXXXXX') — 15–25 chars,
-    # uppercase alphanumeric. Quoted form is what TikTok docs ship.
+    # send_to: 'AW-…/conversion_label'
+    (
+        "Google Ads",
+        re.compile(r"""['"]send_to['"]\s*:\s*['"](AW-\d{9,12})(?:/[^'"]*)?['"]"""),
+        1,
+    ),
+    # ── TikTok Pixel ttq.load('…') ─────────────────────────────────────
     (
         "TikTok Pixel",
         re.compile(r"""ttq\.load\s*\(\s*['"]([A-Z0-9]{15,25})['"]"""),
@@ -66,12 +106,43 @@ _PATTERNS: list[tuple[str, re.Pattern, int]] = [
 ]
 
 
+# Common placeholder tail tokens that vendor docs and help pages use as
+# "fill in your own ID here" examples. Anything matching is filtered out
+# post-match so it cannot become cross-domain attribution evidence.
+_PLACEHOLDER_TAILS = frozenset({
+    "EXAMPLE", "PLACEHOLDER", "YOURID", "YOUR_ID",
+    "TODO", "ABCDEFG", "ABCDEFGH", "ABCDEFGHI",
+    "00000000", "11111111", "12345678", "123456789",
+})
+
+
+def _looks_like_placeholder(ident: str) -> bool:
+    """Heuristic: reject ``G-XXXXXXXX``, ``GTM-EXAMPLE``, ``UA-XXXXX-X`` etc.
+
+    A real operator's tracking ID should not collapse to a single repeated
+    character within any of its segments, nor match the canonical
+    placeholder labels seen in vendor documentation.
+    """
+    parts = ident.upper().split("-")
+    if len(parts) < 2:
+        return False
+    for part in parts[1:]:
+        if not part:
+            continue
+        if len(part) >= 3 and len(set(part)) == 1:
+            return True  # XXXX, ZZZ, 1111
+        if part in _PLACEHOLDER_TAILS:
+            return True
+    return False
+
+
 def extract_tracking_ids(html: str) -> dict[str, list[str]]:
     """Return ``{platform_label: sorted_unique_ids}`` for every pattern hit.
 
     Empty dict if html is falsy or no pattern matched. Each platform's
     ID list is sorted and deduplicated within a single page (the same
-    Pixel ID appearing 5 times is one signal, not five).
+    Pixel ID appearing 5 times is one signal, not five). Obvious
+    placeholders are filtered.
     """
     if not html:
         return {}
@@ -82,8 +153,9 @@ def extract_tracking_ids(html: str) -> dict[str, list[str]]:
                 ident = m.group(group)
             except IndexError:
                 continue
-            if ident:
-                out.setdefault(label, set()).add(ident)
+            if not ident or _looks_like_placeholder(ident):
+                continue
+            out.setdefault(label, set()).add(ident)
     return {k: sorted(v) for k, v in out.items()}
 
 
