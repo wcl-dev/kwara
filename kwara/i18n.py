@@ -164,10 +164,6 @@ _EN: dict[str, str] = {
     "account_patterns.max_cols": "Show top N content IDs (by total posts)",
     "account_patterns.max_cols_help": "The full matrix can be wide; this only displays the most-posted columns. Adjust to see more.",
     "account_patterns.cols_truncated": "Showing {shown} of {total} content IDs. Adjust the slider above to expand.",
-    "account_patterns.timing": "Content Time Distribution",
-    "account_patterns.timing_caption": "Per content ID: how fast was it spread? Reports the shortest gap between any two consecutive posts (min_interval_minutes), the median gap, and total span. Interpret manually — a 3-minute min interval across 5 distinct accounts is suspicious; a 3-minute interval from one bot is not.",
-    "account_patterns.no_timing": "No content with 2+ timed posts. Need posted_at timestamps and at least one repeated content ID.",
-    "account_patterns.timing_note": "Note: timestamps come from the posted_at field of the imported message_evidence row. Only posts that parse successfully are counted.",
     "tab.investigate": "Investigate",
     "tab.clusters": "Clusters",
 
@@ -526,10 +522,6 @@ _ZH: dict[str, str] = {
     "account_patterns.max_cols": "顯示前 N 個內容 ID（依貼文總數排序）",
     "account_patterns.max_cols_help": "完整矩陣可能很寬，這裡只顯示最多被貼的欄位。需要時可調大。",
     "account_patterns.cols_truncated": "顯示 {shown} / {total} 個內容 ID。調整上方滑桿可展開更多。",
-    "account_patterns.timing": "內容時間分布",
-    "account_patterns.timing_caption": "每支內容的散布速度：最短連續貼文間隔（min_interval_minutes）、中位數、總跨度。**請自行判讀**——同一支內容 5 個帳號在 3 分鐘內貼可疑、單一 bot 帳號 3 分鐘間隔不可疑。",
-    "account_patterns.no_timing": "沒有內容滿足「2 篇以上含時間戳」的條件。",
-    "account_patterns.timing_note": "註：時間戳來自匯入時的 posted_at 欄位，僅納入能成功解析的貼文。",
     "tab.investigate": "調查",
     "tab.clusters": "聚合分析",
 
