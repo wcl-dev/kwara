@@ -909,3 +909,84 @@ def certificate_authorities(conn: sqlite3.Connection, case_id: int) -> list:
         })
     out.sort(key=lambda x: (-x["domain_count"], -x["url_count"]))
     return out
+
+
+def ad_tracking_platforms(conn: sqlite3.Connection, case_id: int) -> list:
+    """List ad / analytics platforms with footprint on this case's URLs.
+
+    Provider-lens companion to shared_params(): rather than flagging
+    cross-post reuse, this enumerates which platforms have signal on
+    the case's URLs based on identified URL parameters.
+
+    LIMITATION: only sees signals that travel in the URL itself
+    (utm_*, fbclid, gclid, af_*, _kx, …). Page-embedded tracking
+    (Meta Pixel ID in HTML, GA Property ID, GTM container) requires
+    HTML scraping which is a separate roadmap stage.
+
+    "generic" entries (uid, aff_id, ref, etc.) are surfaced under the
+    "Unattributed Tracker" label — known tracking semantics, unknown
+    operator.
+
+    Returns list sorted by url_count desc:
+      owner, param_keys (sorted), url_count, domain_count, post_count, domains
+    """
+    rows = conn.execute(
+        """SELECT ua.id AS ua_id, me.id AS post_id,
+                  ua.original_url, sr.final_url
+           FROM url_artifacts ua
+           JOIN message_evidence me ON me.id = ua.message_id
+           LEFT JOIN scan_runs sr ON sr.url_artifact_id = ua.id
+               AND sr.id = (
+                   SELECT id FROM scan_runs WHERE url_artifact_id = ua.id
+                   ORDER BY id DESC LIMIT 1
+               )
+           WHERE ua.case_id = ?""",
+        (case_id,),
+    ).fetchall()
+
+    # owner_label -> {param_keys: set, urls: set(ua_id), posts: set, domains: set}
+    by_owner: dict[str, dict] = {}
+
+    for r in rows:
+        observed_owners: set[tuple[str, str]] = set()  # (owner_label, param_key)
+        for url in (r["original_url"], r["final_url"]):
+            if not url:
+                continue
+            parsed = urlparse(url)
+            domain = (parsed.hostname or "").lower()
+            if not domain:
+                continue
+            for key, _vals in parse_qs(parsed.query).items():
+                if not key:
+                    continue
+                owner, _purpose_key = identify_param(key)
+                if not owner:
+                    continue  # truly unknown — skip
+                label = (
+                    t("param.unattributed_tracker")
+                    if owner == "generic" else owner
+                )
+                observed_owners.add((label, key))
+                entry = by_owner.setdefault(label, {
+                    "param_keys": set(),
+                    "urls":       set(),
+                    "posts":      set(),
+                    "domains":    set(),
+                })
+                entry["param_keys"].add(key)
+                entry["urls"].add(r["ua_id"])
+                entry["posts"].add(r["post_id"])
+                entry["domains"].add(domain)
+
+    out: list[dict] = []
+    for label, e in by_owner.items():
+        out.append({
+            "owner":        label,
+            "param_keys":   sorted(e["param_keys"]),
+            "url_count":    len(e["urls"]),
+            "post_count":   len(e["posts"]),
+            "domain_count": len(e["domains"]),
+            "domains":      sorted(e["domains"]),
+        })
+    out.sort(key=lambda x: (-x["url_count"], -x["domain_count"]))
+    return out

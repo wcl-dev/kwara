@@ -5,7 +5,7 @@ from urllib.parse import urlparse as _urlparse
 import pandas as pd
 import streamlit as st
 
-from clustering import asn_clusters, certificate_authorities
+from clustering import ad_tracking_platforms, asn_clusters, certificate_authorities
 from config import KNOWN_SHORTLINK_DOMAINS
 from i18n import t
 from views._shared import TAG_COLORS, scan_flags
@@ -138,6 +138,10 @@ def render(conn, case_id):
 
     st.divider()
 
+    _ad_tracking_section(conn, case_id)
+
+    st.divider()
+
     _hosting_section(conn, case_id)
 
     st.divider()
@@ -209,3 +213,36 @@ def _ca_section(conn, case_id):
     with st.container(border=True):
         st.write(t("prov.ca_domains", issuer=sel, n=len(sel_c["domains"])))
         st.dataframe(pd.DataFrame(sel_c["domains"]), use_container_width=True, hide_index=True)
+
+
+def _ad_tracking_section(conn, case_id):
+    """Ad / analytics platforms identified via URL parameters."""
+    st.subheader(t("prov.ad_tracking"))
+    st.caption(t("prov.ad_tracking_caption"))
+    st.warning(t("prov.ad_tracking_caveat"))
+
+    platforms = ad_tracking_platforms(conn, case_id)
+    if not platforms:
+        st.info(t("prov.no_ad_tracking"))
+        return
+
+    summary = []
+    for p in platforms:
+        summary.append({
+            "owner":      p["owner"],
+            "param_keys": ", ".join(p["param_keys"]),
+            "urls":       p["url_count"],
+            "domains":    p["domain_count"],
+            "posts":      p["post_count"],
+        })
+    st.dataframe(pd.DataFrame(summary), use_container_width=True, hide_index=True)
+
+    sel = st.selectbox(
+        t("prov.drill_ad_tracking"),
+        [p["owner"] for p in platforms],
+        key="prov_ad_sel",
+    )
+    sel_p = next(p for p in platforms if p["owner"] == sel)
+    with st.container(border=True):
+        st.write(t("prov.ad_tracking_domains", owner=sel, n=len(sel_p["domains"])))
+        st.dataframe(pd.DataFrame(sel_p["domains"]), use_container_width=True, hide_index=True)
