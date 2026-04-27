@@ -2,10 +2,17 @@
 import pandas as pd
 import streamlit as st
 
-from clustering import asn_clusters, shared_destinations, shared_params
+from clustering import asn_clusters, shared_certificates, shared_destinations, shared_params
 from i18n import t
 from insights import case_insights
 from views._shared import TAG_COLORS
+
+
+def _short_serial(serial: str, head: int = 8, tail: int = 4) -> str:
+    """Truncate a long cert serial for table display while keeping it identifiable."""
+    if not serial or len(serial) <= head + tail + 1:
+        return serial
+    return f"{serial[:head]}…{serial[-tail:]}"
 
 
 def render(conn, case_id):
@@ -14,6 +21,7 @@ def render(conn, case_id):
     destinations, unresolved_dests = shared_destinations(conn, case_id)
     params = shared_params(conn, case_id)
     asn_data = asn_clusters(conn, case_id)
+    certs = shared_certificates(conn, case_id)
 
     # ── Case Insights ───────────────────────────────────────────
     ci = case_insights(conn, case_id)
@@ -103,6 +111,47 @@ def render(conn, case_id):
         st.info(t("clusters.no_params"))
     else:
         st.dataframe(pd.DataFrame(params), use_container_width=True, hide_index=True)
+
+    st.divider()
+
+    # ── Shared TLS Certificates ─────────────────────────────────
+    st.subheader(t("clusters.tls"))
+    st.caption(t("clusters.tls_caption"))
+
+    by_cert = certs.get("by_cert") or []
+    by_issuance = certs.get("by_issuance") or []
+
+    if not by_cert and not by_issuance:
+        st.info(t("clusters.no_tls"))
+    else:
+        if by_cert:
+            st.markdown(f"**{t('clusters.tls_by_cert')}**")
+            cert_rows = []
+            for c in by_cert:
+                cert_rows.append({
+                    "issuer":       c["issuer"],
+                    "serial":       _short_serial(c["serial"]),
+                    "domains":      c["domain_count"],
+                    "san_total":    c["san_count"],
+                    "not_before":   c["not_before"],
+                    "posts":        c["post_count"],
+                    "domain_list":  ", ".join(c["domains"]),
+                })
+            st.dataframe(pd.DataFrame(cert_rows), use_container_width=True, hide_index=True)
+
+        if by_issuance:
+            st.markdown(f"**{t('clusters.tls_by_window')}**")
+            win_rows = []
+            for w in by_issuance:
+                win_rows.append({
+                    "window_start": w["window_start"],
+                    "window_end":   w["window_end"],
+                    "certs":        w["cert_count"],
+                    "domains":      w["domain_count"],
+                    "issuers":      w["issuers"],
+                    "domain_list":  ", ".join(w["domains"]),
+                })
+            st.dataframe(pd.DataFrame(win_rows), use_container_width=True, hide_index=True)
 
     st.divider()
 
