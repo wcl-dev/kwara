@@ -57,6 +57,12 @@ _PARAM_EXACT: dict[str, tuple[str, str]] = {
     # Mailchimp
     "mc_cid":       ("Mailchimp", "param.campaign_id"),
     "mc_eid":       ("Mailchimp", "param.recipient_id"),
+    # LINE LIFF (Front-end Framework) — official LINE platform parameter
+    # https://developers.line.biz/en/docs/liff/
+    "liffid":       ("LINE LIFF", "param.liff_app_id"),
+    # Klaviyo — email marketing platform
+    "_kx":          ("Klaviyo", "param.klaviyo_subscriber"),
+    "kxidcid":      ("Klaviyo", "param.klaviyo_id"),
     # Common affiliate / tracking
     "ref":          ("generic", "param.referral_affiliate"),
     "aff":          ("generic", "param.affiliate_code"),
@@ -71,12 +77,19 @@ _PARAM_EXACT: dict[str, tuple[str, str]] = {
 }
 
 # Prefix-match table: if the key starts with this prefix -> (owner, i18n_key)
+# Order matters — first match wins; place specific prefixes before generic ones.
 _PARAM_PREFIX: list[tuple[str, str, str]] = [
-    ("utm_",  "Google Analytics", "param.utm_tracking"),
-    ("hsa_",  "HubSpot",          "param.hubspot_ad"),
-    ("mc_",   "Mailchimp",        "param.mailchimp_tracking"),
-    ("fb_",   "Meta / Facebook",  "param.facebook_tracking"),
-    ("_ga",   "Google Analytics",  "param.ga_tracking"),
+    ("utm_",     "Google Analytics", "param.utm_tracking"),
+    ("hsa_",     "HubSpot",          "param.hubspot_ad"),
+    ("mc_",      "Mailchimp",        "param.mailchimp_tracking"),
+    ("fb_",      "Meta / Facebook",  "param.facebook_tracking"),
+    ("_ga",      "Google Analytics", "param.ga_tracking"),
+    # AppsFlyer — industry-standard mobile measurement partner. Used by
+    # Shopee, Foodpanda and most app campaigns. Keys: af_siteid, af_sub_siteid,
+    # af_click_lookback, af_xp, af_channel, etc.
+    ("af_",      "AppsFlyer",        "param.appsflyer_attribution"),
+    # Klaviyo — secondary key prefix beyond _kx
+    ("klaviyo_", "Klaviyo",          "param.klaviyo_tracking"),
 ]
 
 
