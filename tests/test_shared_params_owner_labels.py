@@ -72,7 +72,7 @@ def test_generic_table_hit_marked_generic_kind():
     r = _row_for(shared_params(conn, case_id), "uid")
     assert r is not None
     assert r["owner_kind"] == OWNER_KIND_GENERIC
-    assert r["owner"] == ""  # not a vendor — UI renders via owner_kind
+    assert r["platform_id"] == "generic"
     assert r["purpose_key"] == "param.user_tracking_id"
 
 
@@ -84,12 +84,13 @@ def test_unknown_key_marked_unknown_kind():
     r = _row_for(shared_params(conn, case_id), "xyz_weird_token")
     assert r is not None
     assert r["owner_kind"] == OWNER_KIND_UNKNOWN
-    assert r["owner"] == ""
+    assert r["platform_id"] == ""
     assert r["purpose_key"] == ""
 
 
-def test_known_platform_marked_platform_kind_with_raw_owner():
-    """utm_source → OWNER_KIND_PLATFORM, raw owner is the English vendor name."""
+def test_known_platform_marked_platform_kind_with_canonical_id():
+    """utm_source → OWNER_KIND_PLATFORM, canonical platform_id."""
+    from param_attribution import PLATFORM_GOOGLE_ANALYTICS
     conn = _make_db()
     case_id = _make_case(conn)
     _add_post(conn, case_id, "https://example.com/?utm_source=newsletter")
@@ -97,11 +98,12 @@ def test_known_platform_marked_platform_kind_with_raw_owner():
     r = _row_for(shared_params(conn, case_id), "utm_source")
     assert r is not None
     assert r["owner_kind"] == OWNER_KIND_PLATFORM
-    assert r["owner"] == "Google Analytics"
+    assert r["platform_id"] == PLATFORM_GOOGLE_ANALYTICS
     assert r["purpose_key"] == "param.traffic_source"
 
 
 def test_three_kinds_coexist_in_same_case():
+    from param_attribution import PLATFORM_GOOGLE_ANALYTICS
     conn = _make_db()
     case_id = _make_case(conn)
     _add_post(conn, case_id,
@@ -109,10 +111,10 @@ def test_three_kinds_coexist_in_same_case():
     _add_post(conn, case_id,
               "https://example.com/?utm_source=fb&aff_id=A1&xyz_weird=1")
     by_key = {r["param_key"]: r for r in shared_params(conn, case_id)}
-    assert by_key["utm_source"]["owner_kind"] == OWNER_KIND_PLATFORM
-    assert by_key["utm_source"]["owner"]      == "Google Analytics"
-    assert by_key["aff_id"]["owner_kind"]     == OWNER_KIND_GENERIC
-    assert by_key["xyz_weird"]["owner_kind"]  == OWNER_KIND_UNKNOWN
+    assert by_key["utm_source"]["owner_kind"]  == OWNER_KIND_PLATFORM
+    assert by_key["utm_source"]["platform_id"] == PLATFORM_GOOGLE_ANALYTICS
+    assert by_key["aff_id"]["owner_kind"]      == OWNER_KIND_GENERIC
+    assert by_key["xyz_weird"]["owner_kind"]   == OWNER_KIND_UNKNOWN
 
 
 def test_clustering_output_does_not_depend_on_active_language():
