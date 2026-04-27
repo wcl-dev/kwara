@@ -841,3 +841,71 @@ def shared_certificates(conn: sqlite3.Connection, case_id: int) -> dict:
         "by_cert":     by_cert,
         "by_issuance": by_issuance,
     }
+
+
+def certificate_authorities(conn: sqlite3.Connection, case_id: int) -> list:
+    """List CAs that signed TLS certs for the case's landing domains.
+
+    Provider-lens companion to shared_certificates(): rather than flagging
+    cross-domain reuse, this just enumerates which CAs are involved and
+    how widely. Useful for accountability mapping (which CA's policies
+    apply to this campaign).
+
+    Returns list of dicts sorted by domain_count desc:
+      issuer, domain_count, url_count, cert_count, domains, earliest_notBefore
+    """
+    rows = conn.execute(
+        """SELECT sr.tls_info_json, sr.final_url, ua.id AS ua_id
+           FROM url_artifacts ua
+           JOIN scan_runs sr ON sr.id = (
+               SELECT id FROM scan_runs
+               WHERE url_artifact_id = ua.id AND status = 'done'
+               ORDER BY id DESC LIMIT 1
+           )
+           WHERE ua.case_id = ?
+             AND sr.tls_info_json IS NOT NULL
+             AND TRIM(sr.tls_info_json) != ''""",
+        (case_id,),
+    ).fetchall()
+
+    # issuer_label -> {serials: set, domains: set, urls: set, earliest: datetime|None}
+    by_issuer: dict[str, dict] = {}
+    for r in rows:
+        try:
+            tls = json.loads(r["tls_info_json"])
+        except (ValueError, TypeError):
+            continue
+        if not isinstance(tls, dict):
+            continue
+        issuer = _issuer_label(tls.get("issuer")) or "—"
+        serial = (tls.get("serialNumber") or "").strip()
+        domain = (urlparse(r["final_url"] or "").hostname or "").lower()
+        if not domain:
+            continue
+        nb = _parse_openssl_date(tls.get("notBefore"))
+
+        entry = by_issuer.setdefault(issuer, {
+            "serials": set(),
+            "domains": set(),
+            "urls":    set(),
+            "earliest": None,
+        })
+        if serial:
+            entry["serials"].add(serial)
+        entry["domains"].add(domain)
+        entry["urls"].add(r["ua_id"])
+        if nb is not None and (entry["earliest"] is None or nb < entry["earliest"]):
+            entry["earliest"] = nb
+
+    out: list[dict] = []
+    for issuer, e in by_issuer.items():
+        out.append({
+            "issuer":              issuer,
+            "domain_count":        len(e["domains"]),
+            "url_count":           len(e["urls"]),
+            "cert_count":          len(e["serials"]),
+            "domains":             sorted(e["domains"]),
+            "earliest_notBefore":  (e["earliest"].strftime("%Y-%m-%d") if e["earliest"] else ""),
+        })
+    out.sort(key=lambda x: (-x["domain_count"], -x["url_count"]))
+    return out

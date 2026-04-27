@@ -5,7 +5,7 @@ from urllib.parse import urlparse as _urlparse
 import pandas as pd
 import streamlit as st
 
-from clustering import asn_clusters
+from clustering import asn_clusters, certificate_authorities
 from config import KNOWN_SHORTLINK_DOMAINS
 from i18n import t
 from views._shared import TAG_COLORS, scan_flags
@@ -140,6 +140,10 @@ def render(conn, case_id):
 
     _hosting_section(conn, case_id)
 
+    st.divider()
+
+    _ca_section(conn, case_id)
+
 
 def _hosting_section(conn, case_id):
     """Hosting providers (ASN-based) — accountability lens on infra."""
@@ -172,4 +176,36 @@ def _hosting_section(conn, case_id):
 
     with st.container(border=True):
         st.write(t("prov.hosting_domains", asn=sel, n=len(sel_c["domains"])))
+        st.dataframe(pd.DataFrame(sel_c["domains"]), use_container_width=True, hide_index=True)
+
+
+def _ca_section(conn, case_id):
+    """Certificate authorities — accountability lens on TLS issuers."""
+    st.subheader(t("prov.cas"))
+    st.caption(t("prov.cas_caption"))
+
+    cas = certificate_authorities(conn, case_id)
+    if not cas:
+        st.info(t("prov.no_cas"))
+        return
+
+    summary = []
+    for c in cas:
+        summary.append({
+            "issuer":           c["issuer"],
+            "domains":          c["domain_count"],
+            "urls":             c["url_count"],
+            "certs":            c["cert_count"],
+            "earliest_issued":  c["earliest_notBefore"] or "—",
+        })
+    st.dataframe(pd.DataFrame(summary), use_container_width=True, hide_index=True)
+
+    sel = st.selectbox(
+        t("prov.drill_ca"),
+        [c["issuer"] for c in cas],
+        key="prov_ca_sel",
+    )
+    sel_c = next(c for c in cas if c["issuer"] == sel)
+    with st.container(border=True):
+        st.write(t("prov.ca_domains", issuer=sel, n=len(sel_c["domains"])))
         st.dataframe(pd.DataFrame(sel_c["domains"]), use_container_width=True, hide_index=True)
