@@ -79,11 +79,16 @@ _PATTERNS: list[tuple[str, re.Pattern, int]] = [
         1,
     ),
     # ── Google Tag Manager — GTM-XXXXXX container ──────────────────────
-    # Standard snippet quotes the ID:
-    #   (function(w,d,s,l,i){...})(window,document,'script','dataLayer','GTM-XXXXXX');
+    # Standard snippet ends with the 'dataLayer' literal followed by the
+    # container ID: `(...)(window,document,'script','dataLayer','GTM-…')`
+    # Anchoring to the 'dataLayer' literal (codex2 follow-up) prevents
+    # arbitrary quoted GTM-… strings in unrelated JSON / data-attributes
+    # from being treated as evidence.
     (
         "Google Tag Manager",
-        re.compile(r"""['"](GTM-[A-Z0-9]{4,8})['"]"""),
+        re.compile(
+            r"""['"]dataLayer['"]\s*,\s*['"](GTM-[A-Z0-9]{4,8})['"]"""
+        ),
         1,
     ),
     # Loader / noscript URLs: gtm.js?id=GTM-… , ns.html?id=GTM-…

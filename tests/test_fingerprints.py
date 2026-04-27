@@ -137,12 +137,25 @@ def test_gtm_query_id_NOT_on_google_host_does_NOT_match():
     assert extract_tracking_ids(html) == {}
 
 
-def test_gtm_in_quoted_container_id():
-    # Use a realistic-looking GTM ID — sequential-letter examples like
-    # GTM-ABCDEFG match the placeholder filter, which is the correct
-    # behaviour for vendor doc examples.
+def test_gtm_in_standard_snippet_after_datalayer():
+    """Standard Google snippet ends with 'dataLayer','GTM-…' — anchored match."""
     html = """})(window,document,'script','dataLayer','GTM-K7L5RZP');"""
     assert extract_tracking_ids(html) == {"Google Tag Manager": ["GTM-K7L5RZP"]}
+
+
+def test_gtm_quoted_without_dataLayer_context_does_NOT_match():
+    """Codex2 follow-up: a bare quoted 'GTM-…' in a JSON config or data
+    attribute must NOT be picked up — only the canonical snippet form
+    (preceded by 'dataLayer') and the gtm.js / ns.html URL form qualify."""
+    # JSON config blob mentioning a GTM-like ID
+    html = """<script>var cfg = {"my_gtm_id": "GTM-K7L5RZP"};</script>"""
+    assert extract_tracking_ids(html) == {}
+
+
+def test_gtm_in_data_attribute_does_NOT_match():
+    """data-gtm-id="GTM-…" attribute alone is not a real init call."""
+    html = """<div data-gtm-id="GTM-K7L5RZP">tracker</div>"""
+    assert extract_tracking_ids(html) == {}
 
 
 def test_gtm_bare_token_in_plaintext_does_NOT_match():
