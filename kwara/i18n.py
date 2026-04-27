@@ -411,6 +411,11 @@ _EN: dict[str, str] = {
     "prov.no_hosting": "No ASN data yet. Run domain enrichment in the **Domain** tab.",
     "prov.drill_hosting": "Drill into hosting provider",
     "prov.hosting_domains": "**Domains hosted on AS{asn} ({n} total):**",
+    "prov.cas": "Certificate Authorities",
+    "prov.cas_caption": "CAs that signed TLS certificates for the case's landing domains. Patterns here (e.g. 'all certs from Google Trust Services WE1') often indicate shared CDN/hosting fronts.",
+    "prov.no_cas": "No TLS certificate data yet. Run scans in the **Scan** tab.",
+    "prov.drill_ca": "Drill into CA",
+    "prov.ca_domains": "**Domains signed by `{issuer}` ({n} total):**",
 
     # ── Export ──────────────────────────────────────────────────────────────
     "export.title": "Evidence Pack Export",
@@ -769,6 +774,11 @@ _ZH: dict[str, str] = {
     "prov.no_hosting": "尚無 ASN 資料。請先到「網域情報」分頁執行 enrichment。",
     "prov.drill_hosting": "展開託管商",
     "prov.hosting_domains": "**託管於 AS{asn} 的網域（共 {n} 個）：**",
+    "prov.cas": "憑證機構（CA）",
+    "prov.cas_caption": "簽發本案落地網域 TLS 憑證的 CA。模式（如「全部憑證來自 Google Trust Services WE1」）通常指向共用 CDN/託管前端。",
+    "prov.no_cas": "尚無 TLS 憑證資料。請先在「掃描」分頁執行掃描。",
+    "prov.drill_ca": "展開 CA",
+    "prov.ca_domains": "**由 `{issuer}` 簽發的網域（共 {n} 個）：**",
 
     # ── Export ──────────────────────────────────────────────────────────────
     "export.title": "證據封包匯出",
