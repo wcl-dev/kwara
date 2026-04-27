@@ -416,6 +416,12 @@ _EN: dict[str, str] = {
     "prov.no_cas": "No TLS certificate data yet. Run scans in the **Scan** tab.",
     "prov.drill_ca": "Drill into CA",
     "prov.ca_domains": "**Domains signed by `{issuer}` ({n} total):**",
+    "prov.ad_tracking": "Ad / Tracking Platforms",
+    "prov.ad_tracking_caption": "Ad / analytics platforms whose tracking parameters appear in the case's URLs. Useful for trust-and-safety reporting (e.g. 'Meta, your ad system processed clicks for these scam URLs').",
+    "prov.ad_tracking_caveat": "⚠️ URL-parameter signal only. Page-embedded tracking (Meta Pixel ID in HTML, GA Property ID, GTM container) is not yet extracted — that requires HTML scraping (planned).",
+    "prov.no_ad_tracking": "No identified ad/tracking parameters in the case URLs.",
+    "prov.drill_ad_tracking": "Drill into platform",
+    "prov.ad_tracking_domains": "**Domains carrying `{owner}` parameters ({n} total):**",
 
     # ── Export ──────────────────────────────────────────────────────────────
     "export.title": "Evidence Pack Export",
@@ -779,6 +785,12 @@ _ZH: dict[str, str] = {
     "prov.no_cas": "尚無 TLS 憑證資料。請先在「掃描」分頁執行掃描。",
     "prov.drill_ca": "展開 CA",
     "prov.ca_domains": "**由 `{issuer}` 簽發的網域（共 {n} 個）：**",
+    "prov.ad_tracking": "廣告／追蹤平台",
+    "prov.ad_tracking_caption": "在本案 URL 中可見追蹤參數的廣告／分析平台。可用於對平台檢舉（例：「Meta，你的廣告系統處理過這些詐騙 URL 的點擊」）。",
+    "prov.ad_tracking_caveat": "⚠️ 僅為 URL 參數訊號。頁面內嵌的追蹤碼（HTML 裡的 Meta Pixel ID、GA Property ID、GTM container）尚未抽取——需 HTML 解析（規劃中）。",
+    "prov.no_ad_tracking": "本案 URL 中未發現可辨識的廣告／追蹤參數。",
+    "prov.drill_ad_tracking": "展開平台",
+    "prov.ad_tracking_domains": "**帶有 `{owner}` 參數的網域（共 {n} 個）：**",
 
     # ── Export ──────────────────────────────────────────────────────────────
     "export.title": "證據封包匯出",
