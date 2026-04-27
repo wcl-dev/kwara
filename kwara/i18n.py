@@ -207,6 +207,13 @@ _EN: dict[str, str] = {
     "page.scan_first": "Scan URLs first.",
     "page.btn_batch": "Capture all ({n} pending)",
     "page.warn_time": "Capturing {n} URLs takes roughly {lo}–{hi} minutes.",
+    "page.lightweight_header": "Lightweight HTML-only fetch",
+    "page.lightweight_caption": "Fast alternative: pulls landing-page HTML over plain HTTP and runs the same pixel/GA fingerprint extraction — no browser, no screenshot, no HAR. ~10× faster than the full Playwright capture above. Trade-off: JS-injected tracking (GTM-loaded GA4, SPA-hydrated Pixels) is invisible; only IDs statically embedded in the HTML are caught. Use this when you want quick attribution analysis on a large URL list and don't need screenshot evidence.",
+    "page.btn_lightweight": "Fast HTML extract ({n} un-snapshotted URLs)",
+    "page.lightweight_none_unsnapped": "All scanned URLs already have at least one snapshot — nothing to do here.",
+    "page.lightweight_advanced_expander": "Re-extract on URLs that already have a snapshot ({n}) — advanced",
+    "page.lightweight_shadow_warning": "⚠️ Each URL listed here already has a snapshot. Running lightweight fetch creates a NEW snapshot row that may shadow earlier evidence in pixel-ID aggregations (the latest-usable selector picks the newest snapshot with tracking IDs). If the existing snapshot's HTML had IDs that lightweight can't see (typically: GTM-loaded GA4), running this will hide them. Recommended only when the existing snapshot is empty or you want to refresh.",
+    "page.btn_lightweight_already_snapped": "Re-fetch ({n} URLs) — I understand the warning",
 
     # ── Corroboration sub-tab ──────────────────────────────────────────────
     "corr.done": "Corroborated",
@@ -590,6 +597,13 @@ _ZH: dict[str, str] = {
     "page.scan_first": "請先掃描 URL。",
     "page.btn_batch": "批次截圖（{n} 筆待處理）",
     "page.warn_time": "截圖 {n} 條 URL 預計需要 {lo}–{hi} 分鐘。",
+    "page.lightweight_header": "輕量 HTML-only 擷取",
+    "page.lightweight_caption": "快速替代路徑：用 plain HTTP 抓落地頁的 HTML，跑跟上面一樣的 pixel/GA 指紋抽取——**不啟動瀏覽器、不存截圖、不存 HAR**。比上面的 Playwright 完整擷取快約 10 倍。代價：JS 注入的追蹤碼（GTM 載入的 GA4、SPA hydration 後注入的 Pixel）抓不到，**只能抓到 HTML 中靜態寫死的 ID**。適用情境：想對大量 URL 快速做歸屬分析、不需要截圖證據時。",
+    "page.btn_lightweight": "快速擷取 HTML（{n} 條尚未截圖的 URL）",
+    "page.lightweight_none_unsnapped": "所有掃過的 URL 都已至少擷取過一次——這裡沒事可做。",
+    "page.lightweight_advanced_expander": "對已有截圖的 URL 重新擷取（{n} 條）— 進階",
+    "page.lightweight_shadow_warning": "⚠️ 列在這裡的 URL 都**已經**有 snapshot。執行輕量擷取會新增一筆 snapshot row，可能在 pixel-ID 聚合中**遮蔽掉先前的證據**（latest-usable 選最新的有 tracking IDs 的 snapshot）。如果舊 snapshot 的 HTML 有 ID 但輕量擷取看不到（通常是 GTM 載入的 GA4），執行後就會看不見。**建議只有在舊 snapshot 是空的、或你想刷新內容時才用。**",
+    "page.btn_lightweight_already_snapped": "重新擷取（{n} 條）— 我理解警告",
 
     "corr.done": "已佐證",
     "corr.pending": "待佐證",

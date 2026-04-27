@@ -27,12 +27,19 @@ def migrate_db(conn: sqlite3.Connection) -> None:
         ("capture_detail", "TEXT"),
         ("har_path", "TEXT"),
         ("tracking_ids_json", "TEXT"),
+        ("capture_method", "TEXT"),
     ]
     for col, defn in new_cols:
         try:
             conn.execute(f"ALTER TABLE snapshots ADD COLUMN {col} {defn}")
         except sqlite3.OperationalError:
             pass  # column already exists
+    # Backfill existing rows: anything pre-dating capture_method came from
+    # the Playwright path. Idempotent — only fills NULLs.
+    conn.execute(
+        "UPDATE snapshots SET capture_method = 'playwright' "
+        "WHERE capture_method IS NULL"
+    )
     scan_run_cols = [
         ("whois_registrar", "TEXT"),
         ("whois_creation_date", "TEXT"),
