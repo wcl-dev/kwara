@@ -9,13 +9,14 @@ Factual grouping functions (no intent inference):
   shared_certificates() : domains grouped by shared TLS cert / same-day issuance
   identify_param()      : map a URL parameter key to its known owner/purpose
 """
+import hashlib
 import json
 import sqlite3
 from collections import defaultdict
 from datetime import datetime, timedelta
 from urllib.parse import parse_qs, urlparse
 
-from config import KNOWN_SHORTLINK_DOMAINS
+from config import KNOWN_SHORTLINK_DOMAINS, PARAM_VALUE_HASH_THRESHOLD
 from i18n import t
 
 # ---------------------------------------------------------------------------
@@ -290,12 +291,31 @@ def asn_clusters(conn: sqlite3.Connection, case_id: int) -> list:
     return result
 
 
+def _normalize_param_value(val: str) -> tuple[str, str]:
+    """Return (comparison_key, display_value) for a query parameter value.
+
+    Long values (e.g. base64 tokens, JWTs, encrypted affiliate IDs) are
+    compared by their SHA-256 prefix so two posts carrying the same opaque
+    token still cluster together — but the rendered table shows the hash
+    rather than the raw token to avoid blowing out column width.
+    """
+    if val is None:
+        return "", ""
+    if len(val) <= PARAM_VALUE_HASH_THRESHOLD:
+        return val, val
+    digest = hashlib.sha256(val.encode("utf-8", errors="replace")).hexdigest()[:8]
+    return f"__hash__:{digest}", f"[hash:{digest}…]"
+
+
 def shared_params(conn: sqlite3.Connection, case_id: int) -> list:
     """
     Find query parameter key+value pairs that appear across 2+ distinct posts.
     Checks both original_url (shortlink) and final_url (destination).
 
-    Filters out noise: single-char keys, values > 100 chars.
+    Empty keys are skipped. Long values are compared by SHA-256 prefix so
+    opaque tokens (Shopee affiliate, SendGrid click tracking, JWTs) still
+    cluster — see _normalize_param_value().
+
     Returns list sorted by post_count desc.
     """
     rows = conn.execute(
@@ -311,9 +331,10 @@ def shared_params(conn: sqlite3.Connection, case_id: int) -> list:
         (case_id,),
     ).fetchall()
 
-    param_posts   = defaultdict(set)
-    param_urls    = defaultdict(set)
-    param_domains = defaultdict(set)
+    param_posts:   defaultdict[tuple[str, str], set] = defaultdict(set)
+    param_urls:    defaultdict[tuple[str, str], set] = defaultdict(set)
+    param_domains: defaultdict[tuple[str, str], set] = defaultdict(set)
+    param_display: dict[tuple[str, str], str] = {}
 
     for r in rows:
         for url in (r["original_url"], r["final_url"]):
@@ -322,21 +343,23 @@ def shared_params(conn: sqlite3.Connection, case_id: int) -> list:
             parsed = urlparse(url)
             domain = parsed.hostname or ""
             for key, values in parse_qs(parsed.query).items():
-                if len(key) <= 1:
+                if not key:
                     continue
                 for val in values:
-                    if len(val) > 100:
-                        continue
-                    param_posts[(key, val)].add(r["post_id"])
-                    param_urls[(key, val)].add(url)
-                    param_domains[(key, val)].add(domain)
+                    cmp_val, display_val = _normalize_param_value(val)
+                    bucket = (key, cmp_val)
+                    param_posts[bucket].add(r["post_id"])
+                    param_urls[bucket].add(url)
+                    param_domains[bucket].add(domain)
+                    param_display.setdefault(bucket, display_val)
 
     results = []
-    for (k, v), posts in param_posts.items():
+    for bucket, posts in param_posts.items():
         if len(posts) < 2:
             continue
+        k, _cmp = bucket
         owner, purpose_key = identify_param(k)
-        domains = sorted(param_domains[(k, v)])
+        domains = sorted(param_domains[bucket])
         if not owner or owner == "generic":
             owner = t("param.unrecognized_platform")
             purpose = t("param.unidentified")
@@ -344,12 +367,12 @@ def shared_params(conn: sqlite3.Connection, case_id: int) -> list:
             purpose = t(purpose_key) if purpose_key else ""
         results.append({
             "param_key":   k,
-            "param_value": v,
+            "param_value": param_display.get(bucket, ""),
             "owner":       owner,
             "purpose":     purpose,
             "domains":     ", ".join(domains),
             "post_count":  len(posts),
-            "url_count":   len(param_urls[(k, v)]),
+            "url_count":   len(param_urls[bucket]),
         })
     results.sort(key=lambda x: (-x["post_count"], -x["url_count"]))
     return results

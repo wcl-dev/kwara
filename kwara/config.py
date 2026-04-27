@@ -94,6 +94,17 @@ TRACKER_DOMAINS: frozenset[str] = frozenset({
 HIGH_TRACKER_THRESHOLD: int = 3
 
 
+# ── URL parameter clustering knobs (clustering.py) ───────────────────────
+# Query parameter values longer than this character count are compared by
+# their SHA-256 hash (truncated for display) instead of by literal string.
+# Catches modern tracking systems that embed long base64 / JWT-style tokens
+# (Shopee affiliate, SendGrid click tracking, Klaviyo) where the literal
+# value would otherwise be filtered out as noise.
+PARAM_VALUE_HASH_THRESHOLD: int = int(
+    os.environ.get("KWARA_PARAM_VALUE_HASH_THRESHOLD", "100")
+)
+
+
 # ── Shortlink SaaS catalog (clustering.py + snapshots.py + app.py) ───────
 # Domains that are themselves shortlink services. When a scan's final_domain
 # lands here it means the scan did not penetrate the redirect — the real
