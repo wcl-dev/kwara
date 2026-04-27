@@ -5,12 +5,9 @@ import json
 import sqlite3
 from urllib.parse import urlparse as _urlparse
 
-from clustering import (
-    OWNER_KIND_GENERIC,
-    OWNER_KIND_PLATFORM,
-)
 from config import KNOWN_SHORTLINK_DOMAINS, SUSPICIOUS_EXTS as _SUSP_EXTS
 from i18n import t
+from param_attribution import OWNER_KIND_GENERIC, OWNER_KIND_PLATFORM
 
 
 def localize_owner(row: dict) -> str:

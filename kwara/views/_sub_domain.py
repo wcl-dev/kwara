@@ -4,8 +4,8 @@ from urllib.parse import urlparse as _urlparse
 
 import streamlit as st
 
-from clustering import _merge_risk_tags
 from i18n import t
+from param_attribution import merge_risk_tags as _merge_risk_tags
 from pipeline import run_domain_intel_batch, run_domain_intel_only
 from views._shared import TAG_COLORS, fetch_evidence_rows, url_selector
 

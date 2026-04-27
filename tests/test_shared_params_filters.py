@@ -7,7 +7,7 @@ import os
 import tempfile
 from datetime import datetime, timezone
 
-from clustering import _normalize_param_value, shared_params
+from clustering_url import _normalize_param_value, shared_params
 from db import get_conn, init_db, migrate_db
 
 

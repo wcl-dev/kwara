@@ -11,7 +11,7 @@ import os
 import tempfile
 from datetime import datetime, timezone
 
-from clustering import shared_param_keys
+from clustering_url import shared_param_keys
 from db import get_conn, init_db, migrate_db
 
 
@@ -115,7 +115,7 @@ def test_top_values_truncated_to_5():
 
 def test_owner_kind_for_known_generic_key():
     """uid is in _PARAM_EXACT as 'generic' → owner_kind = generic, owner empty."""
-    from clustering import OWNER_KIND_GENERIC
+    from param_attribution import OWNER_KIND_GENERIC
     conn = _make_db()
     case_id = _make_case(conn)
     for v in ("u1", "u2", "u3"):

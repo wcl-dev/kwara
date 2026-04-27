@@ -3,7 +3,7 @@ import os
 import tempfile
 from datetime import datetime, timezone
 
-from clustering import ad_tracking_platforms
+from clustering_infra import ad_tracking_platforms
 from db import get_conn, init_db, migrate_db
 from i18n import set_lang, t
 
@@ -169,7 +169,7 @@ def test_gtm_html_only_keeps_distinct_label():
 
 def test_generic_keys_marked_generic_kind():
     """aff_id, uid → both fold into one OWNER_KIND_GENERIC bucket."""
-    from clustering import OWNER_KIND_GENERIC
+    from param_attribution import OWNER_KIND_GENERIC
     conn = _make_db()
     case_id = _make_case(conn)
     _add(conn, case_id, "https://x.com/?aff_id=A1")

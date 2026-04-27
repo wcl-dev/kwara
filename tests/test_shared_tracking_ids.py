@@ -4,7 +4,7 @@ import os
 import tempfile
 from datetime import datetime, timezone
 
-from clustering import shared_tracking_ids
+from clustering_infra import shared_tracking_ids
 from db import get_conn, init_db, migrate_db
 
 

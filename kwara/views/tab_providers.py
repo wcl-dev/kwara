@@ -5,7 +5,7 @@ from urllib.parse import urlparse as _urlparse
 import pandas as pd
 import streamlit as st
 
-from clustering import ad_tracking_platforms, asn_clusters, certificate_authorities
+from clustering_infra import ad_tracking_platforms, asn_clusters, certificate_authorities
 from config import KNOWN_SHORTLINK_DOMAINS
 from i18n import t
 from views._shared import TAG_COLORS, scan_flags
