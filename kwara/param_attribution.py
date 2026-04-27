@@ -59,6 +59,10 @@ PLATFORM_MAILCHIMP         = "mailchimp"
 PLATFORM_LINE_LIFF         = "line_liff"
 PLATFORM_KLAVIYO           = "klaviyo"
 PLATFORM_APPSFLYER         = "appsflyer"
+# Phase 3 ticket D — second batch of HTML-embedded tracking platforms
+PLATFORM_MICROSOFT_CLARITY = "microsoft_clarity"
+PLATFORM_HOTJAR            = "hotjar"
+PLATFORM_LINE_TAG          = "line_tag"
 # "generic" is the sentinel for keys that are tracking conventions but
 # can't be attributed to a specific vendor (uid, aff_id, ref…). Mapped to
 # OWNER_KIND_GENERIC at classify time.
@@ -82,6 +86,9 @@ PLATFORM_DISPLAY_NAMES: dict[str, str] = {
     PLATFORM_LINE_LIFF:          "LINE LIFF",
     PLATFORM_KLAVIYO:            "Klaviyo",
     PLATFORM_APPSFLYER:          "AppsFlyer",
+    PLATFORM_MICROSOFT_CLARITY:  "Microsoft Clarity",
+    PLATFORM_HOTJAR:             "Hotjar",
+    PLATFORM_LINE_TAG:           "LINE Tag",
 }
 
 

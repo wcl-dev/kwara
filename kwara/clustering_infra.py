@@ -29,8 +29,12 @@ from param_attribution import (
     PLATFORM_GOOGLE_ADS,
     PLATFORM_GOOGLE_ANALYTICS,
     PLATFORM_GOOGLE_TAG_MANAGER,
+    PLATFORM_HOTJAR,
+    PLATFORM_LINE_TAG,
     PLATFORM_META_FACEBOOK,
+    PLATFORM_MICROSOFT_CLARITY,
     PLATFORM_TIKTOK_ADS,
+    PLATFORM_X_TWITTER,
     classify_owner,
     identify_param,
     merge_risk_tags,
@@ -502,6 +506,11 @@ _HTML_PLATFORM_TO_PLATFORM_ID: dict[str, str] = {
     "Google Tag Manager":    PLATFORM_GOOGLE_TAG_MANAGER,  # no URL-param equivalent
     "Google Ads":            PLATFORM_GOOGLE_ADS,
     "TikTok Pixel":          PLATFORM_TIKTOK_ADS,
+    # Phase 3 ticket D — second batch
+    "Microsoft Clarity":     PLATFORM_MICROSOFT_CLARITY,
+    "Hotjar":                PLATFORM_HOTJAR,
+    "LINE Tag":              PLATFORM_LINE_TAG,
+    "X / Twitter Pixel":     PLATFORM_X_TWITTER,
 }
 
 

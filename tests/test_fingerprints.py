@@ -201,6 +201,80 @@ def test_tiktok_pixel_in_ttq_load_call():
 
 
 # ---------------------------------------------------------------------------
+# Microsoft Clarity (Phase 3 ticket D)
+# ---------------------------------------------------------------------------
+def test_clarity_in_tag_url():
+    """Standard snippet's loader URL: clarity.ms/tag/<id>"""
+    html = """t.src="https://www.clarity.ms/tag/abcd1234ef";"""
+    assert extract_tracking_ids(html) == {"Microsoft Clarity": ["abcd1234ef"]}
+
+
+def test_clarity_in_set_project_call():
+    html = """clarity('set', 'project', 'abcd1234ef');"""
+    assert extract_tracking_ids(html) == {"Microsoft Clarity": ["abcd1234ef"]}
+
+
+def test_clarity_bare_id_in_plaintext_does_NOT_match():
+    html = """<p>Clarity project ID: abcd1234ef</p>"""
+    assert extract_tracking_ids(html) == {}
+
+
+# ---------------------------------------------------------------------------
+# Hotjar (Phase 3 ticket D)
+# ---------------------------------------------------------------------------
+def test_hotjar_in_settings_object():
+    html = """h._hjSettings={hjid:1234567,hjsv:6};"""
+    assert extract_tracking_ids(html) == {"Hotjar": ["1234567"]}
+
+
+def test_hotjar_with_whitespace_variants():
+    html = """h._hjSettings = { hjid : 9876543 , hjsv : 6 };"""
+    assert extract_tracking_ids(html) == {"Hotjar": ["9876543"]}
+
+
+def test_hotjar_bare_number_does_NOT_match():
+    """Bare digits with no _hjSettings context must not match."""
+    html = """<p>Some random number 1234567 in body text.</p>"""
+    assert extract_tracking_ids(html) == {}
+
+
+# ---------------------------------------------------------------------------
+# LINE Tag (Phase 3 ticket D)
+# ---------------------------------------------------------------------------
+def test_line_tag_in_lt_init_call():
+    html = """_lt('init', {customerType: 'lap', tagId: 'taghex123abc456def'});"""
+    assert extract_tracking_ids(html) == {"LINE Tag": ["taghex123abc456def"]}
+
+
+def test_line_tag_alternate_field_order():
+    html = """_lt('init',{tagId:'tag-XYZ-123-abc',customerType:'lap'});"""
+    assert extract_tracking_ids(html) == {"LINE Tag": ["tag-XYZ-123-abc"]}
+
+
+def test_line_tag_bare_token_does_NOT_match():
+    html = """<p>Use tagId: 'taghex123abc456def' as your LINE Tag identifier.</p>"""
+    assert extract_tracking_ids(html) == {}
+
+
+# ---------------------------------------------------------------------------
+# X / Twitter Pixel (Phase 3 ticket D)
+# ---------------------------------------------------------------------------
+def test_x_twitter_pixel_in_twq_config_call():
+    html = """twq('config', 'abc12');"""
+    assert extract_tracking_ids(html) == {"X / Twitter Pixel": ["abc12"]}
+
+
+def test_x_twitter_pixel_in_twq_init_call():
+    html = """twq("init", "xyz98");"""
+    assert extract_tracking_ids(html) == {"X / Twitter Pixel": ["xyz98"]}
+
+
+def test_x_twitter_bare_token_does_NOT_match():
+    html = """<p>Twitter pixel: abc12 (not in a twq call)</p>"""
+    assert extract_tracking_ids(html) == {}
+
+
+# ---------------------------------------------------------------------------
 # Cross-platform behaviour
 # ---------------------------------------------------------------------------
 def test_multiple_platforms_in_same_html():
