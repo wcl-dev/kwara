@@ -104,6 +104,14 @@ PARAM_VALUE_HASH_THRESHOLD: int = int(
     os.environ.get("KWARA_PARAM_VALUE_HASH_THRESHOLD", "100")
 )
 
+# Operator-level coordination via shared_param_keys() — flags KEYS that
+# appear in many posts with VARYING values (a sophisticated operator gives
+# each victim a unique tracking ID). Tighter thresholds = less noise but
+# more missed signals; loosen if running on small samples.
+PARAM_KEY_MIN_POSTS:   int = int(os.environ.get("KWARA_PARAM_KEY_MIN_POSTS", "3"))
+PARAM_KEY_MIN_VALUES:  int = int(os.environ.get("KWARA_PARAM_KEY_MIN_VALUES", "2"))
+PARAM_KEY_MAX_DOMAINS: int = int(os.environ.get("KWARA_PARAM_KEY_MAX_DOMAINS", "5"))
+
 
 # ── Shortlink SaaS catalog (clustering.py + snapshots.py + app.py) ───────
 # Domains that are themselves shortlink services. When a scan's final_domain

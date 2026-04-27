@@ -7,7 +7,13 @@ import sqlite3
 from collections import Counter
 from typing import Any
 
-from clustering import asn_clusters, shared_certificates, shared_destinations, shared_params
+from clustering import (
+    asn_clusters,
+    shared_certificates,
+    shared_destinations,
+    shared_param_keys,
+    shared_params,
+)
 from i18n import t
 
 # Risk tag keys used for label lookup via t("risk.<tag>").
@@ -20,6 +26,7 @@ _RISK_TAGS = (
 def case_insights(conn: sqlite3.Connection, case_id: int) -> dict[str, Any]:
     destinations, unresolved = shared_destinations(conn, case_id)
     params = shared_params(conn, case_id)
+    param_keys = shared_param_keys(conn, case_id)
     asn_data = asn_clusters(conn, case_id)
     certs = shared_certificates(conn, case_id)
 
@@ -91,7 +98,7 @@ def case_insights(conn: sqlite3.Connection, case_id: int) -> dict[str, Any]:
     ).fetchone()["n"]
 
     headline = _build_headline(url_count, scanned, destinations, unresolved, params, asn_data)
-    bullets = _build_bullets(destinations, unresolved, params, asn_data, certs, scanned)
+    bullets = _build_bullets(destinations, unresolved, params, param_keys, asn_data, certs, scanned)
     gaps = _build_gaps(no_intel, no_snap, no_tls, no_corr, scanned, url_count)
 
     return {
@@ -132,6 +139,7 @@ def _build_bullets(
     destinations: list,
     unresolved: list,
     params: list,
+    param_keys: list,
     asn_data: list,
     certs: dict,
     scanned: int,
@@ -173,6 +181,13 @@ def _build_bullets(
             out.append(t("insights.bullet_param2",
                           key=p1["param_key"], value=str(p1["param_value"])[:80],
                           owner=owner_note1, posts=p1.get("post_count", 0)))
+    if param_keys:
+        pk0 = param_keys[0]
+        owner_note = t("insights.bullet_param_owner", owner=pk0["owner"]) if pk0.get("owner") else ""
+        out.append(t("insights.bullet_param_key",
+                      key=pk0["param_key"], owner=owner_note,
+                      posts=pk0["distinct_posts"], values=pk0["distinct_values"],
+                      domains=pk0["distinct_domains"]))
     by_cert = certs.get("by_cert") or []
     by_issuance = certs.get("by_issuance") or []
     if by_cert:
@@ -194,7 +209,7 @@ def _build_bullets(
                       domains=a0["domain_count"], urls=a0["url_count"]))
     if scanned == 0 and not out:
         out.append(t("insights.bullet_no_scans"))
-    return out[:9]
+    return out[:10]
 
 
 def _build_gaps(no_intel: int, no_snap: int, no_tls: int, no_corr: int,

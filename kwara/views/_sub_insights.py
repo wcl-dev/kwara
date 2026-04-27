@@ -2,7 +2,13 @@
 import pandas as pd
 import streamlit as st
 
-from clustering import asn_clusters, shared_certificates, shared_destinations, shared_params
+from clustering import (
+    asn_clusters,
+    shared_certificates,
+    shared_destinations,
+    shared_param_keys,
+    shared_params,
+)
 from i18n import t
 from insights import case_insights
 from views._shared import TAG_COLORS
@@ -20,6 +26,7 @@ def render(conn, case_id):
 
     destinations, unresolved_dests = shared_destinations(conn, case_id)
     params = shared_params(conn, case_id)
+    param_keys = shared_param_keys(conn, case_id)
     asn_data = asn_clusters(conn, case_id)
     certs = shared_certificates(conn, case_id)
 
@@ -111,6 +118,29 @@ def render(conn, case_id):
         st.info(t("clusters.no_params"))
     else:
         st.dataframe(pd.DataFrame(params), use_container_width=True, hide_index=True)
+
+    st.divider()
+
+    # ── Operator-level Param Patterns (key shared, values vary) ─
+    st.subheader(t("clusters.param_keys"))
+    st.caption(t("clusters.param_keys_caption"))
+
+    if not param_keys:
+        st.info(t("clusters.no_param_keys"))
+    else:
+        pk_rows = []
+        for pk in param_keys:
+            pk_rows.append({
+                "param_key":        pk["param_key"],
+                "owner":            pk["owner"],
+                "purpose":          pk["purpose"],
+                "distinct_posts":   pk["distinct_posts"],
+                "distinct_values":  pk["distinct_values"],
+                "distinct_domains": pk["distinct_domains"],
+                "top_values":       ", ".join(str(v)[:40] for v in pk["top_values"]),
+                "domains":          ", ".join(pk["domains"]),
+            })
+        st.dataframe(pd.DataFrame(pk_rows), use_container_width=True, hide_index=True)
 
     st.divider()
 
