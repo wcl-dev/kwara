@@ -94,6 +94,47 @@ TRACKER_DOMAINS: frozenset[str] = frozenset({
 HIGH_TRACKER_THRESHOLD: int = 3
 
 
+# Hosts to exclude from cross-domain third-party endpoint aggregation
+# (clustering_infra.shared_endpoints). These are legitimate CDNs / fonts /
+# analytics that virtually every web page loads — including them produces
+# noise rather than attribution signal.
+#
+# Matching is suffix-aware: an entry of "doubleclick.net" filters BOTH
+# the exact host and any subdomain (e.g. "cm.g.doubleclick.net"). List
+# the broadest level you're comfortable filtering. Edit to extend.
+HAR_NOISE_HOSTS: frozenset[str] = frozenset({
+    # ── CDN — fonts and JS libraries ──────────────────────────────
+    "googleapis.com",         # fonts.*, ajax.*, www.*
+    "gstatic.com",            # fonts.*, www.*
+    "jsdelivr.net",           # cdn.*
+    "cloudflareinsights.com", # Cloudflare Web Analytics (every CF site)
+    "cdnjs.cloudflare.com",
+    "unpkg.com", "code.jquery.com",
+    "aspnetcdn.com",          # ajax.*
+    "bootstrapcdn.com",       # maxcdn.*, stackpath.*
+
+    # ── Google analytics / ads (clustered separately via
+    #     tracking_ids / ad_tracking_platforms — re-listing here
+    #     would double-count) ─────────────────────────────────────
+    "google-analytics.com",
+    "googletagmanager.com",
+    "googletagservices.com",
+    "googleadservices.com",
+    "doubleclick.net",
+    "googlesyndication.com",
+    "adtrafficquality.google",
+    "google.com",             # www.google.com (reCAPTCHA, Maps, etc.)
+
+    # ── Meta / Facebook tracking ─────────────────────────────────
+    "facebook.net",
+    "fbcdn.net",
+
+    # ── Embedded video ───────────────────────────────────────────
+    "youtube.com",
+    "ytimg.com",
+})
+
+
 # ── URL parameter clustering knobs (clustering.py) ───────────────────────
 # Query parameter values longer than this character count are compared by
 # their SHA-256 hash (truncated for display) instead of by literal string.

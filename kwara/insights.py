@@ -10,6 +10,7 @@ from typing import Any
 from clustering_infra import (
     asn_clusters,
     shared_certificates,
+    shared_endpoints,
     shared_tracking_ids,
 )
 from clustering_url import (
@@ -56,6 +57,7 @@ def case_insights(conn: sqlite3.Connection, case_id: int) -> dict[str, Any]:
     asn_data = asn_clusters(conn, case_id)
     certs = shared_certificates(conn, case_id)
     tracking_ids = shared_tracking_ids(conn, case_id)
+    endpoints = shared_endpoints(conn, case_id)
 
     url_count = conn.execute(
         "SELECT COUNT(*) AS n FROM url_artifacts WHERE case_id = ?",
@@ -125,7 +127,7 @@ def case_insights(conn: sqlite3.Connection, case_id: int) -> dict[str, Any]:
     ).fetchone()["n"]
 
     headline = _build_headline(url_count, scanned, destinations, unresolved, params, asn_data)
-    bullets = _build_bullets(destinations, unresolved, wrappers, params, param_keys, asn_data, certs, tracking_ids, scanned)
+    bullets = _build_bullets(destinations, unresolved, wrappers, params, param_keys, asn_data, certs, tracking_ids, endpoints, scanned)
     gaps = _build_gaps(no_intel, no_snap, no_tls, no_corr, scanned, url_count)
 
     return {
@@ -171,6 +173,7 @@ def _build_bullets(
     asn_data: list,
     certs: dict,
     tracking_ids: list,
+    endpoints: list,
     scanned: int,
 ) -> list[str]:
     out: list[str] = []
@@ -228,6 +231,19 @@ def _build_bullets(
                      platform=t0["platform"],
                      tracking_id=t0["tracking_id"],
                      domains=t0["domain_count"]))
+    if endpoints:
+        e0 = endpoints[0]
+        # Direct-IP endpoints are notable — surface that fact in the bullet
+        # so the headline summary doesn't bury it.
+        bullet_key = (
+            "insights.bullet_endpoint_direct_ip"
+            if e0["is_direct_ip"]
+            else "insights.bullet_endpoint"
+        )
+        out.append(t(bullet_key,
+                     n=len(endpoints),
+                     endpoint=e0["endpoint"],
+                     domains=e0["domain_count"]))
     by_cert = certs.get("by_cert") or []
     by_issuance = certs.get("by_issuance") or []
     if by_cert:
@@ -249,7 +265,7 @@ def _build_bullets(
                       domains=a0["domain_count"], urls=a0["url_count"]))
     if scanned == 0 and not out:
         out.append(t("insights.bullet_no_scans"))
-    return out[:12]
+    return out[:13]
 
 
 def _build_gaps(no_intel: int, no_snap: int, no_tls: int, no_corr: int,

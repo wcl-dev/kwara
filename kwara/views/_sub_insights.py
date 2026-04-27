@@ -5,6 +5,7 @@ import streamlit as st
 from clustering_infra import (
     asn_clusters,
     shared_certificates,
+    shared_endpoints,
     shared_tracking_ids,
 )
 from clustering_url import (
@@ -35,6 +36,7 @@ def render(conn, case_id):
     asn_data = asn_clusters(conn, case_id)
     certs = shared_certificates(conn, case_id)
     tracking_ids = shared_tracking_ids(conn, case_id)
+    endpoints = shared_endpoints(conn, case_id)
 
     # ── Case Insights ───────────────────────────────────────────
     ci = case_insights(conn, case_id)
@@ -242,6 +244,25 @@ def render(conn, case_id):
                     "domain_list":  ", ".join(w["domains"]),
                 })
             st.dataframe(pd.DataFrame(win_rows), use_container_width=True, hide_index=True)
+
+    st.divider()
+
+    # ── Shared Third-Party Endpoints (HAR-derived) ──────────────
+    st.subheader(t("clusters.endpoints"))
+    st.caption(t("clusters.endpoints_caption"))
+
+    if not endpoints:
+        st.info(t("clusters.no_endpoints"))
+    else:
+        ep_rows = []
+        for ep in endpoints:
+            ep_rows.append({
+                "endpoint":      ep["endpoint"],
+                "direct_ip":     "yes" if ep["is_direct_ip"] else "",
+                "domains":       ep["domain_count"],
+                "domain_list":   ", ".join(ep["domains"]),
+            })
+        st.dataframe(pd.DataFrame(ep_rows), use_container_width=True, hide_index=True)
 
     st.divider()
 
