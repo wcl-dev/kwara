@@ -13,6 +13,7 @@ from config import (
     SUSPICIOUS_EXTS,
     TRACKER_DOMAINS,
 )
+from fingerprints import extract_tracking_ids_from_file
 
 CAPTURE_OK = "ok"
 CAPTURE_CF = "cf_challenge"
@@ -339,13 +340,15 @@ def snapshot_url(conn: sqlite3.Connection, scan_run_id: int, timeout: int = 30,
      cap_status, cap_detail) = _prepare_insert_row(final_url, hop_count, r)
 
     _har_path = r.get("har_path") if r.get("har_path") and os.path.exists(r.get("har_path", "")) else None
+    tracking_ids = extract_tracking_ids_from_file(html_path)
+    tracking_ids_json = json.dumps(tracking_ids, ensure_ascii=False) if tracking_ids else None
     conn.execute(
         """INSERT INTO snapshots
                (scan_run_id, final_url, final_domain,
                 screenshot_path, html_path, har_path,
                 request_domains_json, risk_tags, captured_at,
-                capture_status, capture_detail)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                capture_status, capture_detail, tracking_ids_json)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             scan_run_id, final_url, final_domain,
             screenshot_path, html_path, _har_path,
@@ -354,6 +357,7 @@ def snapshot_url(conn: sqlite3.Connection, scan_run_id: int, timeout: int = 30,
             _now(),
             cap_status,
             cap_detail,
+            tracking_ids_json,
         ),
     )
     conn.commit()
@@ -369,6 +373,7 @@ def snapshot_url(conn: sqlite3.Connection, scan_run_id: int, timeout: int = 30,
             'error': error_note,
             'capture_status': cap_status,
             'capture_detail': cap_detail,
+            'tracking_id_platforms': sorted(tracking_ids.keys()),
         },
     )
     return snapshot_id
@@ -424,18 +429,20 @@ def snapshot_batch(conn: sqlite3.Connection, scan_run_ids: list[int],
          cap_status, cap_detail) = _prepare_insert_row(m["final_url"], m["hop_count"], r)
 
         _har_p = r.get("har_path") if r.get("har_path") and os.path.exists(r.get("har_path", "")) else None
+        tracking_ids = extract_tracking_ids_from_file(html_path)
+        tracking_ids_json = json.dumps(tracking_ids, ensure_ascii=False) if tracking_ids else None
         conn.execute(
             """INSERT INTO snapshots
                    (scan_run_id, final_url, final_domain,
                     screenshot_path, html_path, har_path,
                     request_domains_json, risk_tags, captured_at,
-                    capture_status, capture_detail)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    capture_status, capture_detail, tracking_ids_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 sr_id, m["final_url"], m["final_domain"],
                 screenshot_path, html_path, _har_p,
                 json.dumps(request_domains), json.dumps(tags), _now(),
-                cap_status, cap_detail,
+                cap_status, cap_detail, tracking_ids_json,
             ),
         )
         conn.commit()
@@ -451,6 +458,7 @@ def snapshot_batch(conn: sqlite3.Connection, scan_run_ids: list[int],
                 'error': error_note,
                 'capture_status': cap_status,
                 'capture_detail': cap_detail,
+                'tracking_id_platforms': sorted(tracking_ids.keys()),
             },
         )
         snapshot_ids.append(snapshot_id)
