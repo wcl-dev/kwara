@@ -232,10 +232,16 @@ def _ad_tracking_section(conn, case_id):
         st.info(t("prov.no_ad_tracking"))
         return
 
+    # Resolve display labels once so the selectbox + table + drill-down
+    # all use the same translated strings.
+    from views._shared import localize_owner
+    display_labels = [localize_owner(p) for p in platforms]
+    label_to_platform = dict(zip(display_labels, platforms))
+
     summary = []
-    for p in platforms:
+    for label, p in zip(display_labels, platforms):
         summary.append({
-            "owner":         p["owner"],
+            "owner":         label,
             "signal":        t(_SOURCE_LABEL_KEYS[p["signal_source"]]),
             "param_keys":    ", ".join(p["param_keys"]) or "—",
             "tracking_ids":  ", ".join(p["tracking_ids"]) or "—",
@@ -247,10 +253,10 @@ def _ad_tracking_section(conn, case_id):
 
     sel = st.selectbox(
         t("prov.drill_ad_tracking"),
-        [p["owner"] for p in platforms],
+        display_labels,
         key="prov_ad_sel",
     )
-    sel_p = next(p for p in platforms if p["owner"] == sel)
+    sel_p = label_to_platform[sel]
     with st.container(border=True):
         st.write(t("prov.ad_tracking_domains", owner=sel, n=len(sel_p["domains"])))
         st.dataframe(pd.DataFrame(sel_p["domains"]), use_container_width=True, hide_index=True)

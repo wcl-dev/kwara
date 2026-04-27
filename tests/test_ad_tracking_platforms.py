@@ -167,17 +167,18 @@ def test_gtm_html_only_keeps_distinct_label():
     assert gtm["tracking_ids"] == ["GTM-ABCDEF"]
 
 
-def test_generic_keys_use_unattributed_label():
-    set_lang("en")
+def test_generic_keys_marked_generic_kind():
+    """aff_id, uid → both fold into one OWNER_KIND_GENERIC bucket."""
+    from clustering import OWNER_KIND_GENERIC
     conn = _make_db()
     case_id = _make_case(conn)
     _add(conn, case_id, "https://x.com/?aff_id=A1")
     _add(conn, case_id, "https://x.com/?uid=638")
     res = ad_tracking_platforms(conn, case_id)
-    labels = {r["owner"] for r in res}
-    assert t("param.unattributed_tracker") in labels
-    # The single unattributed bucket should hold both keys
-    bucket = next(r for r in res if r["owner"] == t("param.unattributed_tracker"))
+    generic_rows = [r for r in res if r["owner_kind"] == OWNER_KIND_GENERIC]
+    assert len(generic_rows) == 1, "aff_id + uid must collapse into one generic bucket"
+    bucket = generic_rows[0]
+    assert bucket["owner"] == ""  # not a vendor — UI translates via owner_kind
     assert "aff_id" in bucket["param_keys"]
     assert "uid" in bucket["param_keys"]
 

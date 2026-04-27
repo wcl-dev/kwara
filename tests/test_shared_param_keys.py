@@ -113,17 +113,18 @@ def test_top_values_truncated_to_5():
     assert len(m["top_values"]) == 5
 
 
-def test_owner_label_for_known_generic_key():
-    """uid is in _PARAM_EXACT as 'generic' → renders as Unattributed Tracker."""
-    from i18n import set_lang
-    set_lang("en")
+def test_owner_kind_for_known_generic_key():
+    """uid is in _PARAM_EXACT as 'generic' → owner_kind = generic, owner empty."""
+    from clustering import OWNER_KIND_GENERIC
     conn = _make_db()
     case_id = _make_case(conn)
     for v in ("u1", "u2", "u3"):
         _add(conn, case_id, f"https://x.com/?uid={v}")
     results = shared_param_keys(conn, case_id)
     m = next(r for r in results if r["param_key"] == "uid")
-    assert m["owner"] == "Unattributed Tracker"
+    assert m["owner_kind"] == OWNER_KIND_GENERIC
+    assert m["owner"] == ""
+    assert m["purpose_key"] == "param.user_tracking_id"
 
 
 def test_long_value_collisions_use_hash():

@@ -1,20 +1,24 @@
-"""Tests for ticket 1.1 — owner-label split for generic vs unrecognized params.
+"""Tests for the owner-kind enum exposed by shared_params().
 
-Previously every `generic` entry in clustering._PARAM_EXACT (`uid`, `aff_id`,
-`ref`, `click_id`, `tracking_id`, `campaign_id`, `source`, …) was overwritten
-to display as "unrecognized platform" — indistinguishable from a key the
-table had never heard of. The two cases now render differently:
-  - generic-table hit → "Unattributed Tracker" (we know it's a tracker
-                          but cannot attribute the operator)
-  - no table hit       → "unrecognized platform"
+After the i18n decoupling, clustering returns three stable kinds:
+  - OWNER_KIND_PLATFORM   recognised vendor; `owner` = raw label like "Google Analytics"
+  - OWNER_KIND_GENERIC    generic tracking convention (uid, aff_id, ref, …)
+  - OWNER_KIND_UNKNOWN    key not recognised by identify_param()
+
+The view layer translates kind+raw-owner into a localised string at
+render time. Clustering itself no longer touches i18n.
 """
 import os
 import tempfile
 from datetime import datetime, timezone
 
-from clustering import shared_params
+from clustering import (
+    OWNER_KIND_GENERIC,
+    OWNER_KIND_PLATFORM,
+    OWNER_KIND_UNKNOWN,
+    shared_params,
+)
 from db import get_conn, init_db, migrate_db
-from i18n import set_lang, t
 
 
 def _now():
@@ -56,67 +60,72 @@ def _add_post(conn, case_id, url):
     conn.commit()
 
 
-def _owners_for(results, key):
-    return [r["owner"] for r in results if r["param_key"] == key]
+def _row_for(results, key):
+    return next((r for r in results if r["param_key"] == key), None)
 
 
-def test_generic_table_hit_renders_as_unattributed_tracker_en():
-    set_lang("en")
+def test_generic_table_hit_marked_generic_kind():
     conn = _make_db()
     case_id = _make_case(conn)
     _add_post(conn, case_id, "https://crawlerlanding.example/redacted139/1?uid=638")
     _add_post(conn, case_id, "https://crawlerlanding.example/redacted139/2?uid=638")
-    results = shared_params(conn, case_id)
-    owners = _owners_for(results, "uid")
-    assert owners == ["Unattributed Tracker"], (
-        f"uid (in generic table) should render as Unattributed Tracker, got {owners}"
-    )
+    r = _row_for(shared_params(conn, case_id), "uid")
+    assert r is not None
+    assert r["owner_kind"] == OWNER_KIND_GENERIC
+    assert r["owner"] == ""  # not a vendor — UI renders via owner_kind
+    assert r["purpose_key"] == "param.user_tracking_id"
 
 
-def test_generic_table_hit_renders_as_zh_label():
+def test_unknown_key_marked_unknown_kind():
+    conn = _make_db()
+    case_id = _make_case(conn)
+    _add_post(conn, case_id, "https://example.com/?xyz_weird_token=12345")
+    _add_post(conn, case_id, "https://example.com/?xyz_weird_token=12345")
+    r = _row_for(shared_params(conn, case_id), "xyz_weird_token")
+    assert r is not None
+    assert r["owner_kind"] == OWNER_KIND_UNKNOWN
+    assert r["owner"] == ""
+    assert r["purpose_key"] == ""
+
+
+def test_known_platform_marked_platform_kind_with_raw_owner():
+    """utm_source → OWNER_KIND_PLATFORM, raw owner is the English vendor name."""
+    conn = _make_db()
+    case_id = _make_case(conn)
+    _add_post(conn, case_id, "https://example.com/?utm_source=newsletter")
+    _add_post(conn, case_id, "https://example.com/?utm_source=newsletter")
+    r = _row_for(shared_params(conn, case_id), "utm_source")
+    assert r is not None
+    assert r["owner_kind"] == OWNER_KIND_PLATFORM
+    assert r["owner"] == "Google Analytics"
+    assert r["purpose_key"] == "param.traffic_source"
+
+
+def test_three_kinds_coexist_in_same_case():
+    conn = _make_db()
+    case_id = _make_case(conn)
+    _add_post(conn, case_id,
+              "https://example.com/?utm_source=fb&aff_id=A1&xyz_weird=1")
+    _add_post(conn, case_id,
+              "https://example.com/?utm_source=fb&aff_id=A1&xyz_weird=1")
+    by_key = {r["param_key"]: r for r in shared_params(conn, case_id)}
+    assert by_key["utm_source"]["owner_kind"] == OWNER_KIND_PLATFORM
+    assert by_key["utm_source"]["owner"]      == "Google Analytics"
+    assert by_key["aff_id"]["owner_kind"]     == OWNER_KIND_GENERIC
+    assert by_key["xyz_weird"]["owner_kind"]  == OWNER_KIND_UNKNOWN
+
+
+def test_clustering_output_does_not_depend_on_active_language():
+    """Regression: previously the result strings depended on i18n.set_lang().
+    Now they should be deterministic regardless of UI language."""
+    from i18n import set_lang
+    conn = _make_db()
+    case_id = _make_case(conn)
+    _add_post(conn, case_id, "https://x.com/?uid=638")
+    _add_post(conn, case_id, "https://x.com/?uid=638")
+
+    set_lang("en")
+    r_en = _row_for(shared_params(conn, case_id), "uid")
     set_lang("zh-TW")
-    conn = _make_db()
-    case_id = _make_case(conn)
-    _add_post(conn, case_id, "https://shop.example/?aff_id=A1")
-    _add_post(conn, case_id, "https://shop.example/?aff_id=A1")
-    results = shared_params(conn, case_id)
-    owners = _owners_for(results, "aff_id")
-    assert owners == ["未歸屬追蹤碼"], owners
-
-
-def test_unknown_key_still_renders_as_unrecognized_platform():
-    set_lang("en")
-    conn = _make_db()
-    case_id = _make_case(conn)
-    _add_post(conn, case_id, "https://example.com/?xyz_weird_token=12345")
-    _add_post(conn, case_id, "https://example.com/?xyz_weird_token=12345")
-    results = shared_params(conn, case_id)
-    owners = _owners_for(results, "xyz_weird_token")
-    assert owners == [t("param.unrecognized_platform")], owners
-
-
-def test_known_platform_unaffected():
-    """utm_source is a Google Analytics key — should NOT change."""
-    set_lang("en")
-    conn = _make_db()
-    case_id = _make_case(conn)
-    _add_post(conn, case_id, "https://example.com/?utm_source=newsletter")
-    _add_post(conn, case_id, "https://example.com/?utm_source=newsletter")
-    results = shared_params(conn, case_id)
-    owners = _owners_for(results, "utm_source")
-    assert owners == ["Google Analytics"], owners
-
-
-def test_generic_and_platform_and_unknown_coexist_in_same_case():
-    set_lang("en")
-    conn = _make_db()
-    case_id = _make_case(conn)
-    _add_post(conn, case_id,
-              "https://example.com/?utm_source=fb&aff_id=A1&xyz_weird=1")
-    _add_post(conn, case_id,
-              "https://example.com/?utm_source=fb&aff_id=A1&xyz_weird=1")
-    results = shared_params(conn, case_id)
-    by_key = {r["param_key"]: r["owner"] for r in results}
-    assert by_key.get("utm_source") == "Google Analytics"
-    assert by_key.get("aff_id") == "Unattributed Tracker"
-    assert by_key.get("xyz_weird") == t("param.unrecognized_platform")
+    r_zh = _row_for(shared_params(conn, case_id), "uid")
+    assert r_en == r_zh, "clustering output must not depend on UI language"

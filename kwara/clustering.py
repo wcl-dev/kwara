@@ -23,7 +23,24 @@ from config import (
     PARAM_KEY_MIN_VALUES,
     PARAM_VALUE_HASH_THRESHOLD,
 )
-from i18n import t
+
+# Clustering is language-agnostic — no i18n imports allowed in this
+# module. View layers translate owner_kind / purpose_key at render time.
+#
+# Stable owner-kind enum returned by clustering functions. The view layer
+# is responsible for translating these into user-facing labels.
+OWNER_KIND_PLATFORM = "platform"   # Recognised vendor (e.g. Google Analytics)
+OWNER_KIND_GENERIC  = "generic"    # Generic tracking convention (uid, aff_id…)
+OWNER_KIND_UNKNOWN  = "unknown"    # Key not recognised by identify_param()
+
+
+def _classify_owner(owner_raw: str) -> str:
+    """Map identify_param() owner string to the stable owner_kind enum."""
+    if owner_raw == "generic":
+        return OWNER_KIND_GENERIC
+    if owner_raw:
+        return OWNER_KIND_PLATFORM
+    return OWNER_KIND_UNKNOWN
 
 # ---------------------------------------------------------------------------
 # Known URL parameter attribution
@@ -377,22 +394,17 @@ def shared_params(conn: sqlite3.Connection, case_id: int) -> list:
         if len(posts) < 2:
             continue
         k, _cmp = bucket
-        owner, purpose_key = identify_param(k)
-        domains = sorted(param_domains[bucket])
-        if owner == "generic":
-            owner = t("param.unattributed_tracker")
-            purpose = t(purpose_key) if purpose_key else t("param.unattributed_purpose")
-        elif not owner:
-            owner = t("param.unrecognized_platform")
-            purpose = t("param.unidentified")
-        else:
-            purpose = t(purpose_key) if purpose_key else ""
+        owner_raw, purpose_key = identify_param(k)
+        owner_kind = _classify_owner(owner_raw)
         results.append({
             "param_key":   k,
             "param_value": param_display.get(bucket, ""),
-            "owner":       owner,
-            "purpose":     purpose,
-            "domains":     ", ".join(domains),
+            "owner_kind":  owner_kind,
+            # owner: vendor name for OWNER_KIND_PLATFORM, empty otherwise.
+            # The view layer renders generic/unknown via i18n at display time.
+            "owner":       owner_raw if owner_kind == OWNER_KIND_PLATFORM else "",
+            "purpose_key": purpose_key,  # raw i18n key, view layer calls t()
+            "domains":     ", ".join(sorted(param_domains[bucket])),
             "post_count":  len(posts),
             "url_count":   len(param_urls[bucket]),
         })
@@ -464,20 +476,13 @@ def shared_param_keys(conn: sqlite3.Connection, case_id: int) -> list:
         if len(key_domains[key]) > PARAM_KEY_MAX_DOMAINS:
             continue
 
-        owner, purpose_key = identify_param(key)
-        if owner == "generic":
-            owner = t("param.unattributed_tracker")
-            purpose = t(purpose_key) if purpose_key else t("param.unattributed_purpose")
-        elif not owner:
-            owner = t("param.unrecognized_platform")
-            purpose = t("param.unidentified")
-        else:
-            purpose = t(purpose_key) if purpose_key else ""
-
+        owner_raw, purpose_key = identify_param(key)
+        owner_kind = _classify_owner(owner_raw)
         results.append({
             "param_key":        key,
-            "owner":            owner,
-            "purpose":          purpose,
+            "owner_kind":       owner_kind,
+            "owner":            owner_raw if owner_kind == OWNER_KIND_PLATFORM else "",
+            "purpose_key":      purpose_key,
             "distinct_posts":   len(posts),
             "distinct_values":  len(key_values[key]),
             "distinct_domains": len(key_domains[key]),
@@ -1075,14 +1080,13 @@ def ad_tracking_platforms(conn: sqlite3.Connection, case_id: int) -> list:
             for key, _vals in parse_qs(parsed.query).items():
                 if not key:
                     continue
-                owner, _purpose_key = identify_param(key)
-                if not owner:
-                    continue
-                label = (
-                    t("param.unattributed_tracker")
-                    if owner == "generic" else owner
-                )
-                e = _entry(label)
+                owner_raw, _purpose_key = identify_param(key)
+                if not owner_raw:
+                    continue  # truly unknown — skip from provider lens
+                # Aggregation key is the raw owner string ("Google Analytics",
+                # "Meta / Facebook", or the sentinel "generic"). View layer
+                # translates "generic" via owner_kind at render time.
+                e = _entry(owner_raw)
                 e["param_keys"].add(key)
                 e["urls"].add(r["ua_id"])
                 e["posts"].add(r["post_id"])
@@ -1120,8 +1124,10 @@ def ad_tracking_platforms(conn: sqlite3.Connection, case_id: int) -> list:
             source = "html_embedded"
         else:
             source = "url_param"
+        owner_kind = _classify_owner(label)
         out.append({
-            "owner":         label,
+            "owner_kind":    owner_kind,
+            "owner":         label if owner_kind == OWNER_KIND_PLATFORM else "",
             "signal_source": source,
             "param_keys":    sorted(e["param_keys"]),
             "tracking_ids":  sorted(e["tracking_ids"]),
