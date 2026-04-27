@@ -116,6 +116,87 @@ def shared_destinations(conn: sqlite3.Connection, case_id: int) -> tuple:
     return resolved, unresolved
 
 
+def wrapper_relationships(conn: sqlite3.Connection, case_id: int) -> list:
+    """Aggregate (original_domain → final_domain) pairs where the redirect
+    chain crosses domains.
+
+    A "wrapper" here means: the URL the analyst received in a post landed
+    on a *different* domain after the scan resolved its redirect chain.
+    Picread → maimai is the canonical example: posters share
+    ``picread.net/article/X?uid=…`` but every URL ends up on ``maimai.pro``
+    after a 2-hop redirect, with the ``uid`` parameter renamed to
+    ``utm_term``. Without surfacing this, an analyst has to manually
+    correlate ``url_artifacts.original_url`` against
+    ``scan_runs.final_url`` URL-by-URL.
+
+    Base: latest done scan_run per url_artifact (matches shared_destinations).
+
+    Returns list sorted by url_count desc, then post_count desc:
+      [{
+        "original_domain": "picread.net",
+        "final_domain":    "maimai.pro",
+        "url_count":       21,        # distinct url_artifacts
+        "post_count":      21,        # distinct messages
+        "min_hops":        2,
+        "max_hops":        2,
+        "sample_urls":     [first 5 distinct original_urls],
+      }]
+    """
+    rows = conn.execute(
+        """SELECT ua.id AS ua_id, ua.original_url,
+                  sr.final_url, sr.hop_count,
+                  me.id AS post_id
+           FROM url_artifacts ua
+           JOIN message_evidence me ON me.id = ua.message_id
+           JOIN scan_runs sr ON sr.id = (
+               SELECT id FROM scan_runs
+               WHERE url_artifact_id = ua.id AND status = 'done'
+               ORDER BY id DESC LIMIT 1
+           )
+           WHERE ua.case_id = ? AND sr.final_url IS NOT NULL""",
+        (case_id,),
+    ).fetchall()
+
+    by_pair: dict[tuple[str, str], dict] = {}
+
+    for r in rows:
+        original = (urlparse(r["original_url"] or "").hostname or "").lower()
+        final = (urlparse(r["final_url"] or "").hostname or "").lower()
+        if not original or not final or original == final:
+            continue
+
+        key = (original, final)
+        entry = by_pair.setdefault(key, {
+            "ua_ids":      set(),
+            "post_ids":    set(),
+            "hops":        [],
+            "sample_urls": [],
+        })
+        entry["ua_ids"].add(r["ua_id"])
+        entry["post_ids"].add(r["post_id"])
+        if r["hop_count"] is not None:
+            entry["hops"].append(r["hop_count"])
+        # Keep up to 5 distinct sample URLs (insertion order, no duplicates)
+        if r["original_url"] and r["original_url"] not in entry["sample_urls"]:
+            if len(entry["sample_urls"]) < 5:
+                entry["sample_urls"].append(r["original_url"])
+
+    out: list[dict] = []
+    for (original, final), e in by_pair.items():
+        hops = e["hops"] or [0]
+        out.append({
+            "original_domain": original,
+            "final_domain":    final,
+            "url_count":       len(e["ua_ids"]),
+            "post_count":      len(e["post_ids"]),
+            "min_hops":        min(hops),
+            "max_hops":        max(hops),
+            "sample_urls":     e["sample_urls"],
+        })
+    out.sort(key=lambda x: (-x["url_count"], -x["post_count"]))
+    return out
+
+
 _HASH_PREFIX_LEN = 12  # hex chars; 12 = 48 bits, safe to ~10M distinct values
 
 
