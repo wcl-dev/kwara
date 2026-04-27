@@ -52,10 +52,15 @@ _PATTERNS: list[tuple[str, re.Pattern, int]] = [
         ),
         1,
     ),
-    # gtag.js loader URL: ?id=G-… ; collect URL: ?tid=G-…
+    # gtag.js loader URL or g/collect URL — must be on a Google host.
+    # Anchoring to googletagmanager.com / google-analytics.com prevents
+    # `?id=G-…` in unrelated docs/blog comments / JSON blobs from being
+    # treated as evidence (codex2 #2).
     (
         "Google Analytics 4",
-        re.compile(r"""[?&](?:id|tid)=(G-[A-Z0-9]{6,12})\b"""),
+        re.compile(
+            r"""(?:googletagmanager\.com|google-analytics\.com)[^"'<>\s]*?[?&](?:id|tid)=(G-[A-Z0-9]{6,12})\b"""
+        ),
         1,
     ),
     # ── Google Analytics Universal (legacy UA-12345-1) ─────────────────
@@ -68,7 +73,9 @@ _PATTERNS: list[tuple[str, re.Pattern, int]] = [
     ),
     (
         "Google Analytics (UA)",
-        re.compile(r"""[?&]tid=(UA-\d{4,12}-\d{1,4})\b"""),
+        re.compile(
+            r"""(?:googletagmanager\.com|google-analytics\.com)[^"'<>\s]*?[?&]tid=(UA-\d{4,12}-\d{1,4})\b"""
+        ),
         1,
     ),
     # ── Google Tag Manager — GTM-XXXXXX container ──────────────────────
@@ -80,9 +87,12 @@ _PATTERNS: list[tuple[str, re.Pattern, int]] = [
         1,
     ),
     # Loader / noscript URLs: gtm.js?id=GTM-… , ns.html?id=GTM-…
+    # Same host-anchoring as GA4 — codex2 #2.
     (
         "Google Tag Manager",
-        re.compile(r"""[?&]id=(GTM-[A-Z0-9]{4,8})\b"""),
+        re.compile(
+            r"""googletagmanager\.com[^"'<>\s]*?[?&]id=(GTM-[A-Z0-9]{4,8})\b"""
+        ),
         1,
     ),
     # ── Google Ads conversion ID AW-XXXXXXXXX ──────────────────────────
