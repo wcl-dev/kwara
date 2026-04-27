@@ -490,6 +490,183 @@ def shared_param_keys(conn: sqlite3.Connection, case_id: int) -> list:
 
 
 # ---------------------------------------------------------------------------
+# Account-pattern exploration (descriptive, no thresholds)
+# ---------------------------------------------------------------------------
+# These functions surface raw distributions for the analyst to read; they
+# deliberately do NOT flag posts as "coordinated" or "suspicious", because
+# any threshold tuned on a single dataset would overfit to that operator.
+# Calibration must be done by the analyst with cross-case context.
+
+# Parameter keys that commonly carry a "content ID" — checked in priority
+# order. Empirical: crawlerlanding wrapper rewrites uid → utm_term, so both refer
+# to the same underlying content slot.
+_CONTENT_ID_KEYS = ("utm_term", "uid", "utm_id", "campaign_id")
+
+
+def _extract_content_id(url: str | None) -> str | None:
+    if not url:
+        return None
+    qs = parse_qs(urlparse(url).query)
+    for key in _CONTENT_ID_KEYS:
+        vals = qs.get(key)
+        if vals:
+            return vals[0]
+    return None
+
+
+def account_content_matrix(conn: sqlite3.Connection, case_id: int) -> dict:
+    """Cross-tab of (poster account × content ID) → post count.
+
+    Content ID is extracted from URL parameters in this priority:
+      utm_term > uid > utm_id > campaign_id
+    Both the original_url and final_url (if scanned) are inspected; the
+    first match wins per post.
+
+    Returns:
+      {
+        "actors":   [actor_label, ...] sorted by total posts desc,
+        "contents": [content_id, ...] sorted by total posts desc,
+        "matrix":   {(actor, content_id): post_count, ...},
+        "actor_totals":   {actor: total_posts, ...},
+        "content_totals": {content_id: total_posts, ...},
+      }
+    """
+    rows = conn.execute(
+        """SELECT me.id AS post_id,
+                  COALESCE(NULLIF(TRIM(me.actor_label), ''), '—') AS actor,
+                  ua.original_url, sr.final_url
+           FROM message_evidence me
+           JOIN url_artifacts ua ON ua.message_id = me.id
+           LEFT JOIN scan_runs sr ON sr.url_artifact_id = ua.id
+               AND sr.id = (
+                   SELECT id FROM scan_runs WHERE url_artifact_id = ua.id
+                   ORDER BY id DESC LIMIT 1
+               )
+           WHERE ua.case_id = ?""",
+        (case_id,),
+    ).fetchall()
+
+    # Per post, take the first content_id found (avoid double-counting if a
+    # message has multiple URLs all carrying the same campaign tag).
+    post_content: dict[int, tuple[str, str]] = {}
+    for r in rows:
+        if r["post_id"] in post_content:
+            continue
+        cid = _extract_content_id(r["original_url"]) or _extract_content_id(r["final_url"])
+        if cid is None:
+            continue
+        post_content[r["post_id"]] = (r["actor"], cid)
+
+    matrix: dict[tuple[str, str], int] = defaultdict(int)
+    actor_totals: dict[str, int] = defaultdict(int)
+    content_totals: dict[str, int] = defaultdict(int)
+    for actor, cid in post_content.values():
+        matrix[(actor, cid)] += 1
+        actor_totals[actor] += 1
+        content_totals[cid] += 1
+
+    actors = sorted(actor_totals, key=lambda a: (-actor_totals[a], a))
+    contents = sorted(content_totals, key=lambda c: (-content_totals[c], c))
+
+    return {
+        "actors":         actors,
+        "contents":       contents,
+        "matrix":         dict(matrix),
+        "actor_totals":   dict(actor_totals),
+        "content_totals": dict(content_totals),
+    }
+
+
+def content_time_distribution(conn: sqlite3.Connection, case_id: int) -> list:
+    """Per-content-ID timing distribution.
+
+    For each content ID with >=2 posts, returns descriptive timing stats:
+      content_id, post_count, actor_count,
+      first_posted, last_posted, span_minutes,
+      min_interval_minutes  (shortest gap between any two consecutive posts),
+      median_interval_minutes
+
+    Sorted by post_count desc. NO threshold-based "burst" flag — analyst
+    interprets the distribution.
+    """
+    rows = conn.execute(
+        """SELECT me.posted_at,
+                  COALESCE(NULLIF(TRIM(me.actor_label), ''), '—') AS actor,
+                  ua.original_url, sr.final_url
+           FROM message_evidence me
+           JOIN url_artifacts ua ON ua.message_id = me.id
+           LEFT JOIN scan_runs sr ON sr.url_artifact_id = ua.id
+               AND sr.id = (
+                   SELECT id FROM scan_runs WHERE url_artifact_id = ua.id
+                   ORDER BY id DESC LIMIT 1
+               )
+           WHERE ua.case_id = ?""",
+        (case_id,),
+    ).fetchall()
+
+    # content_id -> list of (datetime, actor)
+    per_content: dict[str, list[tuple[datetime, str]]] = defaultdict(list)
+    for r in rows:
+        cid = _extract_content_id(r["original_url"]) or _extract_content_id(r["final_url"])
+        if cid is None or not r["posted_at"]:
+            continue
+        ts = _parse_post_timestamp(r["posted_at"])
+        if ts is None:
+            continue
+        per_content[cid].append((ts, r["actor"]))
+
+    out: list[dict] = []
+    for cid, events in per_content.items():
+        if len(events) < 2:
+            continue
+        events.sort(key=lambda e: e[0])
+        times = [e[0] for e in events]
+        actors = {e[1] for e in events}
+        intervals = [
+            (times[i + 1] - times[i]).total_seconds() / 60
+            for i in range(len(times) - 1)
+        ]
+        intervals.sort()
+        median = intervals[len(intervals) // 2] if intervals else 0
+        span = (times[-1] - times[0]).total_seconds() / 60
+        out.append({
+            "content_id":             cid,
+            "post_count":             len(events),
+            "actor_count":            len(actors),
+            "first_posted":           times[0].strftime("%Y-%m-%d %H:%M"),
+            "last_posted":            times[-1].strftime("%Y-%m-%d %H:%M"),
+            "span_minutes":           int(span),
+            "min_interval_minutes":   round(min(intervals), 1),
+            "median_interval_minutes": round(median, 1),
+        })
+
+    out.sort(key=lambda x: (-x["post_count"], -x["actor_count"]))
+    return out
+
+
+# Common posted_at formats observed in CSV imports: "2026-03-24 08:48"
+# (no seconds), ISO with 'T', and full ISO with seconds.
+_TIMESTAMP_FORMATS = (
+    "%Y-%m-%d %H:%M:%S",
+    "%Y-%m-%d %H:%M",
+    "%Y-%m-%dT%H:%M:%S",
+    "%Y-%m-%dT%H:%M",
+)
+
+
+def _parse_post_timestamp(s: str) -> datetime | None:
+    s = (s or "").strip()
+    if not s:
+        return None
+    for fmt in _TIMESTAMP_FORMATS:
+        try:
+            return datetime.strptime(s, fmt)
+        except ValueError:
+            continue
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Shared TLS certificates
 # ---------------------------------------------------------------------------
 # OpenSSL textual date: "Apr 27 00:00:00 2026 GMT". Single-digit days come back
