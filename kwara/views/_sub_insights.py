@@ -8,6 +8,7 @@ from clustering import (
     shared_destinations,
     shared_param_keys,
     shared_params,
+    shared_tracking_ids,
 )
 from i18n import t
 from insights import case_insights
@@ -29,6 +30,7 @@ def render(conn, case_id):
     param_keys = shared_param_keys(conn, case_id)
     asn_data = asn_clusters(conn, case_id)
     certs = shared_certificates(conn, case_id)
+    tracking_ids = shared_tracking_ids(conn, case_id)
 
     # ── Case Insights ───────────────────────────────────────────
     ci = case_insights(conn, case_id)
@@ -141,6 +143,27 @@ def render(conn, case_id):
                 "domains":          ", ".join(pk["domains"]),
             })
         st.dataframe(pd.DataFrame(pk_rows), use_container_width=True, hide_index=True)
+
+    st.divider()
+
+    # ── Shared Tracking IDs (HTML-embedded — strongest signal) ──
+    st.subheader(t("clusters.tracking_ids"))
+    st.caption(t("clusters.tracking_ids_caption"))
+
+    if not tracking_ids:
+        st.info(t("clusters.no_tracking_ids"))
+    else:
+        tid_rows = []
+        for r in tracking_ids:
+            tid_rows.append({
+                "platform":     r["platform"],
+                "tracking_id":  r["tracking_id"],
+                "domains":      r["domain_count"],
+                "urls":         r["url_count"],
+                "posts":        r["post_count"],
+                "domain_list":  ", ".join(r["domains"]),
+            })
+        st.dataframe(pd.DataFrame(tid_rows), use_container_width=True, hide_index=True)
 
     st.divider()
 

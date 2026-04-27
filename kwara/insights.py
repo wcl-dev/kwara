@@ -13,6 +13,7 @@ from clustering import (
     shared_destinations,
     shared_param_keys,
     shared_params,
+    shared_tracking_ids,
 )
 from i18n import t
 
@@ -29,6 +30,7 @@ def case_insights(conn: sqlite3.Connection, case_id: int) -> dict[str, Any]:
     param_keys = shared_param_keys(conn, case_id)
     asn_data = asn_clusters(conn, case_id)
     certs = shared_certificates(conn, case_id)
+    tracking_ids = shared_tracking_ids(conn, case_id)
 
     url_count = conn.execute(
         "SELECT COUNT(*) AS n FROM url_artifacts WHERE case_id = ?",
@@ -98,7 +100,7 @@ def case_insights(conn: sqlite3.Connection, case_id: int) -> dict[str, Any]:
     ).fetchone()["n"]
 
     headline = _build_headline(url_count, scanned, destinations, unresolved, params, asn_data)
-    bullets = _build_bullets(destinations, unresolved, params, param_keys, asn_data, certs, scanned)
+    bullets = _build_bullets(destinations, unresolved, params, param_keys, asn_data, certs, tracking_ids, scanned)
     gaps = _build_gaps(no_intel, no_snap, no_tls, no_corr, scanned, url_count)
 
     return {
@@ -142,6 +144,7 @@ def _build_bullets(
     param_keys: list,
     asn_data: list,
     certs: dict,
+    tracking_ids: list,
     scanned: int,
 ) -> list[str]:
     out: list[str] = []
@@ -188,6 +191,13 @@ def _build_bullets(
                       key=pk0["param_key"], owner=owner_note,
                       posts=pk0["distinct_posts"], values=pk0["distinct_values"],
                       domains=pk0["distinct_domains"]))
+    if tracking_ids:
+        t0 = tracking_ids[0]
+        out.append(t("insights.bullet_tracking_id",
+                     n=len(tracking_ids),
+                     platform=t0["platform"],
+                     tracking_id=t0["tracking_id"],
+                     domains=t0["domain_count"]))
     by_cert = certs.get("by_cert") or []
     by_issuance = certs.get("by_issuance") or []
     if by_cert:
@@ -209,7 +219,7 @@ def _build_bullets(
                       domains=a0["domain_count"], urls=a0["url_count"]))
     if scanned == 0 and not out:
         out.append(t("insights.bullet_no_scans"))
-    return out[:10]
+    return out[:11]
 
 
 def _build_gaps(no_intel: int, no_snap: int, no_tls: int, no_corr: int,
