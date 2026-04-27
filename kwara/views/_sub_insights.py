@@ -11,6 +11,7 @@ from clustering_url import (
     shared_destinations,
     shared_param_keys,
     shared_params,
+    wrapper_relationships,
 )
 from i18n import t
 from insights import case_insights
@@ -28,6 +29,7 @@ def render(conn, case_id):
     st.caption(t("insights_tab.help"))
 
     destinations, unresolved_dests = shared_destinations(conn, case_id)
+    wrappers = wrapper_relationships(conn, case_id)
     params = shared_params(conn, case_id)
     param_keys = shared_param_keys(conn, case_id)
     asn_data = asn_clusters(conn, case_id)
@@ -111,6 +113,28 @@ def render(conn, case_id):
             st.dataframe(pd.DataFrame(posts_to_show), use_container_width=True, hide_index=True)
             if len(sel_d["posts"]) > _PREVIEW and not show_all:
                 st.caption(t("clusters.preview_posts", preview=_PREVIEW, total=len(sel_d['posts'])))
+
+    st.divider()
+
+    # ── Wrapper Domains (original_url → final_url crosses domain) ─
+    st.subheader(t("clusters.wrappers"))
+    st.caption(t("clusters.wrappers_caption"))
+
+    if not wrappers:
+        st.info(t("clusters.no_wrappers"))
+    else:
+        wrap_rows = []
+        for w in wrappers:
+            wrap_rows.append({
+                "wrapper":      w["original_domain"],
+                "redirects_to": w["final_domain"],
+                "url_count":    w["url_count"],
+                "post_count":   w["post_count"],
+                "min_hops":     w["min_hops"],
+                "max_hops":     w["max_hops"],
+                "sample_urls":  ", ".join(u[:60] for u in w["sample_urls"]),
+            })
+        st.dataframe(pd.DataFrame(wrap_rows), use_container_width=True, hide_index=True)
 
     st.divider()
 
