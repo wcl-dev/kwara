@@ -118,6 +118,43 @@ _PATTERNS: list[tuple[str, re.Pattern, int]] = [
         re.compile(r"""ttq\.load\s*\(\s*['"]([A-Z0-9]{15,25})['"]"""),
         1,
     ),
+    # ── Microsoft Clarity (Phase 3 ticket D) ───────────────────────────
+    # Standard snippet: t.src="https://www.clarity.ms/tag/<id>"
+    # Or: clarity('set', 'project', '<id>')
+    # IDs are short lowercase alphanumeric (their docs: 10 chars).
+    (
+        "Microsoft Clarity",
+        re.compile(r"""clarity\.ms/tag/([a-z0-9]{6,20})\b"""),
+        1,
+    ),
+    (
+        "Microsoft Clarity",
+        re.compile(r"""clarity\s*\(\s*['"]set['"]\s*,\s*['"]project['"]\s*,\s*['"]([a-z0-9]{6,20})['"]"""),
+        1,
+    ),
+    # ── Hotjar (Phase 3 ticket D) ──────────────────────────────────────
+    # Standard snippet has _hjSettings={hjid:NNNNNN, hjsv:N};
+    (
+        "Hotjar",
+        re.compile(r"""_hjSettings\s*=\s*\{\s*hjid\s*:\s*(\d{4,10})\s*,"""),
+        1,
+    ),
+    # ── LINE Tag — _lt('init', {customerType:..., tagId: '<id>' ...}) ──
+    (
+        "LINE Tag",
+        re.compile(
+            r"""_lt\s*\(\s*['"]init['"]\s*,\s*\{[^}]*tagId\s*:\s*['"]([A-Za-z0-9_-]{8,40})['"]"""
+        ),
+        1,
+    ),
+    # ── X / Twitter Pixel — twq('config'|'init', '<id>') ───────────────
+    (
+        "X / Twitter Pixel",
+        re.compile(
+            r"""twq\s*\(\s*['"](?:config|init)['"]\s*,\s*['"]([A-Za-z0-9]{4,20})['"]"""
+        ),
+        1,
+    ),
 ]
 
 
