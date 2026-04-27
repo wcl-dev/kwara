@@ -23,7 +23,11 @@ from datetime import datetime, timedelta
 from urllib.parse import parse_qs, urlparse
 
 from param_attribution import (
-    OWNER_KIND_PLATFORM,
+    PLATFORM_GOOGLE_ADS,
+    PLATFORM_GOOGLE_ANALYTICS,
+    PLATFORM_GOOGLE_TAG_MANAGER,
+    PLATFORM_META_FACEBOOK,
+    PLATFORM_TIKTOK_ADS,
     classify_owner,
     identify_param,
     merge_risk_tags,
@@ -453,16 +457,17 @@ def shared_tracking_ids(conn: sqlite3.Connection, case_id: int) -> list:
     return out
 
 
-# Map fingerprints.py platform labels to the canonical owner label used by
+# Map fingerprints.py platform labels to the canonical platform_id used by
 # identify_param(), so URL-param and HTML-embedded signals fold into the
-# same row of the providers table.
-_HTML_PLATFORM_TO_OWNER: dict[str, str] = {
-    "Meta Pixel":            "Meta / Facebook",
-    "Google Analytics 4":    "Google Analytics",
-    "Google Analytics (UA)": "Google Analytics",
-    "Google Tag Manager":    "Google Tag Manager",  # no URL-param equivalent
-    "Google Ads":            "Google Ads",
-    "TikTok Pixel":          "TikTok Ads",
+# same row of the providers table. Symbol references (PLATFORM_*) make
+# typos loud (NameError) instead of silent ("merged into wrong bucket").
+_HTML_PLATFORM_TO_PLATFORM_ID: dict[str, str] = {
+    "Meta Pixel":            PLATFORM_META_FACEBOOK,
+    "Google Analytics 4":    PLATFORM_GOOGLE_ANALYTICS,
+    "Google Analytics (UA)": PLATFORM_GOOGLE_ANALYTICS,
+    "Google Tag Manager":    PLATFORM_GOOGLE_TAG_MANAGER,  # no URL-param equivalent
+    "Google Ads":            PLATFORM_GOOGLE_ADS,
+    "TikTok Pixel":          PLATFORM_TIKTOK_ADS,
 }
 
 
@@ -508,10 +513,10 @@ def ad_tracking_platforms(conn: sqlite3.Connection, case_id: int) -> list:
         (case_id,),
     ).fetchall()
 
-    by_owner: dict[str, dict] = {}
+    by_platform: dict[str, dict] = {}
 
-    def _entry(label: str) -> dict:
-        return by_owner.setdefault(label, {
+    def _entry(platform_id: str) -> dict:
+        return by_platform.setdefault(platform_id, {
             "param_keys":    set(),
             "tracking_ids":  set(),
             "urls":          set(),
@@ -519,6 +524,12 @@ def ad_tracking_platforms(conn: sqlite3.Connection, case_id: int) -> list:
             "domains":       set(),
             "has_url":       False,
             "has_html":      False,
+            # Per-source provenance for the same-evidence intersection check
+            # used to compute signal_source — see fix #3.
+            "url_uas":       set(),
+            "url_domains":   set(),
+            "html_uas":      set(),
+            "html_domains":  set(),
         })
 
     for r in rows:
@@ -533,18 +544,17 @@ def ad_tracking_platforms(conn: sqlite3.Connection, case_id: int) -> list:
             for key, _vals in parse_qs(parsed.query).items():
                 if not key:
                     continue
-                owner_raw, _purpose_key = identify_param(key)
-                if not owner_raw:
+                platform_id, _purpose_key = identify_param(key)
+                if not platform_id:
                     continue  # truly unknown — skip from provider lens
-                # Aggregation key is the raw owner string ("Google Analytics",
-                # "Meta / Facebook", or the sentinel "generic"). View layer
-                # translates "generic" via owner_kind at render time.
-                e = _entry(owner_raw)
+                e = _entry(platform_id)
                 e["param_keys"].add(key)
                 e["urls"].add(r["ua_id"])
                 e["posts"].add(r["post_id"])
                 e["domains"].add(domain)
                 e["has_url"] = True
+                e["url_uas"].add(r["ua_id"])
+                e["url_domains"].add(domain)
 
         # ── HTML-embedded tracking ID signals ──────────────────
         if r["tracking_ids_json"]:
@@ -554,11 +564,13 @@ def ad_tracking_platforms(conn: sqlite3.Connection, case_id: int) -> list:
                 ids_by_platform = None
             if isinstance(ids_by_platform, dict):
                 snap_domain = (r["snap_domain"] or "").lower()
-                for platform, ids in ids_by_platform.items():
+                for fp_label, ids in ids_by_platform.items():
                     if not isinstance(ids, list):
                         continue
-                    label = _HTML_PLATFORM_TO_OWNER.get(platform, platform)
-                    e = _entry(label)
+                    # Unknown fingerprints labels fall back to themselves so
+                    # rare/new platforms still appear in the table.
+                    platform_id = _HTML_PLATFORM_TO_PLATFORM_ID.get(fp_label, fp_label)
+                    e = _entry(platform_id)
                     for ident in ids:
                         if ident:
                             e["tracking_ids"].add(ident)
@@ -567,20 +579,36 @@ def ad_tracking_platforms(conn: sqlite3.Connection, case_id: int) -> list:
                     if snap_domain:
                         e["domains"].add(snap_domain)
                     e["has_html"] = True
+                    e["html_uas"].add(r["ua_id"])
+                    if snap_domain:
+                        e["html_domains"].add(snap_domain)
 
     _SOURCE_RANK = {"both": 0, "html_embedded": 1, "url_param": 2}
     out: list[dict] = []
-    for label, e in by_owner.items():
-        if e["has_url"] and e["has_html"]:
+    for platform_id, e in by_platform.items():
+        # signal_source = 'both' only when URL and HTML evidence intersect on
+        # at least one ua_id or domain (fix #3 from codex review). Without
+        # this check, a URL with utm_source on one URL and a Pixel on a
+        # *different* URL would falsely promote the row to 'both', overstating
+        # cross-confirmation.
+        url_overlaps_html = bool(
+            (e["url_uas"] & e["html_uas"])
+            or (e["url_domains"] & e["html_domains"])
+        )
+        if e["has_url"] and e["has_html"] and url_overlaps_html:
             source = "both"
-        elif e["has_html"]:
+        elif e["has_html"] and not e["has_url"]:
             source = "html_embedded"
-        else:
+        elif e["has_url"] and not e["has_html"]:
             source = "url_param"
-        owner_kind = classify_owner(label)
+        else:
+            # Both signals present but no overlap — keep them visible as
+            # separate rows would be too noisy; mark as html_embedded since
+            # HTML evidence is the stronger one when present.
+            source = "html_embedded" if e["has_html"] else "url_param"
         out.append({
-            "owner_kind":    owner_kind,
-            "owner":         label if owner_kind == OWNER_KIND_PLATFORM else "",
+            "platform_id":   platform_id,
+            "owner_kind":    classify_owner(platform_id),
             "signal_source": source,
             "param_keys":    sorted(e["param_keys"]),
             "tracking_ids":  sorted(e["tracking_ids"]),

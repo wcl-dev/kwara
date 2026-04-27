@@ -17,7 +17,11 @@ from clustering_url import (
     shared_param_keys,
     shared_params,
 )
-from param_attribution import OWNER_KIND_GENERIC, OWNER_KIND_PLATFORM
+from param_attribution import (
+    OWNER_KIND_GENERIC,
+    OWNER_KIND_PLATFORM,
+    PLATFORM_DISPLAY_NAMES,
+)
 
 
 def _bullet_owner_note(row: dict) -> str:
@@ -28,7 +32,8 @@ def _bullet_owner_note(row: dict) -> str:
     """
     kind = row.get("owner_kind", "")
     if kind == OWNER_KIND_PLATFORM:
-        owner = row.get("owner") or ""
+        pid = row.get("platform_id") or ""
+        owner = PLATFORM_DISPLAY_NAMES.get(pid, pid)
         return t("insights.bullet_param_owner", owner=owner) if owner else ""
     if kind == OWNER_KIND_GENERIC:
         return t("insights.bullet_param_owner", owner=t("param.unattributed_tracker"))

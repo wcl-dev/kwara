@@ -7,21 +7,26 @@ from urllib.parse import urlparse as _urlparse
 
 from config import KNOWN_SHORTLINK_DOMAINS, SUSPICIOUS_EXTS as _SUSP_EXTS
 from i18n import t
-from param_attribution import OWNER_KIND_GENERIC, OWNER_KIND_PLATFORM
+from param_attribution import (
+    OWNER_KIND_GENERIC,
+    OWNER_KIND_PLATFORM,
+    PLATFORM_DISPLAY_NAMES,
+)
 
 
 def localize_owner(row: dict) -> str:
-    """Translate clustering's owner_kind/owner into a user-facing label.
+    """Translate clustering's owner_kind/platform_id into a user-facing label.
 
     Clustering returns language-agnostic identifiers (owner_kind enum +
-    raw owner string). The view layer translates here so cached clustering
-    results stay correct when the user switches language.
+    canonical platform_id). The view layer translates here so cached
+    clustering results stay correct when the user switches language.
     """
     kind = row.get("owner_kind", "")
     if kind == OWNER_KIND_PLATFORM:
-        # owner is the raw vendor name (e.g. "Google Analytics") — already
-        # a stable identifier and intentionally not translated.
-        return row.get("owner") or ""
+        pid = row.get("platform_id") or ""
+        # Fall back to the raw platform_id if a new vendor is added without
+        # a display-name registration — better than returning "" silently.
+        return PLATFORM_DISPLAY_NAMES.get(pid, pid)
     if kind == OWNER_KIND_GENERIC:
         return t("param.unattributed_tracker")
     return t("param.unrecognized_platform")

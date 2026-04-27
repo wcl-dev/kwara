@@ -30,7 +30,6 @@ from config import (
     PARAM_VALUE_HASH_THRESHOLD,
 )
 from param_attribution import (
-    OWNER_KIND_PLATFORM,
     classify_owner,
     identify_param,
     merge_risk_tags,
@@ -117,6 +116,9 @@ def shared_destinations(conn: sqlite3.Connection, case_id: int) -> tuple:
     return resolved, unresolved
 
 
+_HASH_PREFIX_LEN = 12  # hex chars; 12 = 48 bits, safe to ~10M distinct values
+
+
 def _normalize_param_value(val: str) -> tuple[str, str]:
     """Return (comparison_key, display_value) for a query parameter value.
 
@@ -129,7 +131,7 @@ def _normalize_param_value(val: str) -> tuple[str, str]:
         return "", ""
     if len(val) <= PARAM_VALUE_HASH_THRESHOLD:
         return val, val
-    digest = hashlib.sha256(val.encode("utf-8", errors="replace")).hexdigest()[:8]
+    digest = hashlib.sha256(val.encode("utf-8", errors="replace")).hexdigest()[:_HASH_PREFIX_LEN]
     return f"__hash__:{digest}", f"[hash:{digest}…]"
 
 
@@ -184,15 +186,16 @@ def shared_params(conn: sqlite3.Connection, case_id: int) -> list:
         if len(posts) < 2:
             continue
         k, _cmp = bucket
-        owner_raw, purpose_key = identify_param(k)
-        owner_kind = classify_owner(owner_raw)
+        platform_id, purpose_key = identify_param(k)
         results.append({
             "param_key":   k,
             "param_value": param_display.get(bucket, ""),
-            "owner_kind":  owner_kind,
-            # owner: vendor name for OWNER_KIND_PLATFORM, empty otherwise.
-            # The view layer renders generic/unknown via i18n at display time.
-            "owner":       owner_raw if owner_kind == OWNER_KIND_PLATFORM else "",
+            "owner_kind":  classify_owner(platform_id),
+            # platform_id is "" when owner_kind == OWNER_KIND_UNKNOWN.
+            # The view layer maps platform_id → display name via
+            # PLATFORM_DISPLAY_NAMES; OWNER_KIND_GENERIC / UNKNOWN are
+            # rendered via i18n at display time.
+            "platform_id": platform_id,
             "purpose_key": purpose_key,  # raw i18n key, view layer calls t()
             "domains":     ", ".join(sorted(param_domains[bucket])),
             "post_count":  len(posts),
@@ -266,12 +269,11 @@ def shared_param_keys(conn: sqlite3.Connection, case_id: int) -> list:
         if len(key_domains[key]) > PARAM_KEY_MAX_DOMAINS:
             continue
 
-        owner_raw, purpose_key = identify_param(key)
-        owner_kind = classify_owner(owner_raw)
+        platform_id, purpose_key = identify_param(key)
         results.append({
             "param_key":        key,
-            "owner_kind":       owner_kind,
-            "owner":            owner_raw if owner_kind == OWNER_KIND_PLATFORM else "",
+            "owner_kind":       classify_owner(platform_id),
+            "platform_id":      platform_id,
             "purpose_key":      purpose_key,
             "distinct_posts":   len(posts),
             "distinct_values":  len(key_values[key]),
