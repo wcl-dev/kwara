@@ -995,28 +995,45 @@ def shared_tracking_ids(conn: sqlite3.Connection, case_id: int) -> list:
     return out
 
 
+# Map fingerprints.py platform labels to the canonical owner label used by
+# identify_param(), so URL-param and HTML-embedded signals fold into the
+# same row of the providers table.
+_HTML_PLATFORM_TO_OWNER: dict[str, str] = {
+    "Meta Pixel":            "Meta / Facebook",
+    "Google Analytics 4":    "Google Analytics",
+    "Google Analytics (UA)": "Google Analytics",
+    "Google Tag Manager":    "Google Tag Manager",  # no URL-param equivalent
+    "Google Ads":            "Google Ads",
+    "TikTok Pixel":          "TikTok Ads",
+}
+
+
 def ad_tracking_platforms(conn: sqlite3.Connection, case_id: int) -> list:
     """List ad / analytics platforms with footprint on this case's URLs.
 
-    Provider-lens companion to shared_params(): rather than flagging
-    cross-post reuse, this enumerates which platforms have signal on
-    the case's URLs based on identified URL parameters.
+    Combines two signal sources:
+      url_param      — query parameters identified by identify_param()
+                       (utm_*, fbclid, gclid, af_*, _kx, …)
+      html_embedded  — tracking IDs extracted from snapshot HTML by
+                       fingerprints.extract_tracking_ids()
+                       (Pixel ID, GA property, GTM container, …)
 
-    LIMITATION: only sees signals that travel in the URL itself
-    (utm_*, fbclid, gclid, af_*, _kx, …). Page-embedded tracking
-    (Meta Pixel ID in HTML, GA Property ID, GTM container) requires
-    HTML scraping which is a separate roadmap stage.
+    Each row reports its `signal_source`: 'url_param' | 'html_embedded' |
+    'both'. 'both' is the strongest — independent confirmation that the
+    platform's account interacts with the URL.
 
-    "generic" entries (uid, aff_id, ref, etc.) are surfaced under the
-    "Unattributed Tracker" label — known tracking semantics, unknown
-    operator.
+    "generic" URL-param entries (uid, aff_id, ref, etc.) are surfaced
+    under the "Unattributed Tracker" label — known tracking semantics,
+    unknown operator.
 
-    Returns list sorted by url_count desc:
-      owner, param_keys (sorted), url_count, domain_count, post_count, domains
+    Returns list sorted by url_count desc, with 'both' rows breaking
+    ties before html-only rows before url-only rows.
     """
     rows = conn.execute(
         """SELECT ua.id AS ua_id, me.id AS post_id,
-                  ua.original_url, sr.final_url
+                  ua.original_url, sr.final_url,
+                  s.tracking_ids_json,
+                  COALESCE(s.final_domain, '') AS snap_domain
            FROM url_artifacts ua
            JOIN message_evidence me ON me.id = ua.message_id
            LEFT JOIN scan_runs sr ON sr.url_artifact_id = ua.id
@@ -1024,15 +1041,30 @@ def ad_tracking_platforms(conn: sqlite3.Connection, case_id: int) -> list:
                    SELECT id FROM scan_runs WHERE url_artifact_id = ua.id
                    ORDER BY id DESC LIMIT 1
                )
+           LEFT JOIN snapshots s ON s.scan_run_id = sr.id
+               AND s.id = (
+                   SELECT id FROM snapshots WHERE scan_run_id = sr.id
+                   ORDER BY id DESC LIMIT 1
+               )
            WHERE ua.case_id = ?""",
         (case_id,),
     ).fetchall()
 
-    # owner_label -> {param_keys: set, urls: set(ua_id), posts: set, domains: set}
     by_owner: dict[str, dict] = {}
 
+    def _entry(label: str) -> dict:
+        return by_owner.setdefault(label, {
+            "param_keys":    set(),
+            "tracking_ids":  set(),
+            "urls":          set(),
+            "posts":         set(),
+            "domains":       set(),
+            "has_url":       False,
+            "has_html":      False,
+        })
+
     for r in rows:
-        observed_owners: set[tuple[str, str]] = set()  # (owner_label, param_key)
+        # ── URL parameter signals ──────────────────────────────
         for url in (r["original_url"], r["final_url"]):
             if not url:
                 continue
@@ -1045,32 +1077,58 @@ def ad_tracking_platforms(conn: sqlite3.Connection, case_id: int) -> list:
                     continue
                 owner, _purpose_key = identify_param(key)
                 if not owner:
-                    continue  # truly unknown — skip
+                    continue
                 label = (
                     t("param.unattributed_tracker")
                     if owner == "generic" else owner
                 )
-                observed_owners.add((label, key))
-                entry = by_owner.setdefault(label, {
-                    "param_keys": set(),
-                    "urls":       set(),
-                    "posts":      set(),
-                    "domains":    set(),
-                })
-                entry["param_keys"].add(key)
-                entry["urls"].add(r["ua_id"])
-                entry["posts"].add(r["post_id"])
-                entry["domains"].add(domain)
+                e = _entry(label)
+                e["param_keys"].add(key)
+                e["urls"].add(r["ua_id"])
+                e["posts"].add(r["post_id"])
+                e["domains"].add(domain)
+                e["has_url"] = True
 
+        # ── HTML-embedded tracking ID signals ──────────────────
+        if r["tracking_ids_json"]:
+            try:
+                ids_by_platform = json.loads(r["tracking_ids_json"])
+            except (ValueError, TypeError):
+                ids_by_platform = None
+            if isinstance(ids_by_platform, dict):
+                snap_domain = (r["snap_domain"] or "").lower()
+                for platform, ids in ids_by_platform.items():
+                    if not isinstance(ids, list):
+                        continue
+                    label = _HTML_PLATFORM_TO_OWNER.get(platform, platform)
+                    e = _entry(label)
+                    for ident in ids:
+                        if ident:
+                            e["tracking_ids"].add(ident)
+                    e["urls"].add(r["ua_id"])
+                    e["posts"].add(r["post_id"])
+                    if snap_domain:
+                        e["domains"].add(snap_domain)
+                    e["has_html"] = True
+
+    _SOURCE_RANK = {"both": 0, "html_embedded": 1, "url_param": 2}
     out: list[dict] = []
     for label, e in by_owner.items():
+        if e["has_url"] and e["has_html"]:
+            source = "both"
+        elif e["has_html"]:
+            source = "html_embedded"
+        else:
+            source = "url_param"
         out.append({
-            "owner":        label,
-            "param_keys":   sorted(e["param_keys"]),
-            "url_count":    len(e["urls"]),
-            "post_count":   len(e["posts"]),
-            "domain_count": len(e["domains"]),
-            "domains":      sorted(e["domains"]),
+            "owner":         label,
+            "signal_source": source,
+            "param_keys":    sorted(e["param_keys"]),
+            "tracking_ids":  sorted(e["tracking_ids"]),
+            "url_count":     len(e["urls"]),
+            "post_count":    len(e["posts"]),
+            "domain_count":  len(e["domains"]),
+            "domains":       sorted(e["domains"]),
         })
-    out.sort(key=lambda x: (-x["url_count"], -x["domain_count"]))
+    out.sort(key=lambda x: (-x["url_count"], -x["domain_count"], _SOURCE_RANK[x["signal_source"]]))
     return out

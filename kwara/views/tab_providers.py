@@ -215,11 +215,17 @@ def _ca_section(conn, case_id):
         st.dataframe(pd.DataFrame(sel_c["domains"]), use_container_width=True, hide_index=True)
 
 
+_SOURCE_LABEL_KEYS = {
+    "both":          "prov.signal_both",
+    "html_embedded": "prov.signal_html",
+    "url_param":     "prov.signal_url",
+}
+
+
 def _ad_tracking_section(conn, case_id):
-    """Ad / analytics platforms identified via URL parameters."""
+    """Ad / analytics platforms — URL params + HTML-embedded pixel IDs."""
     st.subheader(t("prov.ad_tracking"))
     st.caption(t("prov.ad_tracking_caption"))
-    st.warning(t("prov.ad_tracking_caveat"))
 
     platforms = ad_tracking_platforms(conn, case_id)
     if not platforms:
@@ -229,11 +235,13 @@ def _ad_tracking_section(conn, case_id):
     summary = []
     for p in platforms:
         summary.append({
-            "owner":      p["owner"],
-            "param_keys": ", ".join(p["param_keys"]),
-            "urls":       p["url_count"],
-            "domains":    p["domain_count"],
-            "posts":      p["post_count"],
+            "owner":         p["owner"],
+            "signal":        t(_SOURCE_LABEL_KEYS[p["signal_source"]]),
+            "param_keys":    ", ".join(p["param_keys"]) or "—",
+            "tracking_ids":  ", ".join(p["tracking_ids"]) or "—",
+            "urls":          p["url_count"],
+            "domains":       p["domain_count"],
+            "posts":         p["post_count"],
         })
     st.dataframe(pd.DataFrame(summary), use_container_width=True, hide_index=True)
 
