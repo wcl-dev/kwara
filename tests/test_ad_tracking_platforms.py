@@ -251,3 +251,37 @@ def test_sorted_by_url_count_desc():
     res = ad_tracking_platforms(conn, case_id)
     assert res[0]["platform_id"] == PLATFORM_GOOGLE_ANALYTICS
     assert res[0]["url_count"] == 5
+
+
+def test_later_bad_snapshot_does_not_erase_earlier_html_signal():
+    """Codex review fix #2 (companion to test in test_shared_tracking_ids):
+    in ad_tracking_platforms, a later failed re-capture must not erase the
+    HTML pixel signal from an earlier successful snapshot."""
+    import json
+    conn = _make_db()
+    case_id = _make_case(conn)
+    # Successful initial snapshot with Meta Pixel
+    ua_id = _add_with_snapshot(
+        conn, case_id,
+        "https://a.com/?fbclid=ABC",
+        "https://a.com/?fbclid=ABC", "a.com",
+        {"Meta Pixel": ["1234567890123456"]},
+    )
+    # Append a later bad snapshot on the same scan_run
+    sr_id = conn.execute(
+        "SELECT id FROM scan_runs WHERE url_artifact_id = ?", (ua_id,)
+    ).fetchone()["id"]
+    conn.execute(
+        """INSERT INTO snapshots (scan_run_id, final_url, final_domain,
+           captured_at, capture_status, tracking_ids_json)
+           VALUES (?, 'https://a.com/', 'a.com', ?, 'cf_challenge', '{}')""",
+        (sr_id, _now()),
+    )
+    conn.commit()
+
+    res = ad_tracking_platforms(conn, case_id)
+    meta = next(r for r in res if r["platform_id"] == PLATFORM_META_FACEBOOK)
+    # Both URL (fbclid) AND HTML (Pixel from earlier snapshot) should be
+    # present, intersecting on the same ua_id → 'both'
+    assert meta["signal_source"] == "both"
+    assert "1234567890123456" in meta["tracking_ids"]

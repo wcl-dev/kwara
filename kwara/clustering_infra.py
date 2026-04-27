@@ -404,12 +404,18 @@ def shared_tracking_ids(conn: sqlite3.Connection, case_id: int) -> list:
                ORDER BY id DESC LIMIT 1
            )
            JOIN snapshots s ON s.id = (
-               SELECT id FROM snapshots WHERE scan_run_id = sr.id
+               -- Pick the latest *usable* snapshot, not just latest-by-id
+               -- (codex review fix #2). A bad re-snapshot (Cloudflare
+               -- challenge, timeout, empty HTML) on top of an earlier good
+               -- one previously erased the earlier attribution silently.
+               SELECT id FROM snapshots
+               WHERE scan_run_id = sr.id
+                 AND capture_status = 'ok'
+                 AND tracking_ids_json IS NOT NULL
+                 AND TRIM(tracking_ids_json) != ''
                ORDER BY id DESC LIMIT 1
            )
-           WHERE ua.case_id = ?
-             AND s.tracking_ids_json IS NOT NULL
-             AND TRIM(s.tracking_ids_json) != ''""",
+           WHERE ua.case_id = ?""",
         (case_id,),
     ).fetchall()
 
@@ -506,7 +512,15 @@ def ad_tracking_platforms(conn: sqlite3.Connection, case_id: int) -> list:
                )
            LEFT JOIN snapshots s ON s.scan_run_id = sr.id
                AND s.id = (
-                   SELECT id FROM snapshots WHERE scan_run_id = sr.id
+                   -- Pick the latest *usable* snapshot (codex fix #2).
+                   -- HTML pixel signals only count when the capture
+                   -- actually succeeded; a later failed re-snapshot
+                   -- shouldn't shadow an earlier good one.
+                   SELECT id FROM snapshots
+                   WHERE scan_run_id = sr.id
+                     AND capture_status = 'ok'
+                     AND tracking_ids_json IS NOT NULL
+                     AND TRIM(tracking_ids_json) != ''
                    ORDER BY id DESC LIMIT 1
                )
            WHERE ua.case_id = ?""",
