@@ -119,23 +119,25 @@ def restore(export_dir, case_title="Restored case"):
     print(f"  redirect_hops: {hop_count}")
 
     # --- 5. snapshots (metadata) ---
-    # Export ZIP layout: snapshots/{snapshot_id}/{filename}. Restore copies
-    # those into kwara/data/snapshots/{scan_run_id}/{snapshot_id}/{filename}
-    # so restored evidence keeps its per-capture isolation.
+    # Export ZIP layout: snapshots/{snapshot_id}/{filename}. Restore lays
+    # files out at kwara/data/snapshots/{snapshot_id}/{filename} — flat
+    # per-snapshot dirs, matching the ZIP. Live (non-restored) captures use
+    # the per-scan_run/per-capture dir scheme; both layouts coexist fine
+    # because each snapshot row stores its absolute path.
     snap_csv = os.path.join(export_dir, "snapshots", "snapshots.csv")
     snaps = read_csv(snap_csv)
     for s in snaps:
         sr_id = s["scan_run_id"]
-        snap_id = s.get("snapshot_id", "")
+        snap_id = s.get("snapshot_id", "") or "legacy"
         # Build local paths for screenshot/html
         ss_src = s.get("screenshot_file", "")
         html_src = s.get("html_file", "")
         local_ss = (
-            os.path.join(SNAP_DST, sr_id, snap_id or "legacy", os.path.basename(ss_src))
+            os.path.join(SNAP_DST, snap_id, os.path.basename(ss_src))
             if ss_src else ""
         )
         local_html = (
-            os.path.join(SNAP_DST, sr_id, snap_id or "legacy", os.path.basename(html_src))
+            os.path.join(SNAP_DST, snap_id, os.path.basename(html_src))
             if html_src else ""
         )
 

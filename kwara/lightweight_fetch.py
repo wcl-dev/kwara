@@ -31,6 +31,7 @@ from fingerprints import extract_tracking_ids_from_file
 
 CAPTURE_METHOD_PLAYWRIGHT = "playwright"
 CAPTURE_METHOD_HTTP_ONLY  = "http_only"
+CAPTURE_METHOD_MANUAL     = "manual"
 
 # Cap response size so a misbehaving server can't exhaust memory.
 # 5 MB covers virtually every legitimate landing page (the QSH dataset's
