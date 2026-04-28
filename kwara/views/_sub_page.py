@@ -1,6 +1,7 @@
 """Page Evidence sub-tab — screenshot, HTML, HAR, request domains, manual upload."""
 import json
 import os
+from datetime import datetime, timezone
 
 import streamlit as st
 
@@ -162,22 +163,47 @@ def render(conn, case_id, case_locale=None, case_tz=None):
             if not up_png:
                 st.warning(t("page.warn_choose_png"))
             else:
-                base = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "snapshots", str(sel["scan_run_id"]))
-                os.makedirs(base, exist_ok=True)
+                # Each upload creates a NEW snapshot row in a fresh
+                # per-capture directory (codex review #1 round 5: manual
+                # upload was silently overwriting fixed-path files and
+                # mutating existing rows in place — broke the
+                # immutable-evidence model). The latest-usable selector
+                # picks the newest snapshot for display automatically.
+                from snapshots import _per_capture_dir
+                from lightweight_fetch import CAPTURE_METHOD_MANUAL
+                base = _per_capture_dir(sel["scan_run_id"])
                 png_path = os.path.join(base, "screenshot.png")
                 with open(png_path, "wb") as f:
                     f.write(up_png.getbuffer())
-                html_path = snap["html_path"] or os.path.join(base, "page.html")
+                html_path = ""
                 if up_html:
                     html_path = os.path.join(base, "page.html")
                     with open(html_path, "wb") as f:
                         f.write(up_html.getbuffer())
-                tags_list = [tg for tg in json.loads(snap["risk_tags"] or "[]") if tg != "capture_error"]
+                # Best-effort: re-extract pixels from manually uploaded HTML
+                from fingerprints import extract_tracking_ids_from_file
+                tracking_ids = (
+                    extract_tracking_ids_from_file(html_path) if html_path else {}
+                )
+                tracking_ids_json = (
+                    json.dumps(tracking_ids, ensure_ascii=False)
+                    if tracking_ids else None
+                )
                 conn.execute(
-                    """UPDATE snapshots SET screenshot_path=?, html_path=?,
-                           capture_status=?, capture_detail=?, risk_tags=?
-                       WHERE id=?""",
-                    (png_path, html_path, "manual", "user_upload", json.dumps(tags_list), snap["id"]),
+                    """INSERT INTO snapshots
+                           (scan_run_id, final_url, final_domain,
+                            screenshot_path, html_path, captured_at,
+                            capture_status, capture_detail, tracking_ids_json,
+                            capture_method)
+                       VALUES (?, ?, ?, ?, ?, ?, 'manual', 'user_upload', ?, ?)""",
+                    (
+                        sel["scan_run_id"],
+                        snap["final_url"], snap["final_domain"],
+                        png_path, html_path or None,
+                        datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
+                        tracking_ids_json,
+                        CAPTURE_METHOD_MANUAL,
+                    ),
                 )
                 conn.commit()
                 st.session_state["inv_last_ua_id"] = sel["ua_id"]
