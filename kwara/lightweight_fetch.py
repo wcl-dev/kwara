@@ -71,8 +71,11 @@ def fetch_html_only(
     case_id = row["case_id"]
     final_domain = urlparse(final_url).hostname or ""
 
-    base_dir = os.path.join(os.path.dirname(__file__), "data", "snapshots", str(scan_run_id))
-    os.makedirs(base_dir, exist_ok=True)
+    # Per-capture subdir so repeated lightweight fetches on the same scan
+    # don't overwrite earlier artifacts (codex review: silent evidence
+    # corruption — snapshots.py uses the same _per_capture_dir helper).
+    from snapshots import _per_capture_dir
+    base_dir = _per_capture_dir(scan_run_id)
     html_path = os.path.join(base_dir, "page_http_only.html")
 
     capture_status: str = "ok"
@@ -80,25 +83,40 @@ def fetch_html_only(
     body_written = False
 
     try:
+        # allow_redirects=False (codex review #5): the scan path already
+        # resolved the redirect chain, so final_url is canonical for this
+        # scan_run. Following further redirects here would silently capture
+        # HTML from a *different* host than what's recorded on the snapshot
+        # row — exactly the kind of drift that corrupts evidence integrity.
+        # If the page now redirects somewhere else we record a 3xx with the
+        # Location header so the analyst can re-scan.
         resp = requests.get(
             final_url,
             timeout=timeout,
             headers={"User-Agent": SCANNER_USER_AGENT},
             stream=True,
-            allow_redirects=True,
+            allow_redirects=False,
         )
-        resp.raise_for_status()
-        content = bytearray()
-        for chunk in resp.iter_content(chunk_size=8192):
-            if not chunk:
-                continue
-            remaining = MAX_HTML_BYTES - len(content)
-            if remaining <= 0:
-                break
-            content.extend(chunk[:remaining])
-        with open(html_path, "wb") as f:
-            f.write(content)
-        body_written = True
+        if 300 <= resp.status_code < 400:
+            capture_status = "error"
+            new_loc = (resp.headers.get("Location") or "?")[:200]
+            capture_detail = (
+                f"final_url now returns {resp.status_code} → {new_loc}; "
+                "re-scan to follow the new redirect chain"
+            )
+        else:
+            resp.raise_for_status()
+            content = bytearray()
+            for chunk in resp.iter_content(chunk_size=8192):
+                if not chunk:
+                    continue
+                remaining = MAX_HTML_BYTES - len(content)
+                if remaining <= 0:
+                    break
+                content.extend(chunk[:remaining])
+            with open(html_path, "wb") as f:
+                f.write(content)
+            body_written = True
     except requests.exceptions.Timeout:
         capture_status = "timeout"
         capture_detail = f"requests timeout after {timeout}s"

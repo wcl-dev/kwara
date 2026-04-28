@@ -138,20 +138,25 @@ def export_case(conn: sqlite3.Connection, case_id: int) -> str:
 
         snap_meta = []
         for s in snaps:
-            sid = s["scan_run_id"]
+            # Archive path keyed on snapshot.id, not scan_run_id (codex review):
+            # multiple snapshot rows for the same scan_run otherwise collide
+            # in the ZIP, leaving the file content of only the last one
+            # while exporting metadata for all of them.
+            snap_id = s["id"]
+            sr_id = s["scan_run_id"]
             sr_row = conn.execute(
                 """SELECT whois_registrar, whois_creation_date, ip_address, asn, as_org, as_country
                    FROM scan_runs WHERE id = ?""",
-                (sid,),
+                (sr_id,),
             ).fetchone()
             screenshot_arc = ""
             html_arc = ""
             if s["screenshot_path"] and os.path.exists(s["screenshot_path"]):
-                screenshot_arc = f"snapshots/{sid}/screenshot.png"
+                screenshot_arc = f"snapshots/{snap_id}/{os.path.basename(s['screenshot_path'])}"
                 with open(s["screenshot_path"], "rb") as f:
                     add(zf, screenshot_arc, f.read())
             if s["html_path"] and os.path.exists(s["html_path"]):
-                html_arc = f"snapshots/{sid}/page.html"
+                html_arc = f"snapshots/{snap_id}/{os.path.basename(s['html_path'])}"
                 with open(s["html_path"], "rb") as f:
                     add(zf, html_arc, f.read())
 
@@ -164,7 +169,8 @@ def export_case(conn: sqlite3.Connection, case_id: int) -> str:
                 return v
 
             snap_meta.append({
-                "scan_run_id":        sid,
+                "snapshot_id":        snap_id,
+                "scan_run_id":        sr_id,
                 "final_url":          s["final_url"],
                 "final_domain":       s["final_domain"],
                 "ip_address":         _coalesce_snap("ip_address", "ip_address"),
@@ -183,7 +189,7 @@ def export_case(conn: sqlite3.Connection, case_id: int) -> str:
             })
 
         if snap_meta:
-            snap_fields = ["scan_run_id", "final_url", "final_domain",
+            snap_fields = ["snapshot_id", "scan_run_id", "final_url", "final_domain",
                            "ip_address", "asn", "as_org", "as_country",
                            "whois_registrar", "whois_creation_date",
                            "risk_tags", "request_domains",
@@ -262,7 +268,9 @@ urls/
 snapshots/
   snapshots.csv  ({snap_count} record(s))
     Metadata for every snapshot attempt (including failed ones).
-    Columns: scan_run_id, final_url, final_domain,
+    One row per snapshot — multiple snapshots for the same scan_run
+    are kept distinct via snapshot_id.
+    Columns: snapshot_id, scan_run_id, final_url, final_domain,
              ip_address, asn, as_org, as_country,
              whois_registrar, whois_creation_date,
              risk_tags, request_domains,
@@ -273,12 +281,16 @@ snapshots/
                       suspicious_download, high_tracker_count,
                       url_shortener_chain, capture_error
 
-  {{scan_run_id}}/
+  {{snapshot_id}}/
+    Per-snapshot directory (one per snapshot.id). Multiple captures
+    of the same scan are preserved as distinct directories so older
+    evidence isn't overwritten.
     screenshot.png  ({has_snap_file} file(s))
       Full-page screenshot of the landing page.
       Only present where screenshot_file column is non-blank.
-    page.html  ({has_html_file} file(s))
-      Raw HTML of the landing page at time of capture.
+    page.html / page_http_only.html  ({has_html_file} file(s))
+      Raw HTML at time of capture. page_http_only.html marks
+      lightweight (requests.get-based) captures.
       Only present where html_file column is non-blank.
 
 audit.csv
@@ -286,8 +298,17 @@ audit.csv
   Columns: id, case_id, actor, action, at, meta_json
 
 manifest.json
-  SHA-256 hash of every file in this ZIP.
-  Use to verify integrity of the evidence pack.
+  SHA-256 hash of every file in this ZIP (excluding the manifest
+  files themselves). Use to verify integrity of the evidence pack.
+  When KWARA_HMAC_KEY was not set at export time, contains an
+  `integrity_warning` field making the lack of cryptographic
+  signature explicit.
+
+manifest.sha256
+  SHA-256 of manifest.json itself, in `<hash>  manifest.json` format
+  (compatible with `sha256sum -c`). Lets a reviewer verify the
+  manifest hasn't been tampered with via an out-of-band channel
+  (e.g. the hash printed on a report cover page).
 
 manifest.sig  (present only when KWARA_HMAC_KEY is set)
   HMAC-SHA256 signature of manifest.json.
@@ -301,8 +322,8 @@ CROSS-REFERENCE
   messages.csv  id
       └─ urls.csv  message_id  (URLs found in that post)
             └─ urls/chains/url_{{id}}_hops.csv  (redirect chain)
-            └─ snapshots.csv  scan_run_id  (landing page analysis)
-                  └─ snapshots/{{scan_run_id}}/  (screenshot + HTML)
+            └─ snapshots.csv  snapshot_id, scan_run_id  (landing page analysis)
+                  └─ snapshots/{{snapshot_id}}/  (screenshot + HTML)
 
 ────────────────────────────────────────────────────────────
 正體中文摘要
@@ -325,13 +346,37 @@ CROSS-REFERENCE
         add(zf, "README.txt", readme.encode("utf-8"))
 
         # ── manifest.json ───────────────────────────────────────────────
-        manifest_data = json.dumps({
+        # Codex review #3: the manifest hash list omits manifest.json and
+        # manifest.sig themselves. Without HMAC_KEY, an attacker can replace
+        # the manifest+sig pair to lie about every other file's hash.
+        # We mitigate by:
+        #   1. Always writing manifest.sha256 — a one-line companion file
+        #      that hashes manifest.json itself. A reviewer can verify it
+        #      out-of-band (e.g. printed on the cover page of the report).
+        #   2. Writing the existing HMAC signature when HMAC_KEY is set —
+        #      cryptographically anchors manifest.json to the export key.
+        #   3. Embedding an integrity_warning field in manifest.json that
+        #      makes the lack-of-key state explicit.
+        manifest_payload = {
             "case_id":   case_id,
             "export_at": _now(),
             "zip_name":  zip_name,
             "files":     manifest,
-        }, indent=2, ensure_ascii=False).encode("utf-8")
+        }
+        if not HMAC_KEY:
+            manifest_payload["integrity_warning"] = (
+                "KWARA_HMAC_KEY was not set when this pack was exported. "
+                "manifest.sha256 lets a reviewer verify manifest.json "
+                "out-of-band, but no cryptographic signature is included. "
+                "Export with KWARA_HMAC_KEY set for chain-of-custody-grade "
+                "integrity."
+            )
+        manifest_data = json.dumps(
+            manifest_payload, indent=2, ensure_ascii=False
+        ).encode("utf-8")
         zf.writestr("manifest.json", manifest_data)
+        manifest_sha = _sha256(manifest_data)
+        zf.writestr("manifest.sha256", f"{manifest_sha}  manifest.json\n".encode("utf-8"))
 
         # ── manifest.sig (HMAC-SHA256, optional) ────────────────────
         if HMAC_KEY:

@@ -1,5 +1,6 @@
 import json
 import os
+import secrets
 import sqlite3
 import sys
 from collections import defaultdict
@@ -23,6 +24,30 @@ CAPTURE_FILE_MISSING = "file_missing"
 CAPTURE_WAYBACK = "wayback"
 CAPTURE_ERROR = "error"
 CAPTURE_MANUAL = "manual"
+
+
+def _per_capture_dir(scan_run_id: int) -> str:
+    """Per-capture subdirectory under the scan_run's snapshot tree.
+
+    Each capture call writes to a fresh timestamped+random directory so
+    repeated captures (re-snapshot, lightweight fetch, manual upload) on
+    the same scan_run do NOT overwrite older artifacts. Older snapshot
+    rows in the DB keep pointing at their original files. Critical for
+    forensic chain-of-custody (codex review: silent evidence corruption).
+
+    Layout:
+      data/snapshots/{scan_run_id}/{YYYYMMDDTHHMMSSffffff}_{rand4}/
+    """
+    ts = datetime.now(tz=timezone.utc).strftime("%Y%m%dT%H%M%S%f")
+    suffix = secrets.token_hex(2)  # 4 hex chars; defends against same-microsecond collisions
+    base_dir = os.path.join(
+        os.path.dirname(__file__),
+        "data", "snapshots",
+        str(scan_run_id),
+        f"{ts}_{suffix}",
+    )
+    os.makedirs(base_dir, exist_ok=True)
+    return base_dir
 
 
 def _now() -> str:
@@ -324,8 +349,7 @@ def snapshot_url(conn: sqlite3.Connection, scan_run_id: int, timeout: int = 30,
     case_id = row['case_id']
     final_domain = urlparse(final_url).hostname or ''
 
-    base_dir = os.path.join(os.path.dirname(__file__), 'data', 'snapshots', str(scan_run_id))
-    os.makedirs(base_dir, exist_ok=True)
+    base_dir = _per_capture_dir(scan_run_id)
     screenshot_path = os.path.join(base_dir, 'screenshot.png')
     html_path = os.path.join(base_dir, 'page.html')
 
@@ -398,8 +422,7 @@ def snapshot_batch(conn: sqlite3.Connection, scan_run_ids: list[int],
         if row is None:
             continue
 
-        base_dir = os.path.join(os.path.dirname(__file__), 'data', 'snapshots', str(sr_id))
-        os.makedirs(base_dir, exist_ok=True)
+        base_dir = _per_capture_dir(sr_id)
 
         jobs.append({
             "scan_run_id": sr_id,

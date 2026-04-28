@@ -117,12 +117,21 @@ with st.sidebar:
                            WHERE ua.case_id = ?""",
                         (current_case_id,),
                     ).fetchall()
+                    # Confine cleanup to the snapshot data root (codex review
+                    # #6). Without this, a corrupted/crafted DB row could
+                    # supply an arbitrary path to shutil.rmtree.
+                    _SNAP_ROOT = os.path.realpath(os.path.join(
+                        os.path.dirname(__file__), "data", "snapshots"
+                    ))
                     _dirs_to_clean = set()
                     for _sr in _snap_rows:
                         for _col in ("screenshot_path", "html_path", "har_path"):
                             _p = _sr[_col]
-                            if _p and os.path.exists(_p):
-                                _dirs_to_clean.add(os.path.dirname(_p))
+                            if not _p or not os.path.exists(_p):
+                                continue
+                            _real = os.path.realpath(os.path.dirname(_p))
+                            if _real == _SNAP_ROOT or _real.startswith(_SNAP_ROOT + os.sep):
+                                _dirs_to_clean.add(_real)
                     for _d in _dirs_to_clean:
                         shutil.rmtree(_d, ignore_errors=True)
                     conn.execute("DELETE FROM audit_log WHERE case_id = ?", (current_case_id,))

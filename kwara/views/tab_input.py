@@ -28,20 +28,36 @@ def render(conn, case_id):
             if not message_text.strip():
                 st.warning(t("input.warn_message"))
             else:
-                screenshot_path = ""
-                if screenshot:
-                    save_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "screenshots")
-                    os.makedirs(save_dir, exist_ok=True)
-                    screenshot_path = os.path.join(save_dir, os.path.basename(screenshot.name))
-                    with open(screenshot_path, "wb") as f:
-                        f.write(screenshot.read())
+                # Read into memory so we can name the file with the
+                # eventual message_id and avoid filename collisions
+                # between posts that uploaded screenshots with the
+                # same basename (codex review #4).
+                screenshot_bytes = screenshot.read() if screenshot else None
+                screenshot_basename = os.path.basename(screenshot.name) if screenshot else ""
 
                 msg_id, urls = ingest_message(
                     conn, case_id,
                     message_text=message_text, platform=platform,
                     permalink=permalink, actor_label=actor,
-                    posted_at=posted_at, screenshot_path=screenshot_path,
+                    posted_at=posted_at, screenshot_path="",
                 )
+
+                screenshot_path = ""
+                if screenshot_bytes is not None:
+                    save_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "screenshots")
+                    os.makedirs(save_dir, exist_ok=True)
+                    # Prefix with message_id; preserve original basename for
+                    # human readability of evidence packs.
+                    screenshot_path = os.path.join(
+                        save_dir, f"{msg_id}_{screenshot_basename}"
+                    )
+                    with open(screenshot_path, "wb") as f:
+                        f.write(screenshot_bytes)
+                    conn.execute(
+                        "UPDATE message_evidence SET screenshot_path = ? WHERE id = ?",
+                        (screenshot_path, msg_id),
+                    )
+                    conn.commit()
                 st.success(t("input.success_saved", n=len(urls)))
                 for u in urls:
                     st.code(u)
