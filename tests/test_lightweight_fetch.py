@@ -71,6 +71,7 @@ def _fake_response(body: bytes, status_code: int = 200):
     """Build a MagicMock that imitates requests.Response for streaming reads."""
     resp = MagicMock(spec=requests.Response)
     resp.status_code = status_code
+    resp.headers = {}
     resp.iter_content = MagicMock(return_value=iter([body]))
     resp.raise_for_status = MagicMock(
         side_effect=(requests.exceptions.HTTPError(response=resp) if status_code >= 400 else None)
@@ -179,6 +180,32 @@ def test_connection_error_records_error_status(mock_get):
     assert "DNS" in (row["capture_detail"] or "")
 
 
+@patch("lightweight_fetch.requests.get")
+def test_redirect_response_does_not_capture_html(mock_get):
+    """Codex review #5: allow_redirects=False so we don't silently capture
+    HTML from a different host than what's recorded. A 3xx response
+    becomes an error row pointing the analyst to re-scan."""
+    conn = _make_db()
+    case_id = _make_case(conn)
+    sr_id = _add_scan_run(conn, case_id, "http://x/a", "https://target.com/")
+    resp = MagicMock(spec=requests.Response)
+    resp.status_code = 302
+    resp.headers = {"Location": "https://moved-to.example/landing"}
+    resp.iter_content = MagicMock(return_value=iter([b""]))
+    mock_get.return_value = resp
+
+    sid = fetch_html_only(conn, sr_id)
+    row = conn.execute(
+        "SELECT capture_status, capture_detail, html_path, tracking_ids_json "
+        "FROM snapshots WHERE id = ?", (sid,),
+    ).fetchone()
+    assert row["capture_status"] == "error"
+    assert "302" in (row["capture_detail"] or "")
+    assert "moved-to.example" in (row["capture_detail"] or "")
+    assert row["html_path"]        is None
+    assert row["tracking_ids_json"] is None
+
+
 # ---------------------------------------------------------------------------
 # Body cap
 # ---------------------------------------------------------------------------
@@ -191,6 +218,7 @@ def test_response_capped_at_max_bytes(mock_get):
     # Stream returns 3 chunks adding up to MAX + 100 KB
     huge = b"x" * (MAX_HTML_BYTES + 100 * 1024)
     resp = MagicMock(spec=requests.Response)
+    resp.status_code = 200
     resp.iter_content = MagicMock(return_value=iter([
         huge[:MAX_HTML_BYTES // 2],
         huge[MAX_HTML_BYTES // 2:MAX_HTML_BYTES],

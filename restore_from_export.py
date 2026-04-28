@@ -119,15 +119,25 @@ def restore(export_dir, case_title="Restored case"):
     print(f"  redirect_hops: {hop_count}")
 
     # --- 5. snapshots (metadata) ---
+    # Export ZIP layout: snapshots/{snapshot_id}/{filename}. Restore copies
+    # those into kwara/data/snapshots/{scan_run_id}/{snapshot_id}/{filename}
+    # so restored evidence keeps its per-capture isolation.
     snap_csv = os.path.join(export_dir, "snapshots", "snapshots.csv")
     snaps = read_csv(snap_csv)
     for s in snaps:
         sr_id = s["scan_run_id"]
+        snap_id = s.get("snapshot_id", "")
         # Build local paths for screenshot/html
         ss_src = s.get("screenshot_file", "")
         html_src = s.get("html_file", "")
-        local_ss = os.path.join(SNAP_DST, sr_id, "screenshot.png") if ss_src else ""
-        local_html = os.path.join(SNAP_DST, sr_id, "page.html") if html_src else ""
+        local_ss = (
+            os.path.join(SNAP_DST, sr_id, snap_id or "legacy", os.path.basename(ss_src))
+            if ss_src else ""
+        )
+        local_html = (
+            os.path.join(SNAP_DST, sr_id, snap_id or "legacy", os.path.basename(html_src))
+            if html_src else ""
+        )
 
         conn.execute(
             """INSERT INTO snapshots
