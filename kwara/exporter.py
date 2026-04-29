@@ -142,10 +142,11 @@ def export_case(conn: sqlite3.Connection, case_id: int) -> str:
         # redirect chain per scan_run (was per url_artifact-latest; lost
         # history of older scans on a rescanned URL)
         hop_fields = ["hop_order", "url", "status_code", "location",
-                      "resolved_url", "fetched_at"]
+                      "resolved_url", "fetched_at", "response_headers_json"]
         for sr in scan_runs_full:
             hops = conn.execute(
-                """SELECT hop_order, url, status_code, location, resolved_url, fetched_at
+                """SELECT hop_order, url, status_code, location, resolved_url,
+                          fetched_at, response_headers_json
                    FROM redirect_hops WHERE scan_run_id = ? ORDER BY hop_order""",
                 (sr["id"],),
             ).fetchall()

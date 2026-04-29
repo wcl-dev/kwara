@@ -163,10 +163,13 @@ def restore(export_dir, case_title="Restored case"):
             for h in hops:
                 conn.execute(
                     """INSERT INTO redirect_hops
-                       (scan_run_id, hop_order, url, status_code, location, resolved_url, fetched_at)
-                       VALUES (?,?,?,?,?,?,?)""",
+                       (scan_run_id, hop_order, url, status_code, location, resolved_url,
+                        fetched_at, response_headers_json)
+                       VALUES (?,?,?,?,?,?,?,?)""",
                     (sr_id, h["hop_order"], h["url"], h.get("status_code",""),
-                     h.get("location",""), h.get("resolved_url",""), h.get("fetched_at","")),
+                     h.get("location",""), h.get("resolved_url",""),
+                     h.get("fetched_at",""),
+                     h.get("response_headers_json", "") or None),
                 )
                 hop_count += 1
     print(f"  redirect_hops: {hop_count}")
