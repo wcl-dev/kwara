@@ -70,7 +70,15 @@ def run_lightweight_fetch_batch(
 
 
 def _try_corroborate(conn: sqlite3.Connection, scan_run_id: int) -> None:
-    """Best-effort third-party corroboration after a successful scan."""
+    """Best-effort third-party corroboration after a successful scan.
+
+    Per-service failures (urlscan / Wayback / TSA outage) are already
+    captured as `{"error": ...}` entries inside corroborate_url(). If the
+    whole pipeline raises (import failure, networking layer crash, etc.)
+    we still write a stub so the analyst can distinguish "never attempted"
+    from "tried but the entire pipeline aborted" — leaving
+    `corroboration_json` NULL on failure conflates the two.
+    """
     row = conn.execute(
         "SELECT final_url, status, corroboration_json FROM scan_runs WHERE id = ?",
         (scan_run_id,),
@@ -81,13 +89,20 @@ def _try_corroborate(conn: sqlite3.Connection, scan_run_id: int) -> None:
         return  # already corroborated
     try:
         results = corroborate_url(row["final_url"])
-        conn.execute(
-            "UPDATE scan_runs SET corroboration_json = ? WHERE id = ?",
-            (json.dumps(results, ensure_ascii=False), scan_run_id),
-        )
-        conn.commit()
-    except Exception:
-        pass  # best-effort — never block the scan pipeline
+    except Exception as exc:
+        err_label = f"pipeline aborted: {type(exc).__name__}"
+        results = {
+            "urlscan":   {"service": "urlscan.io",  "error": err_label},
+            "wayback":   {"service": "archive.org", "error": err_label},
+            "timestamp": {"service": "rfc3161",     "error": err_label},
+            "_pipeline_error": str(exc)[:500],
+            "_attempted_at":   _intel_now(),
+        }
+    conn.execute(
+        "UPDATE scan_runs SET corroboration_json = ? WHERE id = ?",
+        (json.dumps(results, ensure_ascii=False), scan_run_id),
+    )
+    conn.commit()
 
 
 def run_corroborate(conn: sqlite3.Connection, scan_run_id: int) -> dict | None:

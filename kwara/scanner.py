@@ -82,12 +82,24 @@ def _grab_tls_info(url: str, timeout: int) -> dict | None:
 
 
 def _headers_to_json(resp: requests.Response) -> str | None:
-    """Serialize response headers as a JSON string.
+    """Serialize response headers as a JSON list of [key, value] pairs.
 
-    Headers can have multiple values for the same key (e.g. Set-Cookie),
-    so we store as a list of [key, value] pairs to preserve duplicates.
+    `resp.headers` (CaseInsensitiveDict) folds duplicate keys into one
+    comma-joined value, which destroys per-`Set-Cookie` boundaries needed
+    for cookie-domain leak / per-cookie flag analysis. Read from the
+    underlying urllib3 HTTPHeaderDict (`resp.raw.headers`) when available
+    so each `Set-Cookie` survives as its own pair.
     """
-    pairs = [[k, v] for k, v in resp.headers.items()]
+    raw = getattr(resp, "raw", None)
+    raw_headers = getattr(raw, "headers", None) if raw is not None else None
+    pairs: list[list[str]] | None = None
+    if raw_headers is not None:
+        try:
+            pairs = [[k, v] for k, v in raw_headers.items()]
+        except Exception:
+            pairs = None
+    if pairs is None:
+        pairs = [[k, v] for k, v in resp.headers.items()]
     return json.dumps(pairs, ensure_ascii=False) if pairs else None
 
 
