@@ -48,12 +48,15 @@ def reclaim_stuck_scans(conn: sqlite3.Connection,
     return cur.rowcount
 
 
-def _insert_hop(conn, scan_run_id, hop_order, url, status_code, location, resolved_url):
+def _insert_hop(conn, scan_run_id, hop_order, url, status_code, location,
+                resolved_url, response_headers_json: str | None = None):
     conn.execute(
         """INSERT INTO redirect_hops
-               (scan_run_id, hop_order, url, status_code, location, resolved_url, fetched_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?)""",
-        (scan_run_id, hop_order, url, status_code, location, resolved_url, _now()),
+               (scan_run_id, hop_order, url, status_code, location, resolved_url,
+                fetched_at, response_headers_json)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        (scan_run_id, hop_order, url, status_code, location, resolved_url,
+         _now(), response_headers_json),
     )
 
 
@@ -226,16 +229,19 @@ def scan_url(
             sc       = resp.status_code
             location = resp.headers.get("Location")
 
+            hop_headers_json = _headers_to_json(resp)
             if 300 <= sc < 400 and location:
                 resolved = urljoin(current_url, location)
-                _insert_hop(conn, scan_run_id, hop_order, current_url, sc, location, resolved)
+                _insert_hop(conn, scan_run_id, hop_order, current_url, sc, location,
+                            resolved, response_headers_json=hop_headers_json)
                 conn.commit()
                 hop_order  += 1
                 final_url   = resolved
                 current_url = resolved
             else:
                 # Non-3xx → end of chain
-                _insert_hop(conn, scan_run_id, hop_order, current_url, sc, location, None)
+                _insert_hop(conn, scan_run_id, hop_order, current_url, sc, location, None,
+                            response_headers_json=hop_headers_json)
                 final_url = current_url
                 final_resp = resp
                 hop_order += 1

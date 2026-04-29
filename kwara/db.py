@@ -71,6 +71,19 @@ def migrate_db(conn: sqlite3.Connection) -> None:
             conn.execute(f"ALTER TABLE cases ADD COLUMN {col} {defn}")
         except sqlite3.OperationalError:
             pass
+    # Phase 4.2: per-hop response headers. Without this column, hop-level
+    # OPSEC fingerprints (Server, Set-Cookie domain, x-powered-by, etc.)
+    # are read in scanner and immediately dropped. Stored as a JSON list
+    # of [key, value] pairs preserving duplicates (urllib3 raw headers,
+    # see scanner._headers_to_json).
+    redirect_hop_cols = [
+        ("response_headers_json", "TEXT"),
+    ]
+    for col, defn in redirect_hop_cols:
+        try:
+            conn.execute(f"ALTER TABLE redirect_hops ADD COLUMN {col} {defn}")
+        except sqlite3.OperationalError:
+            pass
     conn.commit()
     _backfill_legacy_capture_status(conn)
 
