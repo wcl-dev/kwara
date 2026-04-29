@@ -5,10 +5,21 @@ Usage:
   python _run_pending.py --case-id 3                   # one specific case
   KWARA_MAX_SNAPSHOT_BATCHES=1 python _run_pending.py  # first batch only (smoke test)
 
+Environment:
+  KWARA_FAILURE_THRESHOLD  per-batch failure-rate ceiling (default 0.5)
+  KWARA_FAILURE_CHUNKS     consecutive bad chunks before abort (default 2)
+  KWARA_MIN_CHUNK_SIZE     batch must have at least N URLs to count
+                           toward the failure-rate budget (default 5)
+
 Round-6 codex finding: the prior version only handled the first case
 (`ORDER BY id LIMIT 1`); subsequent cases were never drained. It also
 didn't reclaim 'running' scan_runs left behind by crashed workers, so
 URLs blocked on those rows could never advance.
+
+ROADMAP 4.4: chunk failure-rate auto-abort. If N consecutive chunks all
+fail at >threshold rate, the run aborts (exit 3) so the analyst can
+diagnose the environment instead of letting a 16-min batch silently
+fail end-to-end.
 """
 import os
 import sys
@@ -24,7 +35,12 @@ from snapshots import (
     CAPTURE_CF, CAPTURE_ERROR, CAPTURE_TIMEOUT, CAPTURE_FILE_MISSING,
 )
 
-MAX_BATCHES = int(os.environ.get("KWARA_MAX_SNAPSHOT_BATCHES", "999999"))
+MAX_BATCHES       = int(os.environ.get("KWARA_MAX_SNAPSHOT_BATCHES", "999999"))
+FAILURE_THRESHOLD = float(os.environ.get("KWARA_FAILURE_THRESHOLD", "0.5"))
+FAILURE_CHUNKS    = int(os.environ.get("KWARA_FAILURE_CHUNKS", "2"))
+MIN_CHUNK_SIZE    = int(os.environ.get("KWARA_MIN_CHUNK_SIZE", "5"))
+
+ENV_ABORTED_EXIT_CODE = 3
 
 
 def _pending_scan_run_ids(conn, case_id: int) -> list[int]:
@@ -69,16 +85,46 @@ def _pending_scan_run_ids(conn, case_id: int) -> list[int]:
     return pending
 
 
-def _drain_case(conn, case_id: int, batch_budget: int) -> tuple[int, int]:
-    """Drain pending snapshots for one case. Returns (snapshot_count,
-    batches_used). batch_budget caps how many batches this case may use."""
+def _chunk_failure_rate(conn, snapshot_ids: list[int]) -> tuple[int, int, float]:
+    """Returns (success_count, total_count, failure_rate) for the given
+    just-inserted snapshot rows. capture_status='ok' (or wayback/manual,
+    which are analyst-recoverable) counts as success."""
+    if not snapshot_ids:
+        return (0, 0, 0.0)
+    placeholders = ",".join("?" * len(snapshot_ids))
+    rows = conn.execute(
+        f"SELECT capture_status FROM snapshots WHERE id IN ({placeholders})",
+        snapshot_ids,
+    ).fetchall()
+    total = len(rows)
+    if total == 0:
+        return (0, 0, 0.0)
+    ok_states = {CAPTURE_OK, CAPTURE_WAYBACK, CAPTURE_MANUAL}
+    success = sum(1 for r in rows if r["capture_status"] in ok_states)
+    return (success, total, (total - success) / total)
+
+
+def _drain_case(conn, case_id: int, batch_budget: int,
+                consecutive_bad_in: int = 0) -> tuple[int, int, int]:
+    """Drain pending snapshots for one case.
+
+    Returns (snapshot_count, batches_used, consecutive_bad_out).
+    batch_budget caps how many batches this case may use.
+    consecutive_bad carries across cases so a single shared environment
+    failure (e.g. network down) trips the abort regardless of which case
+    is currently being drained.
+
+    Raises SystemExit(ENV_ABORTED_EXIT_CODE) when N consecutive eligible
+    chunks all exceed FAILURE_THRESHOLD.
+    """
     pending = _pending_scan_run_ids(conn, case_id)
     print(f"Case {case_id}: {len(pending)} pending snapshot(s)", flush=True)
     if not pending or batch_budget <= 0:
-        return (0, 0)
+        return (0, 0, consecutive_bad_in)
     BATCH = 5
     snap_count = 0
     batches_used = 0
+    consecutive_bad = consecutive_bad_in
     for i in range(0, len(pending), BATCH):
         if batches_used >= batch_budget:
             print(f"  case {case_id}: stopped at batch budget {batch_budget}", flush=True)
@@ -92,8 +138,32 @@ def _drain_case(conn, case_id: int, batch_budget: int) -> tuple[int, int]:
         )
         sids = run_snapshot_batch(conn, batch)
         snap_count += len(sids)
-        print(f"    -> {len(sids)} snapshot row(s) inserted", flush=True)
-    return (snap_count, batches_used)
+        ok, total, rate = _chunk_failure_rate(conn, sids)
+        print(f"    -> {ok}/{total} ok ({rate:.0%} fail)", flush=True)
+        # Only chunks at or above MIN_CHUNK_SIZE count toward the budget;
+        # a tail batch of 1-2 URLs hitting transient failure shouldn't
+        # trip the abort.
+        if total >= MIN_CHUNK_SIZE and rate > FAILURE_THRESHOLD:
+            consecutive_bad += 1
+            print(
+                f"    warn: chunk above failure threshold "
+                f"({rate:.0%} > {FAILURE_THRESHOLD:.0%}); "
+                f"consecutive bad chunks = {consecutive_bad}/{FAILURE_CHUNKS}",
+                flush=True,
+            )
+            if consecutive_bad >= FAILURE_CHUNKS:
+                print(
+                    f"\n[ENV_ABORTED] {FAILURE_CHUNKS} consecutive chunks "
+                    f"failed above {FAILURE_THRESHOLD:.0%}. Likely environment "
+                    f"issue (network, browser, disk). Investigate before "
+                    f"continuing — remaining URLs are intact and will retry "
+                    f"on next run.",
+                    flush=True,
+                )
+                sys.exit(ENV_ABORTED_EXIT_CODE)
+        else:
+            consecutive_bad = 0
+    return (snap_count, batches_used, consecutive_bad)
 
 
 def main():
@@ -131,8 +201,12 @@ def main():
 
     total_snapshots = 0
     remaining = MAX_BATCHES
+    consecutive_bad = 0
     for cid in case_ids:
-        snap_count, used = _drain_case(conn, cid, batch_budget=remaining)
+        snap_count, used, consecutive_bad = _drain_case(
+            conn, cid, batch_budget=remaining,
+            consecutive_bad_in=consecutive_bad,
+        )
         total_snapshots += snap_count
         remaining -= used
         if remaining <= 0:
