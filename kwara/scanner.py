@@ -2,7 +2,7 @@ import json
 import socket
 import sqlite3
 import ssl
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urljoin, urlparse
 
 import requests
@@ -12,8 +12,40 @@ from audit import write_audit
 from config import HTTP_TIMEOUT as TIMEOUT, MAX_HOPS, SCANNER_USER_AGENT as USER_AGENT
 
 
+# A scan_run that's been 'running' beyond this window has lost its worker
+# (process crashed, terminal closed, OS reboot). Without reclaim, the row
+# sits forever and the URL never re-scans. 60 min covers a slow scan +
+# corroboration + WHOIS comfortably; legitimate runs finish in seconds.
+SCAN_LEASE_SECONDS = 60 * 60
+
+
 def _now() -> str:
     return datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+
+def reclaim_stuck_scans(conn: sqlite3.Connection,
+                        *, lease_seconds: int = SCAN_LEASE_SECONDS) -> int:
+    """Mark scan_runs that have outlived their lease as 'lease_expired'.
+
+    Returns the number of rows reclaimed. Call once at worker startup
+    (e.g. _run_pending.py) so abandoned 'running' rows don't block the
+    URL from being rescanned.
+    """
+    threshold = (
+        datetime.now(tz=timezone.utc) - timedelta(seconds=lease_seconds)
+    ).strftime("%Y-%m-%d %H:%M:%S UTC")
+    cur = conn.execute(
+        """UPDATE scan_runs
+              SET status = 'lease_expired',
+                  notes = COALESCE(notes, '')
+                          || ' [auto-reclaim: lease > ' || ? || 's]'
+            WHERE status = 'running'
+              AND run_at IS NOT NULL
+              AND run_at < ?""",
+        (lease_seconds, threshold),
+    )
+    conn.commit()
+    return cur.rowcount
 
 
 def _insert_hop(conn, scan_run_id, hop_order, url, status_code, location, resolved_url):
@@ -26,11 +58,17 @@ def _insert_hop(conn, scan_run_id, hop_order, url, status_code, location, resolv
 
 
 def _grab_tls_info(url: str, timeout: int) -> dict | None:
-    """Fetch TLS certificate from the final landing URL via a fresh TLS handshake.
+    """Fetch TLS certificate + transport metadata from the final landing URL.
 
-    Returns a dict with issuer, subject, notBefore, notAfter, serialNumber,
-    subjectAltName, and the raw PEM-decoded fields. Returns None if the URL
-    is not HTTPS or if the handshake fails.
+    Returns a dict with cert fields (issuer/subject/notBefore/notAfter/
+    serialNumber/subjectAltName/version) plus transport metadata captured
+    from the live socket: peer_ip (origin behind any CDN proxy at the IP
+    layer), tls_version, tls_cipher. These transport details are part of
+    the request-persona record needed to reproduce a scan and to spot
+    cloaking divergence — codex round-6 medium finding flagged that we
+    were dropping them on the floor.
+
+    Returns None if the URL is not HTTPS or if the handshake fails.
     """
     parsed = urlparse(url)
     if parsed.scheme != "https":
@@ -41,10 +79,19 @@ def _grab_tls_info(url: str, timeout: int) -> dict | None:
         return None
 
     ctx = ssl.create_default_context()
+    peer_ip: str | None = None
+    tls_version: str | None = None
+    tls_cipher: tuple | None = None
     try:
         with socket.create_connection((host, port), timeout=timeout) as raw_sock:
             with ctx.wrap_socket(raw_sock, server_hostname=host) as ssock:
                 cert = ssock.getpeercert()
+                try:
+                    peer_ip = ssock.getpeername()[0]
+                except Exception:
+                    peer_ip = None
+                tls_version = ssock.version()
+                tls_cipher = ssock.cipher()
     except Exception:
         return None
 
@@ -78,6 +125,14 @@ def _grab_tls_info(url: str, timeout: int) -> dict | None:
         "serialNumber": cert.get("serialNumber"),
         "subjectAltName": san_list,
         "version": cert.get("version"),
+        # Transport-layer fingerprints (round 6 medium): peer_ip lets you
+        # see the origin IP behind a CDN, tls_version + cipher_suite spot
+        # operator template reuse across domains.
+        "peer_ip": peer_ip,
+        "tls_version": tls_version,
+        "cipher_suite": tls_cipher[0] if tls_cipher else None,
+        "cipher_protocol": tls_cipher[1] if tls_cipher else None,
+        "scanner_user_agent": USER_AGENT,
     }
 
 
