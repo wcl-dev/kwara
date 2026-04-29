@@ -106,7 +106,10 @@ def fetch_html_only(
                 "re-scan to follow the new redirect chain"
             )
         else:
-            resp.raise_for_status()
+            # Save body unconditionally — error pages (custom 404 / PHP 500
+            # with stack trace / branded WAF block) are themselves evidence
+            # for FIMI investigations. Mark the snapshot status='error'
+            # without throwing away the response.
             content = bytearray()
             for chunk in resp.iter_content(chunk_size=8192):
                 if not chunk:
@@ -118,13 +121,12 @@ def fetch_html_only(
             with open(html_path, "wb") as f:
                 f.write(content)
             body_written = True
+            if resp.status_code >= 400:
+                capture_status = "error"
+                capture_detail = f"HTTP {resp.status_code}"
     except requests.exceptions.Timeout:
         capture_status = "timeout"
         capture_detail = f"requests timeout after {timeout}s"
-    except requests.exceptions.HTTPError as exc:
-        capture_status = "error"
-        sc = exc.response.status_code if exc.response is not None else "?"
-        capture_detail = f"HTTP {sc}"
     except requests.exceptions.RequestException as exc:
         capture_status = "error"
         capture_detail = str(exc)[:500]
