@@ -52,6 +52,10 @@ def migrate_db(conn: sqlite3.Connection) -> None:
         ("tls_info_json", "TEXT"),
         ("final_response_headers_json", "TEXT"),
         ("corroboration_json", "TEXT"),
+        # Phase 4.1 — picread-style conditional cloakers leak their
+        # gating logic when you fetch the URL with vs without tracking
+        # params. JSON shape: see cloaking.detect_cloaking().
+        ("cloaking_signal_json", "TEXT"),
     ]
     for col, defn in scan_run_cols:
         try:

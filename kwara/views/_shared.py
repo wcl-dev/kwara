@@ -106,6 +106,7 @@ def fetch_evidence_rows(conn: sqlite3.Connection, case_id: int) -> list:
                   sr.tls_info_json AS sr_tls_info_json,
                   sr.final_response_headers_json AS sr_headers_json,
                   sr.corroboration_json AS sr_corroboration_json,
+                  sr.cloaking_signal_json AS sr_cloaking_signal_json,
                   s.id   AS snapshot_id,
                   s.risk_tags AS snapshot_risk_tags
            FROM url_artifacts ua

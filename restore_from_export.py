@@ -88,8 +88,9 @@ def restore(export_dir, case_title="Restored case"):
                    (id, url_artifact_id, run_at, final_url, hop_count, status, notes,
                     whois_registrar, whois_creation_date, ip_address, asn, as_org, as_country,
                     intel_risk_tags, domain_enriched_at,
-                    tls_info_json, final_response_headers_json, corroboration_json)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    tls_info_json, final_response_headers_json,
+                    corroboration_json, cloaking_signal_json)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (sr["id"], sr["url_artifact_id"],
                  sr.get("run_at", "") or first_ts,
                  sr.get("final_url", ""), sr.get("hop_count", ""),
@@ -100,7 +101,8 @@ def restore(export_dir, case_title="Restored case"):
                  sr.get("intel_risk_tags", ""), sr.get("domain_enriched_at", ""),
                  sr.get("tls_info_json", "") or None,
                  sr.get("final_response_headers_json", "") or None,
-                 sr.get("corroboration_json", "") or None),
+                 sr.get("corroboration_json", "") or None,
+                 sr.get("cloaking_signal_json", "") or None),
             )
         print(f"  scan_runs: {len(scan_runs)}")
     else:
@@ -115,8 +117,9 @@ def restore(export_dir, case_title="Restored case"):
                    (id, url_artifact_id, run_at, final_url, hop_count, status, notes,
                     whois_registrar, whois_creation_date, ip_address, asn, as_org, as_country,
                     intel_risk_tags, domain_enriched_at,
-                    tls_info_json, final_response_headers_json, corroboration_json)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    tls_info_json, final_response_headers_json,
+                    corroboration_json, cloaking_signal_json)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (sr_id, u["id"], first_ts,
                  u.get("final_url", ""), u.get("hop_count", ""),
                  u.get("scan_status", ""), "",
@@ -126,7 +129,8 @@ def restore(export_dir, case_title="Restored case"):
                  u.get("intel_risk_tags", ""), u.get("domain_enriched_at", ""),
                  u.get("tls_info_json", "") or None,
                  u.get("final_response_headers_json", "") or None,
-                 u.get("corroboration_json", "") or None),
+                 u.get("corroboration_json", "") or None,
+                 u.get("cloaking_signal_json", "") or None),
             )
             legacy_count += 1
         print(f"  scan_runs (legacy flatten): {legacy_count}")
