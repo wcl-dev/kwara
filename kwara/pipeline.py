@@ -8,6 +8,7 @@ import sqlite3
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
+from cloaking import detect_and_store_cloaking
 from config import NEW_DOMAIN_DAYS
 from corroboration import corroborate_url
 from scanner import scan_url as _scan
@@ -103,6 +104,26 @@ def _try_corroborate(conn: sqlite3.Connection, scan_run_id: int) -> None:
         (json.dumps(results, ensure_ascii=False), scan_run_id),
     )
     conn.commit()
+
+
+def _try_detect_cloaking(conn: sqlite3.Connection, scan_run_id: int) -> None:
+    """Best-effort cloaking detection. Failures don't block the pipeline —
+    the function itself records {"verdict": "fetch_error"} so the analyst
+    sees what was attempted."""
+    try:
+        detect_and_store_cloaking(conn, scan_run_id)
+    except Exception:
+        # Defence-in-depth: detect_and_store_cloaking already swallows
+        # per-fetch failures; this only catches schema/import-time
+        # surprises so the snapshot pipeline never fails because of
+        # a downstream cloaking detector glitch.
+        pass
+
+
+def run_cloaking(conn: sqlite3.Connection, scan_run_id: int,
+                 *, force: bool = False) -> dict | None:
+    """Force (re-)run cloaking detection from UI."""
+    return detect_and_store_cloaking(conn, scan_run_id, force=force)
 
 
 def run_corroborate(conn: sqlite3.Connection, scan_run_id: int) -> dict | None:
@@ -235,6 +256,7 @@ def run_snapshot(conn: sqlite3.Connection, scan_run_id: int,
     snapshot_id = _snapshot(conn, scan_run_id, env_override=env_override)
     _enrich_domain_for_scan_run(conn, scan_run_id, snapshot_id=snapshot_id)
     _try_corroborate(conn, scan_run_id)
+    _try_detect_cloaking(conn, scan_run_id)
     return snapshot_id
 
 
@@ -248,4 +270,5 @@ def run_snapshot_batch(conn: sqlite3.Connection, scan_run_ids: list[int],
         ).fetchone()
         if row:
             _enrich_domain_for_scan_run(conn, row["scan_run_id"], snapshot_id=sid)
+            _try_detect_cloaking(conn, row["scan_run_id"])
     return snapshot_ids

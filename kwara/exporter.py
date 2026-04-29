@@ -91,7 +91,7 @@ def export_case(conn: sqlite3.Connection, case_id: int) -> str:
                       sr.ip_address, sr.asn, sr.as_org, sr.as_country,
                       sr.domain_enriched_at, sr.intel_risk_tags,
                       sr.tls_info_json, sr.final_response_headers_json,
-                      sr.corroboration_json
+                      sr.corroboration_json, sr.cloaking_signal_json
                FROM url_artifacts ua
                LEFT JOIN scan_runs sr ON sr.url_artifact_id = ua.id
                    AND sr.id = (SELECT id FROM scan_runs WHERE url_artifact_id = ua.id ORDER BY id DESC LIMIT 1)
@@ -105,7 +105,7 @@ def export_case(conn: sqlite3.Connection, case_id: int) -> str:
                       "ip_address", "asn", "as_org", "as_country",
                       "domain_enriched_at", "intel_risk_tags",
                       "tls_info_json", "final_response_headers_json",
-                      "corroboration_json"]
+                      "corroboration_json", "cloaking_signal_json"]
         add(zf, "urls/urls.csv",
             _csv_bytes([dict(r) for r in urls], url_fields))
 
@@ -120,7 +120,7 @@ def export_case(conn: sqlite3.Connection, case_id: int) -> str:
                       sr.ip_address, sr.asn, sr.as_org, sr.as_country,
                       sr.domain_enriched_at, sr.intel_risk_tags,
                       sr.tls_info_json, sr.final_response_headers_json,
-                      sr.corroboration_json
+                      sr.corroboration_json, sr.cloaking_signal_json
                FROM scan_runs sr
                JOIN url_artifacts ua ON ua.id = sr.url_artifact_id
                WHERE ua.case_id = ?
@@ -133,7 +133,8 @@ def export_case(conn: sqlite3.Connection, case_id: int) -> str:
             "whois_registrar", "whois_creation_date",
             "ip_address", "asn", "as_org", "as_country",
             "domain_enriched_at", "intel_risk_tags",
-            "tls_info_json", "final_response_headers_json", "corroboration_json",
+            "tls_info_json", "final_response_headers_json",
+            "corroboration_json", "cloaking_signal_json",
         ]
         add(zf, "urls/scan_runs.csv",
             _csv_bytes([dict(r) for r in scan_runs_full], sr_fields))
