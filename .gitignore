@@ -32,6 +32,9 @@ whois_osint/whois_cache.csv
 # Claude Code 本機設定
 .claude/
 
+# 對外送件提案資料（與 kwara codebase 不同生命週期；放外面、不入 repo）
+FNF_OSINT_2026_*
+
 # 常見系統檔
 Thumbs.db
 .DS_Store
