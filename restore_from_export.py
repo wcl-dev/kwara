@@ -59,10 +59,9 @@ def restore(export_dir, case_title="Restored case"):
         )
     print(f"  messages: {len(msgs)}")
 
-    # --- 3. urls + scan_runs ---
+    # --- 3. urls ---
     urls_csv = os.path.join(export_dir, "urls", "urls.csv")
     urls = read_csv(urls_csv)
-    seen_scan_runs = {}
     for u in urls:
         conn.execute(
             """INSERT INTO url_artifacts
@@ -71,41 +70,91 @@ def restore(export_dir, case_title="Restored case"):
             (u["id"], u["message_id"], u["original_url"], u["domain"],
              u["url_order"], first_ts),
         )
-        sr_id = u.get("scan_run_id")
-        if sr_id and sr_id not in seen_scan_runs:
-            seen_scan_runs[sr_id] = True
+    print(f"  urls: {len(urls)}")
+
+    # --- 3b. scan_runs (full history; codex round-6 critical) ---
+    # Canonical source is urls/scan_runs.csv (v2+). Older exports only
+    # flattened the latest scan_run into urls.csv; fall back to that to
+    # preserve backward compatibility, but those packs lose any older
+    # rescans on restore (and any snapshots referencing them would have
+    # FK-failed — which is exactly the bug this fix exists to prevent
+    # going forward).
+    sr_csv = os.path.join(export_dir, "urls", "scan_runs.csv")
+    if os.path.isfile(sr_csv):
+        scan_runs = read_csv(sr_csv)
+        for sr in scan_runs:
             conn.execute(
                 """INSERT INTO scan_runs
                    (id, url_artifact_id, run_at, final_url, hop_count, status, notes,
                     whois_registrar, whois_creation_date, ip_address, asn, as_org, as_country,
-                    intel_risk_tags, domain_enriched_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                (sr_id, u["id"], first_ts,
-                 u.get("final_url",""), u.get("hop_count",""), u.get("scan_status",""), "",
-                 u.get("whois_registrar",""), u.get("whois_creation_date",""),
-                 u.get("ip_address",""), u.get("asn",""), u.get("as_org",""),
-                 u.get("as_country",""), u.get("intel_risk_tags",""),
-                 u.get("domain_enriched_at","")),
+                    intel_risk_tags, domain_enriched_at,
+                    tls_info_json, final_response_headers_json, corroboration_json)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (sr["id"], sr["url_artifact_id"],
+                 sr.get("run_at", "") or first_ts,
+                 sr.get("final_url", ""), sr.get("hop_count", ""),
+                 sr.get("status", ""), sr.get("notes", ""),
+                 sr.get("whois_registrar", ""), sr.get("whois_creation_date", ""),
+                 sr.get("ip_address", ""), sr.get("asn", ""),
+                 sr.get("as_org", ""), sr.get("as_country", ""),
+                 sr.get("intel_risk_tags", ""), sr.get("domain_enriched_at", ""),
+                 sr.get("tls_info_json", "") or None,
+                 sr.get("final_response_headers_json", "") or None,
+                 sr.get("corroboration_json", "") or None),
             )
-    print(f"  urls: {len(urls)}, scan_runs: {len(seen_scan_runs)}")
+        print(f"  scan_runs: {len(scan_runs)}")
+    else:
+        # Legacy export — flatten from urls.csv.
+        legacy_count = 0
+        for u in urls:
+            sr_id = u.get("scan_run_id")
+            if not sr_id:
+                continue
+            conn.execute(
+                """INSERT INTO scan_runs
+                   (id, url_artifact_id, run_at, final_url, hop_count, status, notes,
+                    whois_registrar, whois_creation_date, ip_address, asn, as_org, as_country,
+                    intel_risk_tags, domain_enriched_at,
+                    tls_info_json, final_response_headers_json, corroboration_json)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (sr_id, u["id"], first_ts,
+                 u.get("final_url", ""), u.get("hop_count", ""),
+                 u.get("scan_status", ""), "",
+                 u.get("whois_registrar", ""), u.get("whois_creation_date", ""),
+                 u.get("ip_address", ""), u.get("asn", ""),
+                 u.get("as_org", ""), u.get("as_country", ""),
+                 u.get("intel_risk_tags", ""), u.get("domain_enriched_at", ""),
+                 u.get("tls_info_json", "") or None,
+                 u.get("final_response_headers_json", "") or None,
+                 u.get("corroboration_json", "") or None),
+            )
+            legacy_count += 1
+        print(f"  scan_runs (legacy flatten): {legacy_count}")
 
     # --- 4. redirect_hops ---
+    # v2+ format: scan_run_{sr_id}_hops.csv (one file per scan_run).
+    # Legacy format: url_{ua_id}_hops.csv (only the latest scan_run's hops).
     chains_dir = os.path.join(export_dir, "urls", "chains")
     hop_count = 0
     if os.path.isdir(chains_dir):
         for fname in os.listdir(chains_dir):
             if not fname.endswith("_hops.csv"):
                 continue
-            # url_{id}_hops.csv -> extract url_artifact_id
-            parts = fname.replace("url_", "").replace("_hops.csv", "")
-            url_id = parts
-            # find the scan_run_id for this url
-            sr_row = conn.execute(
-                "SELECT id FROM scan_runs WHERE url_artifact_id = ?", (url_id,)
-            ).fetchone()
-            if not sr_row:
+            sr_id = None
+            if fname.startswith("scan_run_"):
+                # v2 format: scan_run_{sr_id}_hops.csv
+                sr_id = fname[len("scan_run_"):-len("_hops.csv")]
+            elif fname.startswith("url_"):
+                # legacy format: url_{ua_id}_hops.csv → resolve to latest sr
+                ua_id = fname[len("url_"):-len("_hops.csv")]
+                sr_row = conn.execute(
+                    "SELECT id FROM scan_runs WHERE url_artifact_id = ? "
+                    "ORDER BY id DESC LIMIT 1", (ua_id,),
+                ).fetchone()
+                if sr_row:
+                    sr_id = str(sr_row["id"])
+            if not sr_id:
                 continue
-            sr_id = sr_row["id"]
             hops = read_csv(os.path.join(chains_dir, fname))
             for h in hops:
                 conn.execute(
@@ -129,9 +178,10 @@ def restore(export_dir, case_title="Restored case"):
     for s in snaps:
         sr_id = s["scan_run_id"]
         snap_id = s.get("snapshot_id", "") or "legacy"
-        # Build local paths for screenshot/html
+        # Build local paths for screenshot / html / har
         ss_src = s.get("screenshot_file", "")
         html_src = s.get("html_file", "")
+        har_src = s.get("har_file", "")
         local_ss = (
             os.path.join(SNAP_DST, snap_id, os.path.basename(ss_src))
             if ss_src else ""
@@ -140,21 +190,28 @@ def restore(export_dir, case_title="Restored case"):
             os.path.join(SNAP_DST, snap_id, os.path.basename(html_src))
             if html_src else ""
         )
+        local_har = (
+            os.path.join(SNAP_DST, snap_id, os.path.basename(har_src))
+            if har_src else ""
+        )
 
         conn.execute(
             """INSERT INTO snapshots
-               (scan_run_id, final_url, final_domain, screenshot_path, html_path,
+               (scan_run_id, final_url, final_domain, screenshot_path, html_path, har_path,
                 request_domains_json, risk_tags, whois_registrar, whois_creation_date,
                 captured_at, capture_status, capture_detail,
-                ip_address, asn, as_org, as_country)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                ip_address, asn, as_org, as_country,
+                tracking_ids_json, capture_method)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (sr_id, s.get("final_url",""), s.get("final_domain",""),
-             local_ss, local_html,
+             local_ss, local_html, local_har,
              s.get("request_domains",""), s.get("risk_tags",""),
              s.get("whois_registrar",""), s.get("whois_creation_date",""),
              s.get("captured_at",""), s.get("capture_status",""), s.get("capture_detail",""),
              s.get("ip_address",""), s.get("asn",""), s.get("as_org",""),
-             s.get("as_country","")),
+             s.get("as_country",""),
+             s.get("tracking_ids_json", "") or None,
+             s.get("capture_method", "") or None),
         )
     print(f"  snapshots: {len(snaps)}")
 

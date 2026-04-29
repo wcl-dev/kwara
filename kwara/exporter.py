@@ -79,7 +79,10 @@ def export_case(conn: sqlite3.Connection, case_id: int) -> str:
                 arc = f"messages/screenshots/{r['id']}_{os.path.basename(path)}"
                 add(zf, arc, data)
 
-        # ── urls.csv ────────────────────────────────────────────────────
+        # ── urls.csv (one row per url_artifact, latest scan_run flatten) ──
+        # The flatten is for analyst convenience opening the CSV in Excel.
+        # Full scan_run history is exported separately as scan_runs.csv so
+        # restore can rebuild every scan_run, not just the latest.
         urls = conn.execute(
             """SELECT ua.id, ua.original_url, ua.domain,
                       ua.message_id, ua.url_order,
@@ -106,25 +109,54 @@ def export_case(conn: sqlite3.Connection, case_id: int) -> str:
         add(zf, "urls/urls.csv",
             _csv_bytes([dict(r) for r in urls], url_fields))
 
-        # redirect chain per URL
-        for u in urls:
-            if not u["scan_run_id"]:
-                continue
+        # ── scan_runs.csv (full history, codex round-6 critical) ────────
+        # Without this, a URL that has been rescanned would lose its earlier
+        # scan_runs on restore — and snapshots referencing those older
+        # scan_run_ids would fail FK insertion (PRAGMA foreign_keys=ON).
+        scan_runs_full = conn.execute(
+            """SELECT sr.id, sr.url_artifact_id, sr.run_at, sr.final_url, sr.hop_count,
+                      sr.status, sr.notes,
+                      sr.whois_registrar, sr.whois_creation_date,
+                      sr.ip_address, sr.asn, sr.as_org, sr.as_country,
+                      sr.domain_enriched_at, sr.intel_risk_tags,
+                      sr.tls_info_json, sr.final_response_headers_json,
+                      sr.corroboration_json
+               FROM scan_runs sr
+               JOIN url_artifacts ua ON ua.id = sr.url_artifact_id
+               WHERE ua.case_id = ?
+               ORDER BY sr.id""",
+            (case_id,),
+        ).fetchall()
+        sr_fields = [
+            "id", "url_artifact_id", "run_at", "final_url", "hop_count",
+            "status", "notes",
+            "whois_registrar", "whois_creation_date",
+            "ip_address", "asn", "as_org", "as_country",
+            "domain_enriched_at", "intel_risk_tags",
+            "tls_info_json", "final_response_headers_json", "corroboration_json",
+        ]
+        add(zf, "urls/scan_runs.csv",
+            _csv_bytes([dict(r) for r in scan_runs_full], sr_fields))
+
+        # redirect chain per scan_run (was per url_artifact-latest; lost
+        # history of older scans on a rescanned URL)
+        hop_fields = ["hop_order", "url", "status_code", "location",
+                      "resolved_url", "fetched_at"]
+        for sr in scan_runs_full:
             hops = conn.execute(
                 """SELECT hop_order, url, status_code, location, resolved_url, fetched_at
                    FROM redirect_hops WHERE scan_run_id = ? ORDER BY hop_order""",
-                (u["scan_run_id"],),
+                (sr["id"],),
             ).fetchall()
             if hops:
-                hop_fields = ["hop_order", "url", "status_code", "location",
-                              "resolved_url", "fetched_at"]
-                add(zf, f"urls/chains/url_{u['id']}_hops.csv",
+                add(zf, f"urls/chains/scan_run_{sr['id']}_hops.csv",
                     _csv_bytes([dict(h) for h in hops], hop_fields))
 
         # ── snapshots ───────────────────────────────────────────────────
         snaps = conn.execute(
             """SELECT s.id, s.scan_run_id, s.final_url, s.final_domain,
-                      s.screenshot_path, s.html_path,
+                      s.screenshot_path, s.html_path, s.har_path,
+                      s.tracking_ids_json, s.capture_method,
                       s.ip_address, s.asn, s.as_org, s.as_country,
                       s.whois_registrar, s.whois_creation_date,
                       s.risk_tags, s.request_domains_json, s.captured_at,
@@ -151,6 +183,7 @@ def export_case(conn: sqlite3.Connection, case_id: int) -> str:
             ).fetchone()
             screenshot_arc = ""
             html_arc = ""
+            har_arc = ""
             if s["screenshot_path"] and os.path.exists(s["screenshot_path"]):
                 screenshot_arc = f"snapshots/{snap_id}/{os.path.basename(s['screenshot_path'])}"
                 with open(s["screenshot_path"], "rb") as f:
@@ -159,6 +192,13 @@ def export_case(conn: sqlite3.Connection, case_id: int) -> str:
                 html_arc = f"snapshots/{snap_id}/{os.path.basename(s['html_path'])}"
                 with open(s["html_path"], "rb") as f:
                     add(zf, html_arc, f.read())
+            # HAR is a high-value evidence artifact (request/response/cookie/
+            # timing per third-party endpoint). Round-6 codex finding: was
+            # silently dropped on export.
+            if s["har_path"] and os.path.exists(s["har_path"]):
+                har_arc = f"snapshots/{snap_id}/{os.path.basename(s['har_path'])}"
+                with open(s["har_path"], "rb") as f:
+                    add(zf, har_arc, f.read())
 
             def _coalesce_snap(k_snap: str, k_sr: str):
                 v = s[k_snap]
@@ -181,8 +221,11 @@ def export_case(conn: sqlite3.Connection, case_id: int) -> str:
                 "whois_creation_date": _coalesce_snap("whois_creation_date", "whois_creation_date"),
                 "risk_tags":          s["risk_tags"],
                 "request_domains":    s["request_domains_json"],
+                "tracking_ids_json":  s["tracking_ids_json"] or "",
+                "capture_method":     s["capture_method"] or "",
                 "screenshot_file":    screenshot_arc,
                 "html_file":          html_arc,
+                "har_file":           har_arc,
                 "captured_at":        s["captured_at"],
                 "capture_status":     s["capture_status"] or "",
                 "capture_detail":     s["capture_detail"] or "",
@@ -193,8 +236,9 @@ def export_case(conn: sqlite3.Connection, case_id: int) -> str:
                            "ip_address", "asn", "as_org", "as_country",
                            "whois_registrar", "whois_creation_date",
                            "risk_tags", "request_domains",
-                           "screenshot_file", "html_file", "captured_at",
-                           "capture_status", "capture_detail"]
+                           "tracking_ids_json", "capture_method",
+                           "screenshot_file", "html_file", "har_file",
+                           "captured_at", "capture_status", "capture_detail"]
             add(zf, "snapshots/snapshots.csv",
                 _csv_bytes(snap_meta, snap_fields))
 
@@ -238,13 +282,16 @@ messages/
 
 urls/
   urls.csv
-    All URLs extracted from source posts.
+    One row per URL extracted from source posts. Latest scan_run is
+    flattened in for analyst convenience; full scan_run history is in
+    scan_runs.csv (use that for restore / cross-scan diffing).
     Columns: id, original_url, domain, message_id, url_order,
              scan_run_id, scan_status, final_url, hop_count,
              whois_registrar, whois_creation_date,
              ip_address, asn, as_org, as_country,
              domain_enriched_at, intel_risk_tags,
-             tls_info_json, final_response_headers_json
+             tls_info_json, final_response_headers_json,
+             corroboration_json
     tls_info_json: JSON with issuer, subject, notBefore, notAfter,
                    serialNumber, subjectAltName (from final landing page
                    TLS certificate); null if HTTP or handshake failed.
@@ -259,9 +306,21 @@ urls/
     Scanned    : {scanned_count}
     Unscanned  : {len(urls) - scanned_count}
 
+  scan_runs.csv  ({len(scan_runs_full)} record(s))
+    Full scan_run history — one row per scan attempt, including older
+    rescans. Restore relies on this to rebuild every scan_run before
+    inserting redirect_hops/snapshots; without it, a snapshot referencing
+    an older (non-latest) scan_run would fail FK insertion.
+    Columns: id, url_artifact_id, run_at, final_url, hop_count, status,
+             notes, whois_registrar, whois_creation_date,
+             ip_address, asn, as_org, as_country,
+             domain_enriched_at, intel_risk_tags,
+             tls_info_json, final_response_headers_json,
+             corroboration_json
+
   chains/
-    One CSV per scanned URL showing every redirect hop.
-    Filename format: url_{{url_artifact_id}}_hops.csv
+    One CSV per scan_run showing every redirect hop.
+    Filename format: scan_run_{{scan_run_id}}_hops.csv
     Columns: hop_order, url, status_code, location,
              resolved_url, fetched_at
 
@@ -274,9 +333,15 @@ snapshots/
              ip_address, asn, as_org, as_country,
              whois_registrar, whois_creation_date,
              risk_tags, request_domains,
-             screenshot_file, html_file, captured_at
-    screenshot_file / html_file contain the ZIP-relative path
-    to the binary file, or are blank if capture failed.
+             tracking_ids_json, capture_method,
+             screenshot_file, html_file, har_file,
+             captured_at, capture_status, capture_detail
+    tracking_ids_json: JSON dict {{platform: [ids]}} extracted from the
+                   captured HTML (Meta Pixel, GA4, GTM, Clarity, etc.).
+                   Required for cross-domain operator clustering.
+    capture_method: 'playwright' | 'http_only' | 'manual'.
+    screenshot_file / html_file / har_file contain the ZIP-relative
+    path to each binary, or are blank if absent.
     risk_tags values: multi_hop, no_https, new_domain,
                       suspicious_download, high_tracker_count,
                       url_shortener_chain, capture_error
@@ -292,6 +357,11 @@ snapshots/
       Raw HTML at time of capture. page_http_only.html marks
       lightweight (requests.get-based) captures.
       Only present where html_file column is non-blank.
+    network.har
+      HTTP Archive (HAR 1.2) of every request the browser made
+      during capture — request/response/cookie/timing per
+      third-party endpoint. Only present where har_file is non-blank
+      (Playwright captures only; lightweight fetch has no HAR).
 
 audit.csv
   Full action log for this case (ingestion, scans, snapshots, exports).
