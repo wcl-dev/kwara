@@ -168,6 +168,25 @@ def test_detect_fake_apache_25_and_openssl_112():
     assert any("OpenSSL 1.1.2" in r for r in reasons)
 
 
+def test_detect_fake_apache_in_x_powered_by():
+    """Regression: 2026-04-29 new-case E2E surfaced that operators put the
+    fake `Apache/2.5.1 (Win64) OpenSSL/1.1.2e PHP/8` string in X-Powered-By
+    while Server itself is just `cloudflare`. The Apache pattern was
+    previously tied to Server-only and missed it entirely."""
+    conn = _fresh_db()
+    case_id = _seed_case(conn)
+    _seed_hop(conn, case_id, "http://picread.net/", [
+        ["Server", "cloudflare"],
+        ["x-powered-by", "Apache/2.5.1 (Win64) OpenSSL/1.1.2e PHP/8"],
+    ])
+    out = detect_fake_versions(conn, case_id)
+    apache_hits = [r for r in out if "Apache" in r["reason"]]
+    openssl_hits = [r for r in out if "OpenSSL" in r["reason"]]
+    assert len(apache_hits) == 1
+    assert apache_hits[0]["header"] == "x-powered-by"
+    assert len(openssl_hits) == 1
+
+
 def test_detect_fake_versions_real_versions_not_flagged():
     """Real versions (Apache 2.4.x, OpenSSL 1.1.1, nginx 1.22) must pass."""
     conn = _fresh_db()
