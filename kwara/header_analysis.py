@@ -169,28 +169,27 @@ def cross_domain_shared_template(
 # 3. fake / impossible version strings
 # ---------------------------------------------------------------------------
 
-# (regex on header value, reason). Conservative — we'd rather miss a few
-# real fakes than yell about real software. Each pattern targets a
-# version that's confirmed not to have shipped.
-_FAKE_VERSION_PATTERNS: list[tuple[str, re.Pattern, str]] = [
+# (regex on header value, reason). Each pattern targets a software
+# version confirmed not to have shipped. The header *key* isn't fixed —
+# operators routinely put fake fingerprints under both Server and
+# X-Powered-By (and occasionally custom headers), so we scan any header
+# whose key is in _FINGERPRINT_HEADER_KEYS.
+_FINGERPRINT_HEADER_KEYS = frozenset({
+    "server", "x-powered-by", "x-aspnet-version", "x-runtime",
+})
+
+_FAKE_VERSION_PATTERNS: list[tuple[re.Pattern, str]] = [
     # Apache 2.5+ has never shipped (stopped at 2.4 as of 2026)
-    ("server",
-     re.compile(r"Apache/(2\.[5-9]|[3-9])\.", re.I),
+    (re.compile(r"Apache/(2\.[5-9]|[3-9])\.", re.I),
      "Apache version >= 2.5 has never shipped"),
     # OpenSSL 1.1.2 was skipped (1.1.1 → 3.x)
-    ("x-powered-by",
-     re.compile(r"OpenSSL/1\.1\.2", re.I),
+    (re.compile(r"OpenSSL/1\.1\.2", re.I),
      "OpenSSL 1.1.2 was never released (1.1.1 → 3.x)"),
-    ("server",
-     re.compile(r"OpenSSL/1\.1\.2", re.I),
-     "OpenSSL 1.1.2 was never released (1.1.1 → 3.x)"),
-    # PHP 9.x doesn't exist
-    ("x-powered-by",
-     re.compile(r"PHP/(9|1[0-9])", re.I),
+    # PHP 9.x doesn't exist (yet)
+    (re.compile(r"PHP/(9|1[0-9])", re.I),
      "PHP version >= 9 has never shipped"),
     # nginx 2.x doesn't exist
-    ("server",
-     re.compile(r"nginx/[2-9]\.", re.I),
+    (re.compile(r"nginx/[2-9]\.", re.I),
      "nginx never had a 2.x line; current is 1.x"),
 ]
 
@@ -201,18 +200,24 @@ def detect_fake_versions(
     """Identify response-header values that claim a software version that
     has never shipped — a strong active anti-forensic signal.
 
+    Scans any header whose key is in _FINGERPRINT_HEADER_KEYS so a fake
+    version baked into X-Powered-By is caught even if Server itself is
+    "cloudflare". One row per (domain, header, value, reason) tuple so
+    a single value triggering multiple regexes (Apache + OpenSSL inside
+    one X-Powered-By) is reported as separate evidence items.
+
     Returns: list of {"domain", "header", "value", "reason"}.
     """
-    seen: set[tuple[str, str, str]] = set()
+    seen: set[tuple[str, str, str, str]] = set()
     out: list[dict[str, Any]] = []
     for domain, pairs in _iter_hops_with_headers(conn, case_id):
         for k, v in pairs:
             kl = k.lower().strip()
-            for target_key, pat, reason in _FAKE_VERSION_PATTERNS:
-                if kl != target_key:
-                    continue
+            if kl not in _FINGERPRINT_HEADER_KEYS:
+                continue
+            for pat, reason in _FAKE_VERSION_PATTERNS:
                 if pat.search(v):
-                    key = (domain, kl, v)
+                    key = (domain, kl, v, reason)
                     if key in seen:
                         continue
                     seen.add(key)
@@ -222,7 +227,7 @@ def detect_fake_versions(
                         "value": v,
                         "reason": reason,
                     })
-    out.sort(key=lambda x: (x["domain"], x["header"], x["value"]))
+    out.sort(key=lambda x: (x["domain"], x["header"], x["reason"]))
     return out
 
 
