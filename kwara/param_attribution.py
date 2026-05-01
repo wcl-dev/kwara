@@ -63,6 +63,12 @@ PLATFORM_APPSFLYER         = "appsflyer"
 PLATFORM_MICROSOFT_CLARITY = "microsoft_clarity"
 PLATFORM_HOTJAR            = "hotjar"
 PLATFORM_LINE_TAG          = "line_tag"
+# Phase 4 follow-up — surfaced by 2026-04-29 new-case E2E. Picread.net's
+# SEO persona (now captured via cloaking_alt) embedded these two and
+# shared the same IDs with visitorlanding.example, the cross-domain attribution
+# evidence kwara was missing.
+PLATFORM_GOOGLE_ADSENSE         = "google_adsense"
+PLATFORM_META_FACEBOOK_PAGE     = "meta_facebook_page"
 # "generic" is the sentinel for keys that are tracking conventions but
 # can't be attributed to a specific vendor (uid, aff_id, ref…). Mapped to
 # OWNER_KIND_GENERIC at classify time.
@@ -89,6 +95,8 @@ PLATFORM_DISPLAY_NAMES: dict[str, str] = {
     PLATFORM_MICROSOFT_CLARITY:  "Microsoft Clarity",
     PLATFORM_HOTJAR:             "Hotjar",
     PLATFORM_LINE_TAG:           "LINE Tag",
+    PLATFORM_GOOGLE_ADSENSE:     "Google AdSense",
+    PLATFORM_META_FACEBOOK_PAGE: "Meta / Facebook Page",
 }
 
 

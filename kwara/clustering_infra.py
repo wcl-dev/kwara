@@ -27,11 +27,13 @@ import ipaddress
 from config import HAR_NOISE_HOSTS
 from param_attribution import (
     PLATFORM_GOOGLE_ADS,
+    PLATFORM_GOOGLE_ADSENSE,
     PLATFORM_GOOGLE_ANALYTICS,
     PLATFORM_GOOGLE_TAG_MANAGER,
     PLATFORM_HOTJAR,
     PLATFORM_LINE_TAG,
     PLATFORM_META_FACEBOOK,
+    PLATFORM_META_FACEBOOK_PAGE,
     PLATFORM_MICROSOFT_CLARITY,
     PLATFORM_TIKTOK_ADS,
     PLATFORM_X_TWITTER,
@@ -511,6 +513,9 @@ _HTML_PLATFORM_TO_PLATFORM_ID: dict[str, str] = {
     "Hotjar":                PLATFORM_HOTJAR,
     "LINE Tag":              PLATFORM_LINE_TAG,
     "X / Twitter Pixel":     PLATFORM_X_TWITTER,
+    # Phase 4 follow-up: HTML-only signals (no URL-param equivalent)
+    "Google AdSense":        PLATFORM_GOOGLE_ADSENSE,
+    "Meta Facebook Page":    PLATFORM_META_FACEBOOK_PAGE,
 }
 
 
