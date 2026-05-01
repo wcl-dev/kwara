@@ -155,6 +155,43 @@ _PATTERNS: list[tuple[str, re.Pattern, int]] = [
         ),
         1,
     ),
+    # ── Google AdSense — publisher account ID `ca-pub-NNNNNNNNNNNNNNNN` ─
+    # The ID belongs to a single Google account, so the same `ca-pub-`
+    # appearing on multiple domains is hard evidence of one operator
+    # (same evidence weight as GA4-account sharing). Three invocation
+    # contexts; each anchors the ID to a real AdSense surface so a stray
+    # `ca-pub-…` quoted in tutorials / docs cannot become evidence.
+    (
+        "Google AdSense",
+        re.compile(r"""data-ad-client\s*=\s*['"](ca-pub-\d{16})['"]"""),
+        1,
+    ),
+    (
+        "Google AdSense",
+        re.compile(
+            r"""['"]?google_ad_client['"]?\s*[:=]\s*['"](ca-pub-\d{16})['"]"""
+        ),
+        1,
+    ),
+    (
+        "Google AdSense",
+        re.compile(
+            r"""googlesyndication\.com[^"'<>\s]*?[?&]client=(ca-pub-\d{16})\b"""
+        ),
+        1,
+    ),
+    # ── Meta / Facebook Page — `<meta property="fb:pages" content="…">` ─
+    # The site's self-declared owning FB Page(s). Cross-domain match
+    # links domains to the same FB Page operator. content="" can be
+    # comma-separated for sites claiming multiple pages — handled
+    # post-match in extract_tracking_ids().
+    (
+        "Meta Facebook Page",
+        re.compile(
+            r"""<meta\s+[^>]*property\s*=\s*['"]fb:pages['"][^>]*content\s*=\s*['"]([0-9,\s]+)['"]"""
+        ),
+        1,
+    ),
 ]
 
 
@@ -195,13 +232,21 @@ def _looks_like_placeholder(ident: str) -> bool:
     return False
 
 
+# Labels whose captured group can carry multiple IDs separated by commas
+# or whitespace. Currently fb:pages is the only such case; vendor docs
+# allow multi-page declarations.
+_MULTI_VALUE_LABELS = frozenset({"Meta Facebook Page"})
+_MULTI_VALUE_SPLIT = re.compile(r"[,\s]+")
+
+
 def extract_tracking_ids(html: str) -> dict[str, list[str]]:
     """Return ``{platform_label: sorted_unique_ids}`` for every pattern hit.
 
     Empty dict if html is falsy or no pattern matched. Each platform's
     ID list is sorted and deduplicated within a single page (the same
     Pixel ID appearing 5 times is one signal, not five). Obvious
-    placeholders are filtered.
+    placeholders are filtered. Multi-value capture groups (fb:pages
+    content="ID1,ID2") are split here.
     """
     if not html:
         return {}
@@ -209,12 +254,21 @@ def extract_tracking_ids(html: str) -> dict[str, list[str]]:
     for label, pattern, group in _PATTERNS:
         for m in pattern.finditer(html):
             try:
-                ident = m.group(group)
+                ident_raw = m.group(group)
             except IndexError:
                 continue
-            if not ident or _looks_like_placeholder(ident):
+            if not ident_raw:
                 continue
-            out.setdefault(label, set()).add(ident)
+            candidates = (
+                _MULTI_VALUE_SPLIT.split(ident_raw)
+                if label in _MULTI_VALUE_LABELS
+                else [ident_raw]
+            )
+            for ident in candidates:
+                ident = ident.strip()
+                if not ident or _looks_like_placeholder(ident):
+                    continue
+                out.setdefault(label, set()).add(ident)
     return {k: sorted(v) for k, v in out.items()}
 
 

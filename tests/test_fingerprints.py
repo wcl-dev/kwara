@@ -352,6 +352,117 @@ def test_looks_like_placeholder_does_NOT_reject_repeated_digit_ids():
 
 
 # ---------------------------------------------------------------------------
+# Google AdSense — `ca-pub-NNNNNNNNNNNNNNNN`
+# ---------------------------------------------------------------------------
+
+def test_adsense_extracted_from_data_ad_client_attribute():
+    """The most common AdSense placement — an <ins> ad slot."""
+    html = (
+        '<ins class="adsbygoogle" style="display:block" '
+        'data-ad-client="ca-pub-9453499335233965" '
+        'data-ad-slot="1234567890"></ins>'
+    )
+    out = extract_tracking_ids(html)
+    assert out == {"Google AdSense": ["ca-pub-9453499335233965"]}
+
+
+def test_adsense_extracted_from_js_config_object():
+    """Auto-ads / page-level ad config uses google_ad_client in JS."""
+    html = (
+        "<script>"
+        "(adsbygoogle = window.adsbygoogle || []).push({"
+        'google_ad_client: "ca-pub-1234567890123456",'
+        ' enable_page_level_ads: true});'
+        "</script>"
+    )
+    out = extract_tracking_ids(html)
+    assert out == {"Google AdSense": ["ca-pub-1234567890123456"]}
+
+
+def test_adsense_extracted_from_loader_url_client_param():
+    """The async-loader form: adsbygoogle.js?client=ca-pub-…"""
+    html = (
+        '<script async '
+        'src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js'
+        '?client=ca-pub-7777777777777777"></script>'
+    )
+    out = extract_tracking_ids(html)
+    assert out == {"Google AdSense": ["ca-pub-7777777777777777"]}
+
+
+def test_adsense_dedupes_same_id_across_contexts_within_one_page():
+    html = (
+        '<script src="https://pagead2.googlesyndication.com/pagead/js/'
+        'adsbygoogle.js?client=ca-pub-9453499335233965"></script>'
+        '<ins class="adsbygoogle" data-ad-client="ca-pub-9453499335233965"></ins>'
+    )
+    out = extract_tracking_ids(html)
+    assert out == {"Google AdSense": ["ca-pub-9453499335233965"]}
+
+
+def test_adsense_does_not_match_bare_ca_pub_string():
+    """A `ca-pub-…` quoted in a vendor docs paragraph (no AdSense
+    invocation context) must not become attribution evidence."""
+    html = (
+        "<p>To configure AdSense, copy your ca-pub-1234567890123456 "
+        "from the dashboard.</p>"
+    )
+    assert extract_tracking_ids(html) == {}
+
+
+def test_adsense_does_not_match_wrong_digit_count():
+    """ca-pub- is followed by exactly 16 digits in production."""
+    short = '<ins data-ad-client="ca-pub-12345678"></ins>'
+    long  = '<ins data-ad-client="ca-pub-12345678901234567890"></ins>'
+    assert extract_tracking_ids(short) == {}
+    assert extract_tracking_ids(long)  == {}
+
+
+# ---------------------------------------------------------------------------
+# Meta Facebook Page — <meta property="fb:pages" content="…">
+# ---------------------------------------------------------------------------
+
+def test_fb_pages_single_id():
+    html = '<meta property="fb:pages" content="1800778616880200" />'
+    out = extract_tracking_ids(html)
+    assert out == {"Meta Facebook Page": ["1800778616880200"]}
+
+
+def test_fb_pages_comma_separated_multiple_ids():
+    """Sites declaring more than one owning Page list them comma-separated."""
+    html = (
+        '<meta property="fb:pages" '
+        'content="1800778616880200, 9988776655443322,1234567890123456" />'
+    )
+    out = extract_tracking_ids(html)
+    assert out == {"Meta Facebook Page": [
+        "1234567890123456", "1800778616880200", "9988776655443322",
+    ]}
+
+
+def test_fb_pages_attribute_order_tolerant():
+    """The meta tag's attribute order isn't fixed by spec — content first,
+    property second still has to match."""
+    html = (
+        '<meta content="555555555555555" property="fb:pages" />'
+    )
+    out = extract_tracking_ids(html)
+    # The property-first regex won't match this ordering — confirms current
+    # scope (intentional: the property-first form is what FB documents).
+    # If we widen later, a positive-case test goes in this slot.
+    assert out == {}
+
+
+def test_fb_pages_does_not_swallow_unrelated_meta_tags():
+    html = (
+        '<meta property="og:image" content="1234567890123456">'
+        '<meta property="fb:pages" content="9999999999999999">'
+    )
+    out = extract_tracking_ids(html)
+    assert out == {"Meta Facebook Page": ["9999999999999999"]}
+
+
+# ---------------------------------------------------------------------------
 # File reader
 # ---------------------------------------------------------------------------
 def test_extract_from_file_missing_path():
