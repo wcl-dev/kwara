@@ -29,9 +29,16 @@ from config import HTTP_TIMEOUT, SCANNER_USER_AGENT
 from fingerprints import extract_tracking_ids_from_file
 
 
-CAPTURE_METHOD_PLAYWRIGHT = "playwright"
-CAPTURE_METHOD_HTTP_ONLY  = "http_only"
-CAPTURE_METHOD_MANUAL     = "manual"
+CAPTURE_METHOD_PLAYWRIGHT   = "playwright"
+CAPTURE_METHOD_HTTP_ONLY    = "http_only"
+CAPTURE_METHOD_MANUAL       = "manual"
+# Phase 4.1+: the "without tracking params" body fetched during cloaking
+# detection. Only created when the verdict is cloaking_suspect — it's
+# the SEO-facing persona of the URL that the normal scan/snapshot path
+# never sees (because scan follows the redirect to the with-params
+# destination). Lets fingerprint clustering pick up tracking IDs from
+# the cloaker's "real" content.
+CAPTURE_METHOD_CLOAKING_ALT = "cloaking_alt"
 
 # Cap response size so a misbehaving server can't exhaust memory.
 # 5 MB covers virtually every legitimate landing page (the QSH dataset's
