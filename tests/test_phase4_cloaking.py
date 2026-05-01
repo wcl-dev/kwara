@@ -246,3 +246,126 @@ def test_detect_and_store_force_reruns(mock_get):
 def test_detect_and_store_returns_none_for_missing_scan_run():
     conn = _fresh_db()
     assert detect_and_store_cloaking(conn, 99999) is None
+
+
+# ---------------------------------------------------------------------------
+# cloaking_alt snapshot path (the SEO-facing persona kwara would otherwise
+# never capture, because scan follows the with-params redirect away from it)
+# ---------------------------------------------------------------------------
+
+@patch("cloaking.requests.get")
+def test_cloaking_suspect_creates_alt_snapshot_with_extracted_pixels(mock_get):
+    """crawlerlanding-style case: with-uid → visitorlanding (small body), no-uid → crawlerlanding
+    real redacted139 HTML embedding a Meta Pixel. The alt snapshot row must
+    appear with capture_method='cloaking_alt' and tracking_ids_json
+    populated by the fingerprint extractor."""
+    def fake(url, **_):
+        if "uid=" in url:
+            # with-uid: 302 to visitorlanding (mock final body, different domain)
+            return _resp(b"<html>visitorlanding landing " + b"x" * 5000 + b"</html>",
+                         status_code=200, final_url="https://visitorlanding.example/redacted139/x")
+        # without-uid: crawlerlanding serves a real redacted139 that happens to load
+        # a Meta Pixel — exactly the operator-attribution evidence the
+        # alt-snapshot path is meant to surface.
+        return _resp(
+            b"<html><script>fbq('init', '1234567890123456');</script>"
+            b"<p>real redacted139 body" + b"x" * 12000 + b"</p></html>",
+            status_code=200, final_url="https://crawlerlanding.example/redacted139/x",
+        )
+    mock_get.side_effect = fake
+
+    conn = _fresh_db()
+    sr_id = _seed_scan_run(conn, "http://crawlerlanding.example/redacted139/x?uid=638")
+
+    result = detect_and_store_cloaking(conn, sr_id)
+    assert result["verdict"] == "cloaking_suspect"
+
+    # Alt snapshot row exists, anchored to the same scan_run, carrying
+    # crawlerlanding.example (the without-params final domain).
+    snap = conn.execute(
+        """SELECT final_url, final_domain, html_path, capture_method,
+                  capture_status, tracking_ids_json
+           FROM snapshots WHERE scan_run_id = ? AND capture_method = 'cloaking_alt'""",
+        (sr_id,),
+    ).fetchone()
+    assert snap is not None
+    assert snap["capture_status"] == "ok"
+    assert snap["final_domain"] == "crawlerlanding.example"
+    assert snap["html_path"] and os.path.isfile(snap["html_path"])
+    # Fingerprint extraction picked up the Meta Pixel from the crawlerlanding body
+    ids = json.loads(snap["tracking_ids_json"])
+    assert ids == {"Meta Pixel": ["1234567890123456"]}
+
+
+@patch("cloaking.requests.get")
+def test_no_cloaking_does_not_create_alt_snapshot(mock_get):
+    """Identical responses → verdict=no_cloaking. The without-params body
+    contains no new info vs what scan/lightweight already captured, so
+    we don't create a duplicate snapshot row."""
+    body = b"<html>same content</html>"
+    mock_get.side_effect = lambda *a, **kw: _resp(
+        body, status_code=200, final_url="http://example.com/"
+    )
+    conn = _fresh_db()
+    sr_id = _seed_scan_run(conn, "http://example.com/?utm_source=fb")
+    detect_and_store_cloaking(conn, sr_id)
+    n = conn.execute(
+        "SELECT COUNT(*) FROM snapshots WHERE scan_run_id = ? AND capture_method = 'cloaking_alt'",
+        (sr_id,),
+    ).fetchone()[0]
+    assert n == 0
+
+
+@patch("cloaking.requests.get")
+def test_alt_snapshot_is_idempotent_across_repeated_runs(mock_get):
+    """A second call (no force) must not create a second alt snapshot row."""
+    def fake(url, **_):
+        if "uid=" in url:
+            return _resp(b"<html>large" + b"x" * 5000 + b"</html>",
+                         status_code=200, final_url="https://visitorlanding.example/")
+        return _resp(b"<html>small</html>", status_code=200,
+                     final_url="https://crawlerlanding.example/")
+    mock_get.side_effect = fake
+    conn = _fresh_db()
+    sr_id = _seed_scan_run(conn, "http://crawlerlanding.example/?uid=1")
+
+    detect_and_store_cloaking(conn, sr_id)
+    detect_and_store_cloaking(conn, sr_id)  # already-populated → skip
+    n = conn.execute(
+        "SELECT COUNT(*) FROM snapshots WHERE scan_run_id = ? AND capture_method = 'cloaking_alt'",
+        (sr_id,),
+    ).fetchone()[0]
+    assert n == 1
+
+
+@patch("cloaking.requests.get")
+def test_alt_snapshot_force_updates_existing_row_no_duplicate(mock_get):
+    """force=True re-runs detection and updates the existing alt row in
+    place (preserves snapshot_id for cross-references) instead of
+    inserting a second row."""
+    def fake(url, **_):
+        if "uid=" in url:
+            return _resp(b"<html>large" + b"x" * 5000 + b"</html>",
+                         status_code=200, final_url="https://visitorlanding.example/")
+        return _resp(
+            b"<script>fbq('init','9999999999999999');</script>"
+            b"<p>" + b"x" * 12000 + b"</p>",
+            status_code=200, final_url="https://crawlerlanding.example/",
+        )
+    mock_get.side_effect = fake
+    conn = _fresh_db()
+    sr_id = _seed_scan_run(conn, "http://crawlerlanding.example/?uid=1")
+
+    detect_and_store_cloaking(conn, sr_id)
+    first_id = conn.execute(
+        "SELECT id FROM snapshots WHERE scan_run_id = ? AND capture_method = 'cloaking_alt'",
+        (sr_id,),
+    ).fetchone()["id"]
+
+    detect_and_store_cloaking(conn, sr_id, force=True)
+    rows = conn.execute(
+        "SELECT id FROM snapshots WHERE scan_run_id = ? AND capture_method = 'cloaking_alt' ORDER BY id",
+        (sr_id,),
+    ).fetchall()
+    assert len(rows) == 1
+    assert rows[0]["id"] == first_id  # in-place update, id preserved
