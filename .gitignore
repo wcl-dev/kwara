@@ -38,3 +38,31 @@ FNF_OSINT_2026_*
 # 常見系統檔
 Thumbs.db
 .DS_Store
+
+# DB backup 檔案（kwara.db.before_merge_* 等）
+kwara/data/*.db.*
+
+# 個人執行腳本（ad-hoc，與 kwara 工具不同生命週期；放外面、不入 repo）
+/_*.py
+
+# 報告產出（與 kwara 工具不同生命週期；放外面、不入 repo）
+/0510*.md
+/0510*.pdf
+/UNIFIED_CLUSTER_REPORT_*
+/kwara_分析原理.md
+/kwara_角色定位.md
+
+# qsh_pdf：報告專用內容（圖表來源、quarto 來源、編譯產物、樣式）
+# 注意：qsh_pdf/build-pdf.sh 與 qsh_pdf/pdf-style.css 是工具，不在此 ignore 範圍
+qsh_pdf/charts/*.mmd
+qsh_pdf/charts/*.png
+qsh_pdf/charts/*.svg
+qsh_pdf/charts/captions.txt
+qsh_pdf/qsh_report.qd
+qsh_pdf/smoke.qd
+qsh_pdf/report.css
+qsh_pdf/out/
+qsh_pdf/out_html/
+
+# FB 採集示範資料（demo/ 內檔案逐機更新，不入 repo）
+demo/
