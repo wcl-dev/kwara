@@ -203,6 +203,7 @@ _case_tz = (_case_row["browser_timezone"] if _case_row and _case_row["browser_ti
 # ---------------------------------------------------------------------------
 from views import (
     tab_analyze,
+    tab_crosscase,
     tab_evidence,
     tab_export,
     tab_input,
@@ -210,12 +211,13 @@ from views import (
     tab_preserve,
 )
 
-tab_in, tab_ev, tab_iv, tab_pv, tab_az, tab_ex = st.tabs([
+tab_in, tab_ev, tab_iv, tab_pv, tab_az, tab_xc, tab_ex = st.tabs([
     t("tab.input"),
     t("tab.collected"),
     t("tab.investigate"),
     t("tab.preserve"),
     t("tab.analyze"),
+    t("tab.crosscase"),
     t("tab.export"),
 ])
 
@@ -233,6 +235,9 @@ with tab_pv:
 
 with tab_az:
     tab_analyze.render(conn, current_case_id)
+
+with tab_xc:
+    tab_crosscase.render(conn, current_case_id)
 
 with tab_ex:
     tab_export.render(conn, current_case_id)
