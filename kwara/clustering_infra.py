@@ -11,6 +11,8 @@ Public surface:
   certificate_authorities  CAs ranked by domain footprint
   shared_tracking_ids      same Pixel/GA/GTM ID across multiple domains
   ad_tracking_platforms    URL params + HTML pixels merged per platform
+  shared_ad_accounts       ads.txt DIRECT accounts + identical-template
+                           clusters (frequency-weighted: manager vs operator)
 
 Companion module: clustering_url (URL/post-level clustering).
 """
@@ -24,8 +26,9 @@ from urllib.parse import parse_qs, urlparse
 
 import ipaddress
 
-from config import HAR_NOISE_HOSTS
+from config import ADS_TXT_MANAGER_BREADTH, HAR_NOISE_HOSTS
 from param_attribution import (
+    PLATFORM_ADS_TXT_SELLER,
     PLATFORM_GOOGLE_ADS,
     PLATFORM_GOOGLE_ADSENSE,
     PLATFORM_GOOGLE_ANALYTICS,
@@ -723,3 +726,132 @@ def shared_endpoints(conn: sqlite3.Connection, case_id: int) -> list:
     # backend infrastructure that bypasses CDN routing).
     out.sort(key=lambda x: (-x["domain_count"], not x["is_direct_ip"], x["endpoint"]))
     return out
+
+
+def shared_ad_accounts(conn: sqlite3.Connection, case_id: int) -> dict:
+    """Cluster landing domains by their ads.txt monetisation evidence.
+
+    Reads scan_runs.ads_txt_json (Phase 8, fetched by adstxt.py). Returns
+    two cluster lists:
+
+      by_account  : a DIRECT (adsystem, seller_id) account appears on 2+
+                    distinct domains in this case. Frequency-weighted via
+                    `tier`:
+                      operator — appears on a *rare subset* of the case's
+                                 ads.txt domains (breadth_ratio <
+                                 ADS_TXT_MANAGER_BREADTH). Strong: a shared
+                                 money account on few domains.
+                      manager  — appears on most/all domains. Weak: this is
+                                 a shared monetisation manager / reseller
+                                 network templated across client sites, NOT
+                                 a same-operator signal.
+      by_template : 2+ domains served a byte-identical ads.txt (same raw
+                    sha256). Strongest operator signal — a shared
+                    monetisation template.
+
+    Only DIRECT lines feed by_account (RESELLER is downstream supply-chain
+    noise, not the publisher's own money account). `case_domains` (distinct
+    domains carrying a parseable ads.txt) is the breadth denominator.
+
+    by_account sorted operator-tier-first then domain_count desc; by_template
+    sorted domain_count desc. platform_id on every by_account row is the
+    canonical PLATFORM_ADS_TXT_SELLER (contract 1).
+    """
+    rows = conn.execute(
+        f"""SELECT sr.ads_txt_json, sr.final_url,
+                  ua.id AS ua_id, me.id AS post_id
+           FROM url_artifacts ua
+           JOIN message_evidence me ON me.id = ua.message_id
+           JOIN scan_runs sr ON sr.id = {LATEST_DONE_SCAN_RUN}
+           WHERE ua.case_id = ?
+             AND sr.ads_txt_json IS NOT NULL
+             AND TRIM(sr.ads_txt_json) != ''""",
+        (case_id,),
+    ).fetchall()
+
+    # (adsystem, seller_id) → {domains, urls, posts}
+    account_data: dict[tuple[str, str], dict] = {}
+    # raw_sha256 → {domains}
+    template_data: dict[str, set] = defaultdict(set)
+    # distinct domains with a parseable ads.txt (breadth denominator)
+    case_domains: set[str] = set()
+
+    for r in rows:
+        try:
+            ads = json.loads(r["ads_txt_json"])
+        except (ValueError, TypeError):
+            continue
+        if not isinstance(ads, dict):
+            continue
+        domain = (urlparse(r["final_url"] or "").hostname or "").lower()
+        if not domain:
+            continue
+
+        # Template clustering keys off the raw sha256 regardless of parse
+        # status (a 403 still has a body hash, but only count domains that
+        # actually served ads.txt content — status ok with records).
+        records = ads.get("records") or []
+        if ads.get("status") == "ok" and records:
+            case_domains.add(domain)
+            sha = ads.get("raw_sha256")
+            if sha:
+                template_data[sha].add(domain)
+
+        for rec in records:
+            if (rec.get("relationship") or "").upper() != "DIRECT":
+                continue
+            adsystem = (rec.get("adsystem") or "").lower()
+            seller_id = (rec.get("seller_id") or "").strip()
+            if not adsystem or not seller_id:
+                continue
+            key = (adsystem, seller_id)
+            entry = account_data.get(key)
+            if entry is None:
+                entry = {"domains": set(), "urls": set(), "posts": set()}
+                account_data[key] = entry
+            entry["domains"].add(domain)
+            entry["urls"].add(r["ua_id"])
+            entry["posts"].add(r["post_id"])
+
+    denom = len(case_domains) or 1
+
+    # ── Cluster A: shared DIRECT accounts (frequency-weighted) ─────────
+    by_account: list[dict] = []
+    for (adsystem, seller_id), entry in account_data.items():
+        if len(entry["domains"]) < 2:
+            continue
+        domain_count = len(entry["domains"])
+        breadth_ratio = domain_count / denom
+        tier = "manager" if breadth_ratio >= ADS_TXT_MANAGER_BREADTH else "operator"
+        by_account.append({
+            "platform_id":   PLATFORM_ADS_TXT_SELLER,
+            "adsystem":      adsystem,
+            "seller_id":     seller_id,
+            "tier":          tier,
+            "breadth_ratio": round(breadth_ratio, 3),
+            "domains":       sorted(entry["domains"]),
+            "domain_count":  domain_count,
+            "url_count":     len(entry["urls"]),
+            "post_count":    len(entry["posts"]),
+        })
+    # operator-tier first (the real attribution signal), then domain_count.
+    by_account.sort(key=lambda x: (x["tier"] != "operator", -x["domain_count"],
+                                   x["adsystem"], x["seller_id"]))
+
+    # ── Cluster B: byte-identical ads.txt templates ───────────────────
+    by_template: list[dict] = []
+    for sha, domains in template_data.items():
+        if len(domains) < 2:
+            continue
+        by_template.append({
+            "sha256":       sha,
+            "sha256_short": sha[:12],
+            "domains":      sorted(domains),
+            "domain_count": len(domains),
+        })
+    by_template.sort(key=lambda x: (-x["domain_count"], x["sha256"]))
+
+    return {
+        "by_account":  by_account,
+        "by_template": by_template,
+    }

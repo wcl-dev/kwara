@@ -8,6 +8,7 @@ import sqlite3
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
+from adstxt import fetch_and_store_ads_txt
 from cloaking import detect_and_store_cloaking
 from config import NEW_DOMAIN_DAYS
 from corroboration import corroborate_url
@@ -124,6 +125,24 @@ def run_cloaking(conn: sqlite3.Connection, scan_run_id: int,
                  *, force: bool = False) -> dict | None:
     """Force (re-)run cloaking detection from UI."""
     return detect_and_store_cloaking(conn, scan_run_id, force=force)
+
+
+def _try_fetch_ads_txt(conn: sqlite3.Connection, scan_run_id: int) -> None:
+    """Best-effort ads.txt fetch. Failures don't block the pipeline —
+    fetch_and_store_ads_txt itself records {"status": "error"} so the
+    analyst sees what was attempted."""
+    try:
+        fetch_and_store_ads_txt(conn, scan_run_id)
+    except Exception:
+        # Defence-in-depth: only catches schema/import surprises so the
+        # snapshot pipeline never fails on a downstream ads.txt glitch.
+        pass
+
+
+def run_ads_txt(conn: sqlite3.Connection, scan_run_id: int,
+                *, force: bool = False) -> dict | None:
+    """Force (re-)fetch a scan run's ads.txt from UI."""
+    return fetch_and_store_ads_txt(conn, scan_run_id, force=force)
 
 
 def run_corroborate(conn: sqlite3.Connection, scan_run_id: int) -> dict | None:
@@ -257,6 +276,7 @@ def run_snapshot(conn: sqlite3.Connection, scan_run_id: int,
     _enrich_domain_for_scan_run(conn, scan_run_id, snapshot_id=snapshot_id)
     _try_corroborate(conn, scan_run_id)
     _try_detect_cloaking(conn, scan_run_id)
+    _try_fetch_ads_txt(conn, scan_run_id)
     return snapshot_id
 
 
@@ -271,4 +291,5 @@ def run_snapshot_batch(conn: sqlite3.Connection, scan_run_ids: list[int],
         if row:
             _enrich_domain_for_scan_run(conn, row["scan_run_id"], snapshot_id=sid)
             _try_detect_cloaking(conn, row["scan_run_id"])
+            _try_fetch_ads_txt(conn, row["scan_run_id"])
     return snapshot_ids

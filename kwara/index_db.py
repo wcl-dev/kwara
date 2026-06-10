@@ -42,14 +42,17 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
+from config import ADS_TXT_MANAGER_BREADTH
 from sql import LATEST_DONE_SCAN_RUN, latest_usable_snapshot
 
 # Signal type tags. Stable strings — stored in the DB and matched on lookup.
-SIGNAL_TRACKING_ID  = "tracking_id"
-SIGNAL_CERT_SERIAL  = "cert_serial"
-SIGNAL_REGISTRAR    = "registrar"
-SIGNAL_ASN          = "asn"
-SIGNAL_FINAL_DOMAIN = "final_domain"
+SIGNAL_TRACKING_ID     = "tracking_id"
+SIGNAL_CERT_SERIAL     = "cert_serial"
+SIGNAL_REGISTRAR       = "registrar"
+SIGNAL_ASN             = "asn"
+SIGNAL_FINAL_DOMAIN    = "final_domain"
+SIGNAL_ADS_TXT_SELLER  = "ads_txt_seller"    # DIRECT account, operator-tier only
+SIGNAL_ADS_TXT_TEMPLATE = "ads_txt_template"  # raw ads.txt sha256
 
 ALL_SIGNAL_TYPES = frozenset({
     SIGNAL_TRACKING_ID,
@@ -57,6 +60,8 @@ ALL_SIGNAL_TYPES = frozenset({
     SIGNAL_REGISTRAR,
     SIGNAL_ASN,
     SIGNAL_FINAL_DOMAIN,
+    SIGNAL_ADS_TXT_SELLER,
+    SIGNAL_ADS_TXT_TEMPLATE,
 })
 
 
@@ -205,6 +210,80 @@ def extract_case_signals(
                 _emit(SIGNAL_TRACKING_ID, ident, platform=platform,
                       scan_run_id=r["scan_run_id"], final_domain=domain,
                       observed_at=r["run_at"])
+
+    # ── scan_run-level signals: ads.txt monetisation (Phase 8) ─────────────
+    # Two signal kinds:
+    #   ads_txt_seller   — DIRECT seller account, but ONLY operator-tier ones
+    #                      (breadth below ADS_TXT_MANAGER_BREADTH). A handful
+    #                      of accounts shared by *every* domain is a shared
+    #                      monetisation manager; indexing those would flood
+    #                      recurring_signals with manager-wide noise. Rare
+    #                      accounts (incl. case-singletons) ARE indexed —
+    #                      cross-case recurrence of a rare money account is
+    #                      exactly the operator signal we want.
+    #   ads_txt_template — the raw ads.txt sha256, one per domain. Cross-case
+    #                      identical templates = operator reused the same file.
+    ads_rows = conn.execute(
+        f"""SELECT sr.id AS scan_run_id, sr.run_at, sr.final_url, sr.ads_txt_json
+            FROM url_artifacts ua
+            JOIN scan_runs sr ON sr.id = {LATEST_DONE_SCAN_RUN}
+            WHERE ua.case_id = ?
+              AND sr.ads_txt_json IS NOT NULL
+              AND TRIM(sr.ads_txt_json) != ''""",
+        (case_id,),
+    ).fetchall()
+
+    # First pass: per-account domain breadth across the case.
+    parsed_ads: list[tuple] = []  # (scan_run_id, run_at, domain, ads_dict)
+    case_ads_domains: set[str] = set()
+    account_domains: dict[tuple[str, str], set] = defaultdict(set)
+    for r in ads_rows:
+        try:
+            ads = json.loads(r["ads_txt_json"])
+        except (ValueError, TypeError):
+            continue
+        if not isinstance(ads, dict):
+            continue
+        domain = (urlparse(r["final_url"] or "").hostname or "").lower()
+        if not domain:
+            continue
+        parsed_ads.append((r["scan_run_id"], r["run_at"], domain, ads))
+        records = ads.get("records") or []
+        if ads.get("status") == "ok" and records:
+            case_ads_domains.add(domain)
+        for rec in records:
+            if (rec.get("relationship") or "").upper() != "DIRECT":
+                continue
+            adsystem = (rec.get("adsystem") or "").lower()
+            seller_id = (rec.get("seller_id") or "").strip()
+            if adsystem and seller_id:
+                account_domains[(adsystem, seller_id)].add(domain)
+
+    denom = len(case_ads_domains) or 1
+
+    # Second pass: emit, applying the operator-tier filter to accounts.
+    for srid, run_at, domain, ads in parsed_ads:
+        sha = (ads.get("raw_sha256") or "").strip()
+        if sha and ads.get("status") == "ok" and (ads.get("records") or []):
+            _emit(SIGNAL_ADS_TXT_TEMPLATE, sha, platform=None,
+                  scan_run_id=srid, final_domain=domain, observed_at=run_at)
+        seen_accounts: set[tuple[str, str]] = set()
+        for rec in ads.get("records") or []:
+            if (rec.get("relationship") or "").upper() != "DIRECT":
+                continue
+            adsystem = (rec.get("adsystem") or "").lower()
+            seller_id = (rec.get("seller_id") or "").strip()
+            if not adsystem or not seller_id:
+                continue
+            key = (adsystem, seller_id)
+            if key in seen_accounts:
+                continue
+            seen_accounts.add(key)
+            breadth = len(account_domains[key]) / denom
+            if breadth >= ADS_TXT_MANAGER_BREADTH:
+                continue  # manager-wide account — don't pollute the index
+            _emit(SIGNAL_ADS_TXT_SELLER, seller_id, platform=adsystem,
+                  scan_run_id=srid, final_domain=domain, observed_at=run_at)
 
     return out
 
