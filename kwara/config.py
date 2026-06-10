@@ -154,6 +154,28 @@ PARAM_KEY_MIN_VALUES:  int = int(os.environ.get("KWARA_PARAM_KEY_MIN_VALUES", "2
 PARAM_KEY_MAX_DOMAINS: int = int(os.environ.get("KWARA_PARAM_KEY_MAX_DOMAINS", "5"))
 
 
+# ── Phase 4 OPSEC-forensics knobs (cloaking.py, opsec.py) ────────────────
+# Centralised here so reports can cite the exact thresholds in effect, per
+# the "no magic numbers in analysis modules" contract. Phase 4 modules read
+# these instead of hard-coding their own constants.
+
+# cloaking.py — with-params vs without-params bodies are treated as the
+# same content while their size differs by less than this fraction.
+# Accommodates ad-script variability without firing on minor template diffs.
+CLOAKING_BODY_SIZE_DIFF: float = float(
+    os.environ.get("KWARA_CLOAKING_BODY_SIZE_DIFF", "0.30")
+)
+
+# opsec.py — lightweight-fetch success-rate cutoffs that map a domain to an
+# OPSEC level (Playwright must itself succeed >= OPSEC_PW_MIN first):
+#   lightweight >= OPSEC_LW_HIGH        → low    (no UA gate)
+#   OPSEC_LW_LOW <= lightweight < HIGH  → medium (partial gate)
+#   lightweight < OPSEC_LW_LOW          → strong (near-total UA gate)
+OPSEC_LW_HIGH: float = float(os.environ.get("KWARA_OPSEC_LW_HIGH", "0.70"))
+OPSEC_LW_LOW:  float = float(os.environ.get("KWARA_OPSEC_LW_LOW", "0.20"))
+OPSEC_PW_MIN:  float = float(os.environ.get("KWARA_OPSEC_PW_MIN", "0.70"))
+
+
 # ── Shortlink SaaS catalog (clustering.py + snapshots.py + app.py) ───────
 # Domains that are themselves shortlink services. When a scan's final_domain
 # lands here it means the scan did not penetrate the redirect — the real

@@ -3,6 +3,7 @@ Rule-based case insights from existing clustering outputs (auditable, no LLM).
 """
 from __future__ import annotations
 
+import json
 import sqlite3
 from collections import Counter
 from typing import Any
@@ -19,6 +20,12 @@ from clustering_url import (
     shared_params,
     wrapper_relationships,
 )
+from header_analysis import (
+    cross_domain_shared_template,
+    detect_fake_versions,
+)
+from i18n import t
+from opsec import compute_opsec_profile
 from param_attribution import (
     OWNER_KIND_GENERIC,
     OWNER_KIND_PLATFORM,
@@ -40,13 +47,43 @@ def _bullet_owner_note(row: dict) -> str:
     if kind == OWNER_KIND_GENERIC:
         return t("insights.bullet_param_owner", owner=t("param.unattributed_tracker"))
     return ""
-from i18n import t
+
 
 # Risk tag keys used for label lookup via t("risk.<tag>").
 _RISK_TAGS = (
     "multi_hop", "no_https", "new_domain", "suspicious_download",
     "high_tracker_count", "url_shortener_chain", "capture_error",
 )
+
+
+def _count_cloaking_suspects(conn: sqlite3.Connection, case_id: int) -> int:
+    """Count landing URLs whose latest done scan flagged cloaking_suspect.
+
+    Cloaking is an *active* anti-investigation signal (the operator wrote
+    logic to vary behaviour by visitor type) so even one suspect is worth
+    surfacing in the headline summary — it never reached Insights before.
+    """
+    rows = conn.execute(
+        """SELECT sr.cloaking_signal_json
+           FROM url_artifacts ua
+           JOIN scan_runs sr ON sr.id = (
+               SELECT id FROM scan_runs
+               WHERE url_artifact_id = ua.id AND status = 'done'
+               ORDER BY id DESC LIMIT 1
+           )
+           WHERE ua.case_id = ?
+             AND sr.cloaking_signal_json IS NOT NULL
+             AND TRIM(sr.cloaking_signal_json) != ''""",
+        (case_id,),
+    ).fetchall()
+    n = 0
+    for r in rows:
+        try:
+            if json.loads(r["cloaking_signal_json"]).get("verdict") == "cloaking_suspect":
+                n += 1
+        except (TypeError, ValueError):
+            continue
+    return n
 
 
 def case_insights(conn: sqlite3.Connection, case_id: int) -> dict[str, Any]:
@@ -58,6 +95,22 @@ def case_insights(conn: sqlite3.Connection, case_id: int) -> dict[str, Any]:
     certs = shared_certificates(conn, case_id)
     tracking_ids = shared_tracking_ids(conn, case_id)
     endpoints = shared_endpoints(conn, case_id)
+
+    # ── Phase 4 OPSEC-forensics signals (cloaking / headers / opsec) ──
+    # These are the strongest evidence layers but previously never reached
+    # the Insights headline — an analyst reading only this screen would not
+    # learn the operator was actively evading. Surface their verdicts here.
+    cloaking_suspects = _count_cloaking_suspects(conn, case_id)
+    fake_versions = detect_fake_versions(conn, case_id)
+    header_templates = cross_domain_shared_template(conn, case_id)
+    opsec_strong = [r for r in compute_opsec_profile(conn, case_id)
+                    if r["level"] == "strong"]
+    phase4 = {
+        "cloaking_suspects": cloaking_suspects,
+        "fake_versions":     fake_versions,
+        "header_templates":  header_templates,
+        "opsec_strong":      opsec_strong,
+    }
 
     url_count = conn.execute(
         "SELECT COUNT(*) AS n FROM url_artifacts WHERE case_id = ?",
@@ -127,7 +180,7 @@ def case_insights(conn: sqlite3.Connection, case_id: int) -> dict[str, Any]:
     ).fetchone()["n"]
 
     headline = _build_headline(url_count, scanned, destinations, unresolved, params, asn_data)
-    bullets = _build_bullets(destinations, unresolved, wrappers, params, param_keys, asn_data, certs, tracking_ids, endpoints, scanned)
+    bullets = _build_bullets(destinations, unresolved, wrappers, params, param_keys, asn_data, certs, tracking_ids, endpoints, phase4, scanned)
     gaps = _build_gaps(no_intel, no_snap, no_tls, no_corr, scanned, url_count)
 
     return {
@@ -174,9 +227,31 @@ def _build_bullets(
     certs: dict,
     tracking_ids: list,
     endpoints: list,
+    phase4: dict,
     scanned: int,
 ) -> list[str]:
     out: list[str] = []
+    # ── Phase 4 active-evasion signals first — highest evidence weight ──
+    if phase4.get("cloaking_suspects"):
+        out.append(t("insights.bullet_cloaking", n=phase4["cloaking_suspects"]))
+    fake_versions = phase4.get("fake_versions") or []
+    if fake_versions:
+        f0 = fake_versions[0]
+        out.append(t("insights.bullet_fake_version",
+                     n=len(fake_versions),
+                     domain=f0["domain"], header=f0["header"], value=f0["value"]))
+    header_templates = phase4.get("header_templates") or []
+    if header_templates:
+        h0 = header_templates[0]
+        out.append(t("insights.bullet_header_template",
+                     n=len(header_templates),
+                     header=h0["header"], value=h0["value"],
+                     domains=len(h0["domains"])))
+    opsec_strong = phase4.get("opsec_strong") or []
+    if opsec_strong:
+        out.append(t("insights.bullet_opsec_strong",
+                     n=len(opsec_strong),
+                     domains=", ".join(r["domain"] for r in opsec_strong[:3])))
     if destinations:
         top = sorted(destinations, key=lambda d: (-d["post_count"], -d["url_count"]))[:3]
         bits = ", ".join(
@@ -265,7 +340,7 @@ def _build_bullets(
                       domains=a0["domain_count"], urls=a0["url_count"]))
     if scanned == 0 and not out:
         out.append(t("insights.bullet_no_scans"))
-    return out[:13]
+    return out[:17]
 
 
 def _build_gaps(no_intel: int, no_snap: int, no_tls: int, no_corr: int,

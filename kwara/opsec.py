@@ -21,6 +21,8 @@ import sqlite3
 from collections import defaultdict
 from typing import Any
 
+from config import OPSEC_LW_HIGH, OPSEC_LW_LOW, OPSEC_PW_MIN
+
 
 # capture_status values that count as 'analyst got usable evidence'
 OK_STATES = frozenset({"ok", "wayback", "manual"})
@@ -29,19 +31,20 @@ OK_STATES = frozenset({"ok", "wayback", "manual"})
 def _classify(lw_rate: float | None, pw_rate: float | None) -> str:
     """Map (lightweight_rate, playwright_rate) → OPSEC level.
 
-    Levels (intentionally coarse — analyst confirms):
-      low            playwright AND lightweight both succeed (>=70%)
-      medium         playwright fine; lightweight partial (20-70%)
-      strong         playwright fine; lightweight nearly blocked (<20%)
+    Levels (intentionally coarse — analyst confirms). Cutoffs sourced from
+    config (KWARA_OPSEC_*) so reports can cite the thresholds in effect:
+      low            playwright AND lightweight both succeed (>= OPSEC_LW_HIGH)
+      medium         playwright fine; lightweight partial (LOW..HIGH)
+      strong         playwright fine; lightweight nearly blocked (< OPSEC_LW_LOW)
       indeterminate  one path has no data, or playwright itself fails
     """
     if lw_rate is None or pw_rate is None:
         return "indeterminate"
-    if pw_rate < 0.7:
+    if pw_rate < OPSEC_PW_MIN:
         return "indeterminate"
-    if lw_rate >= 0.7:
+    if lw_rate >= OPSEC_LW_HIGH:
         return "low"
-    if lw_rate >= 0.2:
+    if lw_rate >= OPSEC_LW_LOW:
         return "medium"
     return "strong"
 

@@ -15,13 +15,15 @@ kwara takes suspicious URLs from social media posts and walks them through a six
 3. **Domain** — look up WHOIS registration, IP, and ASN hosting
 4. **Page** — capture browser screenshots, HTML source, and HAR network logs
 5. **Corroboration** — archive the landing page on Internet Archive, submit to urlscan.io, and obtain an RFC 3161 trusted timestamp
-6. **Insights** — generate rule-based case summaries with risk flags, parameter attribution, and infrastructure clustering
+6. **Insights** — generate rule-based case summaries with risk flags, parameter attribution, infrastructure clustering, and Phase 4 active-evasion signals (cloaking, fabricated server versions, shared server templates, strong UA-gating)
 
 All evidence is stored locally in SQLite and can be exported as a ZIP evidence pack with SHA-256 manifest and optional HMAC signature.
 
 ## Key features
 
-- **Evidence chain workflow** — six analysis sub-tabs guide you from scan to corroboration
+- **Three-stage workflow** — Investigate → Preserve → Analyze, with the six evidence steps distributed across them
+- **Operator-level signal clustering** — cross-domain matching of HTML tracking IDs (11 platforms), TLS certificates, URL parameters, and wrapper redirects
+- **Active-evasion forensics (Phase 4)** — cloaking detection, HTTP header forensics (origin leak / fabricated versions / server templates), and OPSEC path differential
 - **Third-party proof** — Wayback Machine, urlscan.io, and RFC 3161 timestamps provide independent records
 - **Per-case locale** — set victim's region so screenshots reflect what they actually saw (defeats geo-cloaking)
 - **URL parameter attribution** — auto-identifies 50+ tracking parameters (UTM, fbclid, gclid, etc.)

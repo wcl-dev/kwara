@@ -37,13 +37,15 @@ from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 import requests
 
 from audit import write_audit
-from config import HTTP_TIMEOUT, SCANNER_USER_AGENT
+from config import CLOAKING_BODY_SIZE_DIFF, HTTP_TIMEOUT, SCANNER_USER_AGENT
 from lightweight_fetch import CAPTURE_METHOD_CLOAKING_ALT
 from param_attribution import identify_param
 
-# Body sizes within ±30% are treated as the same — accommodates ad-script
-# variability without firing on every minor template difference.
-BODY_SIZE_DIFF_THRESHOLD = 0.30
+# Body sizes within this fraction are treated as the same — accommodates
+# ad-script variability without firing on minor template diffs. Sourced from
+# config (KWARA_CLOAKING_BODY_SIZE_DIFF) so reports can cite it; the
+# module-level name is retained as the canonical reference used in tests.
+BODY_SIZE_DIFF_THRESHOLD = CLOAKING_BODY_SIZE_DIFF
 
 # Cap response read; mirrors lightweight_fetch's MAX_HTML_BYTES so the
 # sha256 inputs are bounded.
