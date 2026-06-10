@@ -63,6 +63,7 @@ Windows 已安裝依賴的情況下，從專案根目錄雙擊 `start_kwara.bat`
 | `KWARA_HTTP_TIMEOUT` | `10` | 掃描逾時秒數 |
 | `KWARA_MAX_HOPS` | `20` | Redirect chain 跳轉上限 |
 | `KWARA_NEW_DOMAIN_DAYS` | `180` | 「新網域」風險旗標門檻天數 |
+| `KWARA_INDEX_DB_PATH` | `~/.kwara/index.db` | 跨案件訊號中央索引（橫跨多個 DB 檔） |
 
 ## 專案結構
 

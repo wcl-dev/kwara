@@ -1,8 +1,8 @@
 # kwara 開發 Roadmap
 
 > 最後更新：2026-06-10
-> 目前狀態：Phase 1 + 2 + 3 + 4 完成、過 5 輪 codex review、267/267 測試綠燈、QSH 100 筆端到端驗證通過。
-> 下一批：Phase 5（跨案件 index）→ Phase 6（對外報告）→ Phase 7（watchlist + feed，新增候選）。
+> 目前狀態：Phase 1 + 2 + 3 + 4 + 5.1 完成、過 5 輪 codex review、277/277 測試綠燈、QSH 100 筆端到端驗證通過。
+> 下一批：Phase 5.2（header 衍生訊號入索引）/ Phase 6（對外報告）/ Phase 7（watchlist + feed，依賴 5.1）。
 
 ---
 
@@ -120,21 +120,23 @@
 
 ## Phase 5 — Cross-Case Longitudinal（既定優先）
 
-### 5.1 跨案件查詢
+### 5.1 跨案件查詢 ✅（已交付 2026-06-10）
 
 **問題**：今天每個案件是獨立 SQLite DB，無法回答「`G-BG0P58H1GN` 出現在過去哪些案件」、「Malaysia Cloud Pte Ltd 過去半年我們追過幾次」。但這正是 single-user local tool 的**核心增值點**——分析師累積的歷史比任何 SaaS 都深。
 
-**做法**：
-- 集中索引 DB（`~/.kwara/index.db`）儲存：tracking_id、TLS cert serial、registrar、ASN、final_domain、x-server-hosted、cookie domain → (case_id, scan_run_id, captured_at) 的多對多 mapping
-- 每次 case 結束（或手動觸發）批次 upsert
-- 開 `tab_search` 提供 `?id=G-BG0P58H1GN` 查所有案件命中
+**已交付**：
+- 集中索引 DB（`~/.kwara/index.db`，可由 `KWARA_INDEX_DB_PATH` 覆寫）儲存 5 類強訊號：tracking_id、TLS cert serial、registrar、ASN、final_domain，每筆帶 provenance（source_db、case_id、case_title、scan_run_id、observed_at）。**含 singleton**（A 案單筆配 B 案單筆才是重點）。
+- 手動觸發 upsert（跨案件分頁的「加入索引」按鈕）；full-refresh per (source_db, case_id)，re-index 冪等。
+- 查詢介面：`lookup(value)` 查單值所有命中；`recurring_signals(min_cases=2)` 列出跨 2+ 案件再現的訊號。**涵蓋跨不同 DB 檔**（使用者 2026-06-10 拍板的範圍）。
 
 **對應模組**：
-- `index.py`（新）— 集中索引建構、查詢
-- `views/tab_search.py`（新）— 跨案件搜尋介面
-- `db.py` — 不動現有案件 DB schema、只加跨案件 index DB
+- `index_db.py`（新）— schema、抽訊號、index_case、lookup、recurring_signals
+- `views/tab_crosscase.py`（新）— 跨案件分頁（第 6 個頂層分頁，介於 分析 與 匯出 之間）
+- `sql.py`（新，第一步）— 共用 latest-done-scan / latest-usable-snapshot 子查詢；index_db 直接重用
 
-**開發效果**：kwara 從 per-case → 縱向追蹤；同一個操作者跨案件再現會自動浮出，是 single-user tool 對 SaaS 的最大優勢。
+**尚未做（Phase 5.2 候選）**：x-server-hosted（origin host）、cookie domain、假版本字串等 header 衍生訊號的索引；自動觸發（目前僅手動）。
+
+**開發效果**：kwara 從 per-case → 縱向追蹤；同一個操作者跨案件再現會自動浮出，是 single-user tool 對 SaaS 的最大優勢。也是 Phase 7 watchlist 的存放體。
 
 **預估**：~1 天
 

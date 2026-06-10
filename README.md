@@ -63,6 +63,7 @@ On Windows with dependencies already installed, double-click `start_kwara.bat` f
 | `KWARA_HTTP_TIMEOUT` | `10` | Scanner per-request timeout (seconds) |
 | `KWARA_MAX_HOPS` | `20` | Redirect chain hop limit |
 | `KWARA_NEW_DOMAIN_DAYS` | `180` | "New domain" risk flag threshold (days) |
+| `KWARA_INDEX_DB_PATH` | `~/.kwara/index.db` | Central cross-case signal index (spans multiple DB files) |
 
 ## Project structure
 
