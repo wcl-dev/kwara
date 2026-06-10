@@ -51,15 +51,24 @@ URLs are extracted and deduplicated automatically.
 
 Review all ingested posts and extracted URLs in table format.
 
-### 3. Analysis — Evidence Chain
+The six top-level tabs run in workflow order. **Investigate → Preserve → Analyze** is the three-stage workflow; the six evidence steps are distributed across them:
 
-Six sub-tabs guide you through the evidence collection workflow. Work left to right:
+```
+Input → Collected → [ Investigate → Preserve → Analyze ] → Export
+                       Scan          Page        Insights / Account Patterns / Providers
+                       Network       Corrob.     Cloaking / Headers / OPSEC
+                       Domain
+```
+
+### 3. Investigate
+
+Three sub-tabs that collect network-layer evidence for each URL.
 
 #### Scan
 
-Follow each URL's redirect chain to find the real landing page. Batch-scan all unscanned URLs (8 parallel workers) or scan individually. Stuck scans can be reset.
+Follow each URL's redirect chain to find the real landing page. Batch-scan all unscanned URLs (parallel workers) or scan individually. Stuck scans can be reset.
 
-**What you get**: `final_url`, `hop_count`, `status`, and each hop's `url`, `status_code`, `location`.
+**What you get**: `final_url`, `hop_count`, `status`, and each hop's `url`, `status_code`, `location`, plus the full per-hop response header set.
 
 #### Network
 
@@ -67,7 +76,7 @@ View evidence collected during the scan — no extra action needed:
 
 - **Redirect Chain** — every hop with status code and location header
 - **TLS Certificate** — issuer, subject, validity period, serial number, SAN list (HTTPS only)
-- **Response Headers** — full HTTP headers from the landing page (including Set-Cookie, Server, etc.)
+- **Response Headers** — full HTTP headers from each hop (including Set-Cookie, Server, etc.)
 
 #### Domain
 
@@ -79,6 +88,10 @@ WHOIS registration and hosting intelligence for the landing domain:
 
 Batch-query all pending URLs or query individually.
 
+### 4. Preserve
+
+Two sub-tabs that capture page evidence and obtain third-party proof.
+
 #### Page
 
 Browser-rendered evidence of the landing page:
@@ -87,6 +100,7 @@ Browser-rendered evidence of the landing page:
 - **HTML** — raw page source at time of capture
 - **HAR** — complete HTTP Archive of all requests during page load
 - **Request Domains** — all third-party hosts the page contacted
+- **Lightweight HTML-only fetch** — skip the browser for ~10× faster captures (no screenshot; still extracts tracking IDs)
 - **Manual Upload** — upload your own screenshot/HTML if automated capture failed
 
 Batch-capture all pending or capture individually. The browser locale follows the case's Victim Locale setting.
@@ -101,21 +115,39 @@ Submit the landing page to independent third-party services:
 
 Corroboration runs automatically after scanning. Use the button to retry or re-corroborate.
 
+### 5. Analyze
+
+Six sub-tabs that cluster the collected evidence across URLs.
+
 #### Insights
 
-Rule-based case summary (no LLM):
+Rule-based case summary (no LLM). Read this first:
 
 - **Headline** — total URLs, scanned count, landing domains, parameter clusters
-- **Key findings** — landing concentration, risk flag breakdown, cross-post parameter attribution (50+ known trackers), ASN infrastructure clusters
+- **Key findings** — landing concentration, risk flags, cross-post parameter attribution (50+ trackers), tracking-ID matches, TLS/ASN clustering, and **Phase 4 active-evasion signals (cloaking suspects, fabricated server versions, shared server templates, strong UA-gating)**
 - **Data gaps** — alerts for missing WHOIS, snapshots, TLS certificates, and corroboration
 
-Also includes: Scanned Destinations drill-down, Shared URL Parameters table, and Hosting Infrastructure (ASN) grouping.
+#### Account Patterns
 
-### 4. Providers
+Poster × content-ID matrix. Deliberately does **not** auto-flag coordination — the analyst reads the raw distribution.
 
-Shortlink services and domain registrars involved in the case. Use this to identify abuse report recipients.
+#### Providers
 
-### 5. Export
+Accountability lens: shortlink services, domain registrars, hosting, CAs, and ad/tracking platforms involved in the case. Use this to identify abuse-report recipients.
+
+#### Cloaking
+
+Conditional-cloaker detection — compares the page served *with* tracking params vs *without*. Per-URL verdict plus case-wide counts. Catches operators (e.g. crawlerlanding) that vary behaviour by visitor type — the strongest active-evasion signal.
+
+#### Headers
+
+Per-hop response-header forensics: per-domain constant headers (origin leak), cross-domain shared templates (same-operator signal), fabricated version strings, and Set-Cookie origin leaks.
+
+#### OPSEC
+
+Per-domain success-rate comparison between the lightweight fetch and Playwright paths — exposes "blocks User-Agent but renders in Chromium" WAF deployments, a same-operator signal independent of GA4/TLS.
+
+### 6. Export
 
 Download a ZIP evidence pack containing:
 
@@ -149,7 +181,12 @@ Download a ZIP evidence pack containing:
 |---|---|
 | Redirect chain tracing | ✅ Up to 20 hops with loop/SSL/timeout detection |
 | WHOIS + ASN + IP geolocation | ✅ RDAP + port-43 fallback |
-| TLS certificate extraction | ✅ Issuer, SAN, validity, serial |
+| TLS certificate extraction + cross-domain clustering | ✅ Issuer, SAN, validity, serial; `by_cert` + 24h `by_issuance` |
+| HTML tracking-ID extraction (11 platforms) | ✅ Context-anchored regex; cross-domain ID clustering |
+| HAR third-party endpoint aggregation | ✅ Cross-domain shared endpoints, direct-IP flagging |
+| Cloaking detection (Phase 4) | ✅ With-param vs without-param differential |
+| HTTP header forensics (Phase 4) | ✅ Origin leak / fabricated versions / shared templates / cookie origin |
+| OPSEC path differential (Phase 4) | ✅ Lightweight vs Playwright success-rate per domain |
 | Browser screenshot + HTML + HAR | ✅ Playwright with Cloudflare bypass |
 | Third-party archiving (Wayback) | ✅ Automatic after scan |
 | Third-party scanning (urlscan.io) | ✅ With API key |
