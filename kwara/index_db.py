@@ -1,0 +1,330 @@
+"""Cross-case signal index (Phase 5.1).
+
+A central SQLite DB (default ``~/.kwara/index.db``) that accumulates strong
+operator-attribution signals across every case the analyst indexes — even
+cases that live in *different* kwara DB files. It answers the question a
+per-case tool cannot: **"have I seen this GA4 ID / cert serial / registrar /
+ASN / domain before, and in which case?"**
+
+This is the payoff for kwara's single-user-local-SQLite bet: an analyst's
+accumulated history is something no multi-tenant SaaS can build, because it
+requires *being* that analyst across every investigation.
+
+Design notes
+------------
+* The index is a SEPARATE DB from any case DB, so it spans multiple case
+  files. Provenance (``source_db`` path + ``case_id`` + ``scan_run_id``)
+  points back to the originating evidence.
+* Even SINGLETON signals are indexed — a value seen once in case A and once
+  in case B is exactly the cross-case match we want. We do NOT pre-cluster.
+* Indexing a case is a FULL REFRESH for that (source_db, case_id): prior
+  rows are deleted then re-inserted, so re-indexing an updated case is
+  idempotent and drops signals that no longer appear.
+* Read-only on the case DB; only the index DB is written.
+
+Public surface:
+  get_index_conn(path)                 connect + init the central index DB
+  extract_case_signals(conn, case_id, source_db, case_title)
+                                       pure extraction — list[signal dict]
+  index_case(index_conn, case_conn, source_db, case_id, case_title)
+                                       full-refresh upsert; returns row count
+  lookup(index_conn, value, signal_type=None)
+                                       every occurrence of a value
+  recurring_signals(index_conn, min_cases=2)
+                                       signals spanning >= min_cases cases
+"""
+from __future__ import annotations
+
+import json
+import os
+import sqlite3
+from collections import defaultdict
+from datetime import datetime, timezone
+from urllib.parse import urlparse
+
+from sql import LATEST_DONE_SCAN_RUN, latest_usable_snapshot
+
+# Signal type tags. Stable strings — stored in the DB and matched on lookup.
+SIGNAL_TRACKING_ID  = "tracking_id"
+SIGNAL_CERT_SERIAL  = "cert_serial"
+SIGNAL_REGISTRAR    = "registrar"
+SIGNAL_ASN          = "asn"
+SIGNAL_FINAL_DOMAIN = "final_domain"
+
+ALL_SIGNAL_TYPES = frozenset({
+    SIGNAL_TRACKING_ID,
+    SIGNAL_CERT_SERIAL,
+    SIGNAL_REGISTRAR,
+    SIGNAL_ASN,
+    SIGNAL_FINAL_DOMAIN,
+})
+
+
+def _now() -> str:
+    return datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+
+# ---------------------------------------------------------------------------
+# Index DB connection + schema
+# ---------------------------------------------------------------------------
+
+def get_index_conn(db_path: str) -> sqlite3.Connection:
+    """Open (creating if needed) the central index DB and ensure its schema."""
+    parent = os.path.dirname(db_path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    conn = sqlite3.connect(db_path, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    _init_index(conn)
+    return conn
+
+
+def _init_index(conn: sqlite3.Connection) -> None:
+    conn.executescript("""
+    CREATE TABLE IF NOT EXISTS signals (
+        signal_type   TEXT NOT NULL,
+        signal_value  TEXT NOT NULL,
+        platform      TEXT,            -- sub-type / context (GA4 / cert issuer / as_org)
+        source_db     TEXT NOT NULL,   -- absolute path of the originating kwara DB
+        case_id       INTEGER NOT NULL,
+        case_title    TEXT,
+        scan_run_id   INTEGER NOT NULL,
+        final_domain  TEXT,            -- which landing this signal was seen on
+        observed_at   TEXT,            -- when the evidence was captured (scan run_at)
+        indexed_at    TEXT NOT NULL,
+        PRIMARY KEY (signal_type, signal_value, source_db, case_id, scan_run_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_signal_lookup
+        ON signals(signal_type, signal_value);
+    CREATE INDEX IF NOT EXISTS idx_signal_value
+        ON signals(signal_value);
+    CREATE INDEX IF NOT EXISTS idx_signal_case
+        ON signals(source_db, case_id);
+    """)
+    conn.commit()
+
+
+# ---------------------------------------------------------------------------
+# Extraction (pure read over a case DB — testable without the index)
+# ---------------------------------------------------------------------------
+
+def extract_case_signals(
+    conn: sqlite3.Connection,
+    case_id: int,
+    source_db: str,
+    case_title: str = "",
+) -> list[dict]:
+    """Extract every indexable signal for a case from its kwara DB.
+
+    Returns a list of signal dicts ready for insertion. Singletons included —
+    cross-case matching is the whole point. Pure read; no index DB involved.
+    """
+    out: list[dict] = []
+    indexed_at = _now()
+
+    def _emit(stype, value, *, platform, scan_run_id, final_domain, observed_at):
+        value = (value or "").strip()
+        if not value:
+            return
+        out.append({
+            "signal_type":  stype,
+            "signal_value": value,
+            "platform":     (platform or "").strip() or None,
+            "source_db":    source_db,
+            "case_id":      case_id,
+            "case_title":   case_title,
+            "scan_run_id":  scan_run_id,
+            "final_domain": (final_domain or "").strip() or None,
+            "observed_at":  observed_at,
+            "indexed_at":   indexed_at,
+        })
+
+    # ── scan_run-level signals: cert serial, registrar, ASN, final domain ──
+    scan_rows = conn.execute(
+        f"""SELECT sr.id AS scan_run_id, sr.run_at, sr.final_url,
+                   sr.tls_info_json, sr.whois_registrar, sr.asn, sr.as_org
+            FROM url_artifacts ua
+            JOIN scan_runs sr ON sr.id = {LATEST_DONE_SCAN_RUN}
+            WHERE ua.case_id = ?""",
+        (case_id,),
+    ).fetchall()
+
+    for r in scan_rows:
+        domain = (urlparse(r["final_url"] or "").hostname or "").lower()
+        observed = r["run_at"]
+        srid = r["scan_run_id"]
+
+        # final domain
+        _emit(SIGNAL_FINAL_DOMAIN, domain, platform=None,
+              scan_run_id=srid, final_domain=domain, observed_at=observed)
+
+        # registrar
+        _emit(SIGNAL_REGISTRAR, r["whois_registrar"], platform=None,
+              scan_run_id=srid, final_domain=domain, observed_at=observed)
+
+        # ASN (platform = AS org for display)
+        _emit(SIGNAL_ASN, r["asn"], platform=r["as_org"],
+              scan_run_id=srid, final_domain=domain, observed_at=observed)
+
+        # cert serial (platform = issuer)
+        if r["tls_info_json"]:
+            try:
+                tls = json.loads(r["tls_info_json"])
+            except (ValueError, TypeError):
+                tls = None
+            if isinstance(tls, dict):
+                serial = (tls.get("serialNumber") or "").strip()
+                issuer = _issuer_text(tls.get("issuer"))
+                _emit(SIGNAL_CERT_SERIAL, serial, platform=issuer,
+                      scan_run_id=srid, final_domain=domain, observed_at=observed)
+
+    # ── snapshot-level signals: tracking IDs (latest usable snapshot) ──────
+    pixel_rows = conn.execute(
+        f"""SELECT sr.id AS scan_run_id, sr.run_at,
+                   s.tracking_ids_json,
+                   COALESCE(s.final_domain, '') AS final_domain
+            FROM url_artifacts ua
+            JOIN scan_runs sr ON sr.id = {LATEST_DONE_SCAN_RUN}
+            JOIN snapshots s ON s.id = {latest_usable_snapshot("tracking_ids_json")}
+            WHERE ua.case_id = ?""",
+        (case_id,),
+    ).fetchall()
+
+    for r in pixel_rows:
+        try:
+            ids_by_platform = json.loads(r["tracking_ids_json"])
+        except (ValueError, TypeError):
+            continue
+        if not isinstance(ids_by_platform, dict):
+            continue
+        domain = (r["final_domain"] or "").lower()
+        for platform, ids in ids_by_platform.items():
+            if not isinstance(ids, list):
+                continue
+            for ident in ids:
+                _emit(SIGNAL_TRACKING_ID, ident, platform=platform,
+                      scan_run_id=r["scan_run_id"], final_domain=domain,
+                      observed_at=r["run_at"])
+
+    return out
+
+
+def _issuer_text(issuer) -> str:
+    """Best-effort short issuer label from a cert issuer DN dict."""
+    if not isinstance(issuer, dict):
+        return ""
+    for key in ("organizationName", "commonName"):
+        v = issuer.get(key)
+        if isinstance(v, list):
+            v = v[0] if v else ""
+        if v:
+            return str(v)
+    return ""
+
+
+# ---------------------------------------------------------------------------
+# Indexing (write to the central index)
+# ---------------------------------------------------------------------------
+
+def index_case(
+    index_conn: sqlite3.Connection,
+    case_conn: sqlite3.Connection,
+    source_db: str,
+    case_id: int,
+    case_title: str = "",
+) -> int:
+    """Full-refresh the index for one (source_db, case_id).
+
+    Deletes any prior rows for this case then inserts freshly-extracted
+    signals — idempotent, and drops signals that no longer appear. Returns
+    the number of signal rows written.
+    """
+    signals = extract_case_signals(case_conn, case_id, source_db, case_title)
+
+    index_conn.execute(
+        "DELETE FROM signals WHERE source_db = ? AND case_id = ?",
+        (source_db, case_id),
+    )
+    index_conn.executemany(
+        """INSERT OR REPLACE INTO signals
+           (signal_type, signal_value, platform, source_db, case_id,
+            case_title, scan_run_id, final_domain, observed_at, indexed_at)
+           VALUES
+           (:signal_type, :signal_value, :platform, :source_db, :case_id,
+            :case_title, :scan_run_id, :final_domain, :observed_at, :indexed_at)""",
+        signals,
+    )
+    index_conn.commit()
+    return len(signals)
+
+
+# ---------------------------------------------------------------------------
+# Query
+# ---------------------------------------------------------------------------
+
+def lookup(
+    index_conn: sqlite3.Connection,
+    value: str,
+    signal_type: str | None = None,
+) -> list[dict]:
+    """Every indexed occurrence of `value` (optionally constrained to a type).
+
+    Returns rows sorted newest-observed first. Each row carries full
+    provenance so the analyst can jump back to the originating case/scan.
+    """
+    value = (value or "").strip()
+    if not value:
+        return []
+    sql = "SELECT * FROM signals WHERE signal_value = ?"
+    params: list = [value]
+    if signal_type:
+        sql += " AND signal_type = ?"
+        params.append(signal_type)
+    sql += " ORDER BY observed_at DESC, source_db, case_id"
+    return [dict(r) for r in index_conn.execute(sql, params).fetchall()]
+
+
+def recurring_signals(
+    index_conn: sqlite3.Connection,
+    min_cases: int = 2,
+) -> list[dict]:
+    """Signals that appear across >= `min_cases` distinct cases.
+
+    This is the headline cross-case report: the same operator account /
+    cert / registrar / ASN / domain resurfacing across separate
+    investigations. Returns one row per (signal_type, signal_value) with the
+    distinct-case count and the list of cases it spans.
+    """
+    rows = index_conn.execute(
+        """SELECT signal_type, signal_value,
+                  COUNT(DISTINCT source_db || '|' || case_id) AS case_count,
+                  COUNT(*) AS hit_count
+           FROM signals
+           GROUP BY signal_type, signal_value
+           HAVING case_count >= ?
+           ORDER BY case_count DESC, hit_count DESC""",
+        (min_cases,),
+    ).fetchall()
+
+    out: list[dict] = []
+    for r in rows:
+        cases = index_conn.execute(
+            """SELECT DISTINCT source_db, case_id, case_title, platform
+               FROM signals
+               WHERE signal_type = ? AND signal_value = ?
+               ORDER BY source_db, case_id""",
+            (r["signal_type"], r["signal_value"]),
+        ).fetchall()
+        out.append({
+            "signal_type":  r["signal_type"],
+            "signal_value": r["signal_value"],
+            "case_count":   r["case_count"],
+            "hit_count":    r["hit_count"],
+            "platform":     next((c["platform"] for c in cases if c["platform"]), None),
+            "cases":        [
+                {"source_db": c["source_db"], "case_id": c["case_id"],
+                 "case_title": c["case_title"]}
+                for c in cases
+            ],
+        })
+    return out
