@@ -70,7 +70,7 @@ def render(conn, case_id):
             try:
                 df_preview = pd.read_csv(uploaded_csv)
                 st.write(t("input.csv_preview"))
-                st.dataframe(df_preview.head(5), use_container_width=True)
+                st.dataframe(df_preview.head(5), width='stretch')
                 uploaded_csv.seek(0)
             except Exception as e:
                 st.error(t("input.csv_error", e=e))

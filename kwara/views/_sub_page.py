@@ -130,7 +130,7 @@ def render(conn, case_id, case_locale=None, case_tz=None):
         st.caption(f"Status: {cap or '—'}" + (f" — {cap_d}" if cap_d else ""))
 
     if snap["screenshot_path"] and os.path.exists(snap["screenshot_path"]):
-        st.image(snap["screenshot_path"], use_container_width=True)
+        st.image(snap["screenshot_path"], width='stretch')
     else:
         st.warning(t("page.missing_screenshot"))
 

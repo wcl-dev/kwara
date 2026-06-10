@@ -65,7 +65,7 @@ with st.sidebar:
         set_lang(sel_lang)
         st.rerun()
 
-    if st.button(t("sidebar.btn_guide"), key="btn_guide", use_container_width=True):
+    if st.button(t("sidebar.btn_guide"), key="btn_guide", width='stretch'):
         _show_guide()
     st.divider()
 

@@ -39,7 +39,7 @@ def render(conn, case_id):
         (sel["scan_run_id"],),
     ).fetchall()
     if hops:
-        st.dataframe(pd.DataFrame([dict(h) for h in hops]), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame([dict(h) for h in hops]), width='stretch', hide_index=True)
 
     # ── TLS Certificate ─────────────────────────────────────────
     try:
@@ -77,7 +77,7 @@ def render(conn, case_id):
         st.caption(t("net.headers_count", n=len(_hdrs)))
         st.dataframe(
             pd.DataFrame(_hdrs, columns=["Header", "Value"]),
-            use_container_width=True, hide_index=True,
+            width='stretch', hide_index=True,
         )
     else:
         st.caption(t("net.no_headers"))

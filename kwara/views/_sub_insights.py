@@ -78,7 +78,7 @@ def render(conn, case_id):
                 "posts":        d["post_count"],
                 "risk_flags":   tag_str,
             })
-        st.dataframe(pd.DataFrame(summary_rows), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(summary_rows), width='stretch', hide_index=True)
 
         sel_domain = st.selectbox(
             t("clusters.drill_dest"),
@@ -99,7 +99,7 @@ def render(conn, case_id):
             for u in urls_to_show:
                 tag_str = "  ".join(f"{TAG_COLORS.get(tg, '⚪')} {tg}" for tg in u["risk_tags"]) if u["risk_tags"] else "—"
                 url_df_rows.append({"risk_flags": tag_str, "original_url": u["original_url"]})
-            st.dataframe(pd.DataFrame(url_df_rows), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(url_df_rows), width='stretch', hide_index=True)
             if len(sel_d["urls"]) > _PREVIEW:
                 if show_all:
                     if st.button(t("clusters.btn_less"), key=f"cluster_less_{sel_domain}"):
@@ -112,7 +112,7 @@ def render(conn, case_id):
 
             st.write(t("clusters.found_in_posts"))
             posts_to_show = sel_d["posts"] if show_all else sel_d["posts"][:_PREVIEW]
-            st.dataframe(pd.DataFrame(posts_to_show), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(posts_to_show), width='stretch', hide_index=True)
             if len(sel_d["posts"]) > _PREVIEW and not show_all:
                 st.caption(t("clusters.preview_posts", preview=_PREVIEW, total=len(sel_d['posts'])))
 
@@ -136,7 +136,7 @@ def render(conn, case_id):
                 "max_hops":     w["max_hops"],
                 "sample_urls":  ", ".join(u[:60] for u in w["sample_urls"]),
             })
-        st.dataframe(pd.DataFrame(wrap_rows), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(wrap_rows), width='stretch', hide_index=True)
 
     st.divider()
 
@@ -158,7 +158,7 @@ def render(conn, case_id):
                 "post_count":  p["post_count"],
                 "url_count":   p["url_count"],
             })
-        st.dataframe(pd.DataFrame(param_rows), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(param_rows), width='stretch', hide_index=True)
 
     st.divider()
 
@@ -181,7 +181,7 @@ def render(conn, case_id):
                 "top_values":       ", ".join(str(v)[:40] for v in pk["top_values"]),
                 "domains":          ", ".join(pk["domains"]),
             })
-        st.dataframe(pd.DataFrame(pk_rows), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(pk_rows), width='stretch', hide_index=True)
 
     st.divider()
 
@@ -202,7 +202,7 @@ def render(conn, case_id):
                 "posts":        r["post_count"],
                 "domain_list":  ", ".join(r["domains"]),
             })
-        st.dataframe(pd.DataFrame(tid_rows), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(tid_rows), width='stretch', hide_index=True)
 
     st.divider()
 
@@ -229,7 +229,7 @@ def render(conn, case_id):
                     "posts":        c["post_count"],
                     "domain_list":  ", ".join(c["domains"]),
                 })
-            st.dataframe(pd.DataFrame(cert_rows), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(cert_rows), width='stretch', hide_index=True)
 
         if by_issuance:
             st.markdown(f"**{t('clusters.tls_by_window')}**")
@@ -243,7 +243,7 @@ def render(conn, case_id):
                     "issuers":      w["issuers"],
                     "domain_list":  ", ".join(w["domains"]),
                 })
-            st.dataframe(pd.DataFrame(win_rows), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(win_rows), width='stretch', hide_index=True)
 
     st.divider()
 
@@ -262,7 +262,7 @@ def render(conn, case_id):
                 "domains":       ep["domain_count"],
                 "domain_list":   ", ".join(ep["domains"]),
             })
-        st.dataframe(pd.DataFrame(ep_rows), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(ep_rows), width='stretch', hide_index=True)
 
     st.divider()
 
@@ -289,7 +289,7 @@ def render(conn, case_id):
                 "posts":        a["post_count"],
                 "risk_flags":   tag_str,
             })
-        st.dataframe(pd.DataFrame(asn_summary), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(asn_summary), width='stretch', hide_index=True)
 
         sel_asn = st.selectbox(
             t("clusters.drill_asn"),
@@ -305,7 +305,7 @@ def render(conn, case_id):
         with st.container(border=True):
             st.write(t("clusters.domains_asn", asn=sel_asn, n=len(sel_a['domains'])))
             domains_show = sel_a["domains"] if _asn_show_all else sel_a["domains"][:_ASN_PREVIEW]
-            st.dataframe(pd.DataFrame(domains_show), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(domains_show), width='stretch', hide_index=True)
 
             st.write(t("clusters.shortlinks_asn", total=len(sel_a['urls']), flagged=sel_a['flagged_url_count']))
             urls_sorted = sorted(sel_a["urls"], key=lambda u: -len(u["risk_tags"]))
@@ -314,7 +314,7 @@ def render(conn, case_id):
             for u in urls_show:
                 tag_str = "  ".join(f"{TAG_COLORS.get(tg, '⚪')} {tg}" for tg in u["risk_tags"]) if u["risk_tags"] else "—"
                 asn_url_rows.append({"risk_flags": tag_str, "original_url": u["original_url"]})
-            st.dataframe(pd.DataFrame(asn_url_rows), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(asn_url_rows), width='stretch', hide_index=True)
 
             total_items = max(len(sel_a["domains"]), len(sel_a["urls"]))
             if total_items > _ASN_PREVIEW:
