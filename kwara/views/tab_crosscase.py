@@ -83,7 +83,7 @@ def render(conn, case_id):
                     t("crosscase.col_observed"): h["observed_at"] or "—",
                     t("crosscase.col_db"):       h["source_db"],
                 } for h in hits],
-                hide_index=True, use_container_width=True,
+                hide_index=True, width='stretch',
             )
 
     st.divider()
@@ -109,5 +109,5 @@ def render(conn, case_id):
                     t("crosscase.col_case"): c["case_title"] or f"#{c['case_id']}",
                     t("crosscase.col_db"):   c["source_db"],
                 } for c in r["cases"]],
-                hide_index=True, use_container_width=True,
+                hide_index=True, width='stretch',
             )
