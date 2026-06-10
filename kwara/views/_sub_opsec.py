@@ -43,5 +43,5 @@ def render(conn, case_id):
             t("opsec.col_playwright"):  _rate_cell(r["pw_ok"], r["pw_total"]),
             t("opsec.col_level"):       _level_label(r["level"]),
         })
-    st.dataframe(table, hide_index=True, use_container_width=True)
+    st.dataframe(table, hide_index=True, width='stretch')
     st.caption(t("opsec.diff_caption"))

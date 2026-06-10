@@ -45,7 +45,7 @@ def render(conn, case_id):
 
     if providers:
         df_prov = pd.DataFrame([dict(r) for r in providers])
-        st.dataframe(df_prov, use_container_width=True, hide_index=True)
+        st.dataframe(df_prov, width='stretch', hide_index=True)
 
         sel_prov = st.selectbox(
             t("prov.drill"),
@@ -90,7 +90,7 @@ def render(conn, case_id):
             for x in to_show:
                 tag_str = "  ".join(f"{TAG_COLORS.get(tg, '⚪')} {tg}" for tg in x["tags"]) if x["tags"] else "—"
                 prov_df_rows.append({"risk_flags": tag_str, "original_url": x["url"]})
-            st.dataframe(pd.DataFrame(prov_df_rows), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(prov_df_rows), width='stretch', hide_index=True)
             if len(prov_rows_tagged) > _PROV_PREVIEW:
                 if _prov_show_all:
                     if st.button(t("clusters.btn_less"), key=f"prov_less_{sel_prov}"):
@@ -132,7 +132,7 @@ def render(conn, case_id):
         reg_rows.append({"registrar": r["registrar"], "domain": dom, "domain_created": r["domain_created"]})
 
     if reg_rows:
-        st.dataframe(pd.DataFrame(reg_rows), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(reg_rows), width='stretch', hide_index=True)
     else:
         st.info(t("prov.no_registrars"))
 
@@ -168,7 +168,7 @@ def _hosting_section(conn, case_id):
             "domains": c["domain_count"],
             "urls":    c["url_count"],
         })
-    st.dataframe(pd.DataFrame(summary), use_container_width=True, hide_index=True)
+    st.dataframe(pd.DataFrame(summary), width='stretch', hide_index=True)
 
     sel = st.selectbox(
         t("prov.drill_hosting"),
@@ -180,7 +180,7 @@ def _hosting_section(conn, case_id):
 
     with st.container(border=True):
         st.write(t("prov.hosting_domains", asn=sel, n=len(sel_c["domains"])))
-        st.dataframe(pd.DataFrame(sel_c["domains"]), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(sel_c["domains"]), width='stretch', hide_index=True)
 
 
 def _ca_section(conn, case_id):
@@ -202,7 +202,7 @@ def _ca_section(conn, case_id):
             "certs":            c["cert_count"],
             "earliest_issued":  c["earliest_notBefore"] or "—",
         })
-    st.dataframe(pd.DataFrame(summary), use_container_width=True, hide_index=True)
+    st.dataframe(pd.DataFrame(summary), width='stretch', hide_index=True)
 
     sel = st.selectbox(
         t("prov.drill_ca"),
@@ -212,7 +212,7 @@ def _ca_section(conn, case_id):
     sel_c = next(c for c in cas if c["issuer"] == sel)
     with st.container(border=True):
         st.write(t("prov.ca_domains", issuer=sel, n=len(sel_c["domains"])))
-        st.dataframe(pd.DataFrame(sel_c["domains"]), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(sel_c["domains"]), width='stretch', hide_index=True)
 
 
 _SOURCE_LABEL_KEYS = {
@@ -250,7 +250,7 @@ def _ad_tracking_section(conn, case_id):
             "domains":       p["domain_count"],
             "posts":         p["post_count"],
         })
-    st.dataframe(pd.DataFrame(summary), use_container_width=True, hide_index=True)
+    st.dataframe(pd.DataFrame(summary), width='stretch', hide_index=True)
 
     sel = st.selectbox(
         t("prov.drill_ad_tracking"),
@@ -260,4 +260,4 @@ def _ad_tracking_section(conn, case_id):
     sel_p = label_to_platform[sel]
     with st.container(border=True):
         st.write(t("prov.ad_tracking_domains", owner=sel, n=len(sel_p["domains"])))
-        st.dataframe(pd.DataFrame(sel_p["domains"]), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(sel_p["domains"]), width='stretch', hide_index=True)

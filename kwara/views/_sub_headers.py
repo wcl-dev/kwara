@@ -47,7 +47,7 @@ def render(conn, case_id):
                     t("hdr.col_header"): header_name,
                     t("hdr.col_value"):  value,
                 })
-        st.dataframe(rows, hide_index=True, use_container_width=True)
+        st.dataframe(rows, hide_index=True, width='stretch')
 
     # ── 2. cross-domain template ──────────────────────────────────────
     templates = cross_domain_shared_template(conn, case_id)
@@ -61,7 +61,7 @@ def render(conn, case_id):
             t("hdr.col_value"):   r["value"],
             t("hdr.col_domains"): ", ".join(r["domains"]),
         } for r in templates]
-        st.dataframe(rows, hide_index=True, use_container_width=True)
+        st.dataframe(rows, hide_index=True, width='stretch')
 
     # ── 3. fake versions ──────────────────────────────────────────────
     fakes = detect_fake_versions(conn, case_id)
@@ -76,7 +76,7 @@ def render(conn, case_id):
             t("hdr.col_value"):  r["value"],
             t("hdr.col_reason"): r["reason"],
         } for r in fakes]
-        st.dataframe(rows, hide_index=True, use_container_width=True)
+        st.dataframe(rows, hide_index=True, width='stretch')
 
     # ── 4. cookie origin leaks + shared templates ─────────────────────
     cookies = cookie_origin_signals(conn, case_id)
@@ -90,7 +90,7 @@ def render(conn, case_id):
             t("hdr.col_response_domain"): r["response_domain"],
             t("hdr.col_cookie_domain"):   r["cookie_domain"],
         } for r in cookies["origin_leaks"]]
-        st.dataframe(rows, hide_index=True, use_container_width=True)
+        st.dataframe(rows, hide_index=True, width='stretch')
 
     st.subheader(t("hdr.section_cookie_template"))
     st.caption(t("hdr.section_cookie_template_caption"))
@@ -103,4 +103,4 @@ def render(conn, case_id):
             t("hdr.col_samesite"): r["samesite"] or "—",
             t("hdr.col_domains"):  ", ".join(r["domains"]),
         } for r in cookies["shared_templates"]]
-        st.dataframe(rows, hide_index=True, use_container_width=True)
+        st.dataframe(rows, hide_index=True, width='stretch')
