@@ -24,6 +24,7 @@ kwara 接收社群貼文中的可疑 URL，引導你走過六步驟的證據鏈�
 - **三段式工作流** — 調查 → 保全 → 分析，六個證據步驟分布其中
 - **操作者層訊號聚合** — 跨網域比對 HTML 追蹤碼（11 平台）、TLS 憑證、URL 參數、wrapper 跳轉
 - **主動防偵測對抗（Phase 4）** — cloaking 偵測、HTTP header 鑑識（origin 洩漏 / 偽造版本 / server 模板）、OPSEC 路徑差異
+- **變現歸因鑑識（Phase 8）** — 抓取每個網域的 `ads.txt`，聚類共用的 DIRECT 廣告帳號與逐字節相同的模板；以頻率加權區分共用變現代管商（弱）與操作者聚類訊號（強）
 - **第三方佐證** — Wayback Machine、urlscan.io、RFC 3161 時間戳提供獨立紀錄
 - **Per-case 語系設定** — 依受害者所在地設定截圖瀏覽器語系，突破地理封鎖
 - **URL 參數歸屬** — 自動辨識 50+ 已知追蹤參數（UTM、fbclid、gclid 等）
@@ -73,7 +74,6 @@ Windows 已安裝依賴的情況下，從專案根目錄雙擊 `start_kwara.bat`
 | `kwara/views/` | UI tab 模組（每個 tab 一個檔案，方便編輯） |
 | `kwara/config.py` | 集中配置與環境變數預設值 |
 | `kwara/corroboration.py` | 第三方證據服務（Wayback、urlscan、RFC 3161） |
-| `whois_osint/` | 獨立 WHOIS 批次查詢腳本（[README](whois_osint/README.md)） |
 | `restore_from_export.py` | 從匯出的 ZIP 證據封包還原資料庫 |
 
 ## Clone 後

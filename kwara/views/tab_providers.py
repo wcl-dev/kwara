@@ -5,9 +5,15 @@ from urllib.parse import urlparse as _urlparse
 import pandas as pd
 import streamlit as st
 
-from clustering_infra import ad_tracking_platforms, asn_clusters, certificate_authorities
+from clustering_infra import (
+    ad_tracking_platforms,
+    asn_clusters,
+    certificate_authorities,
+    shared_ad_accounts,
+)
 from config import KNOWN_SHORTLINK_DOMAINS
 from i18n import t
+from pipeline import run_ads_txt
 from views._shared import TAG_COLORS, scan_flags
 
 
@@ -142,6 +148,10 @@ def render(conn, case_id):
 
     st.divider()
 
+    _ad_accounts_section(conn, case_id)
+
+    st.divider()
+
     _hosting_section(conn, case_id)
 
     st.divider()
@@ -261,3 +271,98 @@ def _ad_tracking_section(conn, case_id):
     with st.container(border=True):
         st.write(t("prov.ad_tracking_domains", owner=sel, n=len(sel_p["domains"])))
         st.dataframe(pd.DataFrame(sel_p["domains"]), width='stretch', hide_index=True)
+
+
+_TIER_BADGE = {"operator": "🔴 operator", "manager": "⚪ manager"}
+
+
+def _ad_accounts_section(conn, case_id):
+    """ads.txt monetisation accounts — DIRECT money-trail attribution.
+
+    Two clusters: shared DIRECT accounts (frequency-weighted into
+    operator vs manager) and byte-identical ads.txt templates.
+    """
+    st.subheader(t("prov.ads_txt"))
+    st.caption(t("prov.ads_txt_caption"))
+
+    # Refresh button — ads.txt is fetched lazily in the snapshot pipeline,
+    # but existing scans predate the feature; let the analyst fetch on demand
+    # for every done scan_run in the case.
+    if st.button(t("prov.ads_txt_refresh"), key="btn_ads_txt"):
+        scan_ids = conn.execute(
+            """SELECT sr.id FROM url_artifacts ua
+               JOIN scan_runs sr ON sr.id = (
+                   SELECT id FROM scan_runs WHERE url_artifact_id = ua.id
+                   ORDER BY id DESC LIMIT 1)
+               WHERE ua.case_id = ? AND sr.status = 'done'
+                 AND sr.final_url IS NOT NULL""",
+            (case_id,),
+        ).fetchall()
+        with st.spinner(t("prov.ads_txt_spinner", n=len(scan_ids))):
+            for row in scan_ids:
+                run_ads_txt(conn, row["id"], force=True)
+        st.rerun()
+
+    clusters = shared_ad_accounts(conn, case_id)
+    by_account = clusters["by_account"]
+    by_template = clusters["by_template"]
+
+    # ── Declared owner/manager (ads.txt 1.1) + fetch status per domain ──
+    declared = conn.execute(
+        f"""SELECT sr.final_url, sr.ads_txt_json
+            FROM url_artifacts ua
+            JOIN scan_runs sr ON sr.id = (
+                SELECT id FROM scan_runs WHERE url_artifact_id = ua.id
+                ORDER BY id DESC LIMIT 1)
+            WHERE ua.case_id = ? AND sr.ads_txt_json IS NOT NULL
+              AND TRIM(sr.ads_txt_json) != ''""",
+        (case_id,),
+    ).fetchall()
+    status_rows = []
+    for r in declared:
+        try:
+            ads = json.loads(r["ads_txt_json"])
+        except (ValueError, TypeError):
+            continue
+        domain = _urlparse(r["final_url"] or "").hostname or "—"
+        status_rows.append({
+            "domain":         domain,
+            "status":         ads.get("status_code") or ads.get("status") or "—",
+            "direct_records": sum(
+                1 for rec in (ads.get("records") or [])
+                if (rec.get("relationship") or "").upper() == "DIRECT"
+            ),
+            "owner_domain":   ads.get("owner_domain") or "—",
+            "manager_domain": ads.get("manager_domain") or "—",
+        })
+
+    if not status_rows:
+        st.info(t("prov.no_ads_txt"))
+        return
+
+    # ── Shared DIRECT accounts (operator-tier first) ──
+    if by_account:
+        st.markdown(t("prov.ads_txt_accounts"))
+        acc_rows = [{
+            "tier":     _TIER_BADGE.get(a["tier"], a["tier"]),
+            "adsystem": a["adsystem"],
+            "seller_id": a["seller_id"],
+            "domains":  a["domain_count"],
+            "breadth":  a["breadth_ratio"],
+            "domain_list": ", ".join(a["domains"]),
+        } for a in by_account]
+        st.dataframe(pd.DataFrame(acc_rows), width='stretch', hide_index=True)
+
+    # ── Identical ads.txt templates ──
+    if by_template:
+        st.markdown(t("prov.ads_txt_templates"))
+        tmpl_rows = [{
+            "sha256":      tmpl["sha256_short"],
+            "domains":     tmpl["domain_count"],
+            "domain_list": ", ".join(tmpl["domains"]),
+        } for tmpl in by_template]
+        st.dataframe(pd.DataFrame(tmpl_rows), width='stretch', hide_index=True)
+
+    # ── Per-domain declared owner/manager + fetch status ──
+    st.markdown(t("prov.ads_txt_declared"))
+    st.dataframe(pd.DataFrame(status_rows), width='stretch', hide_index=True)

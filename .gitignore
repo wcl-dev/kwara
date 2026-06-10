@@ -44,6 +44,8 @@ kwara/data/*.db.*
 
 # 個人執行腳本（ad-hoc，與 kwara 工具不同生命週期；放外面、不入 repo）
 /_*.py
+# 已執行完的一次性腳本歸檔（2026-06-10 從 root 移入；保持不入 repo）
+/scripts/oneshot/
 
 # 報告產出（與 kwara 工具不同生命週期；放外面、不入 repo）
 /0510*.md

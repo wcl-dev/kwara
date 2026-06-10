@@ -56,6 +56,10 @@ def migrate_db(conn: sqlite3.Connection) -> None:
         # gating logic when you fetch the URL with vs without tracking
         # params. JSON shape: see cloaking.detect_cloaking().
         ("cloaking_signal_json", "TEXT"),
+        # Phase 8 — the landing domain's /ads.txt: DIRECT monetisation
+        # accounts + a sha256 of the raw file. JSON shape: see
+        # adstxt.fetch_and_store_ads_txt().
+        ("ads_txt_json", "TEXT"),
     ]
     for col, defn in scan_run_cols:
         try:

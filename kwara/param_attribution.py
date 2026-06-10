@@ -69,6 +69,11 @@ PLATFORM_LINE_TAG          = "line_tag"
 # evidence kwara was missing.
 PLATFORM_GOOGLE_ADSENSE         = "google_adsense"
 PLATFORM_META_FACEBOOK_PAGE     = "meta_facebook_page"
+# Phase 8 — a DIRECT seller account declared in a domain's ads.txt
+# (adstxt.py). Not a URL-param or HTML signal; carried as the platform_id
+# of shared-monetisation-account clusters so reports can cite it like any
+# other canonical platform.
+PLATFORM_ADS_TXT_SELLER         = "ads_txt_seller"
 # "generic" is the sentinel for keys that are tracking conventions but
 # can't be attributed to a specific vendor (uid, aff_id, ref…). Mapped to
 # OWNER_KIND_GENERIC at classify time.
@@ -97,6 +102,7 @@ PLATFORM_DISPLAY_NAMES: dict[str, str] = {
     PLATFORM_LINE_TAG:           "LINE Tag",
     PLATFORM_GOOGLE_ADSENSE:     "Google AdSense",
     PLATFORM_META_FACEBOOK_PAGE: "Meta / Facebook Page",
+    PLATFORM_ADS_TXT_SELLER:     "ads.txt Seller (DIRECT)",
 }
 
 

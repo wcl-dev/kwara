@@ -187,6 +187,24 @@ OPSEC_LW_LOW:  float = float(os.environ.get("KWARA_OPSEC_LW_LOW", "0.20"))
 OPSEC_PW_MIN:  float = float(os.environ.get("KWARA_OPSEC_PW_MIN", "0.70"))
 
 
+# ── Phase 8 ads.txt monetization-forensics knobs (adstxt.py) ────────────
+# kwara fetches each landing domain's /ads.txt — the publisher's own public
+# declaration of which ad systems it authorises and under which account
+# (DIRECT = "this account collects the money"). Shared DIRECT accounts and
+# byte-identical ads.txt templates are operator-attribution signals.
+ADS_TXT_TIMEOUT:   int = int(os.environ.get("KWARA_ADS_TXT_TIMEOUT", "10"))
+# 256KB cap — empirically ads.txt files run to 700+ lines on MFA sites.
+ADS_TXT_MAX_BYTES: int = int(os.environ.get("KWARA_ADS_TXT_MAX_BYTES", "262144"))
+# Frequency weighting (the crux): a DIRECT account appearing on >= this
+# fraction of the case's ads.txt-bearing domains is treated as a shared
+# monetisation MANAGER / reseller-network account (weak attribution), not a
+# same-operator signal. Below the threshold → operator-cluster candidate
+# (strong). Mirrors the common-vs-rare-ID handling in clustering.
+ADS_TXT_MANAGER_BREADTH: float = float(
+    os.environ.get("KWARA_ADS_TXT_MANAGER_BREADTH", "0.8")
+)
+
+
 # ── Shortlink SaaS catalog (clustering.py + snapshots.py + app.py) ───────
 # Domains that are themselves shortlink services. When a scan's final_domain
 # lands here it means the scan did not penetrate the redirect — the real

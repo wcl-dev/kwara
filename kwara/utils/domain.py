@@ -1,4 +1,3 @@
-# Copied from whois_osint/whois_domain_lookup.py
 from urllib.parse import urlparse
 
 try:
