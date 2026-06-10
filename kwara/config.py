@@ -14,6 +14,9 @@ See the docstring at the top of _snapshot_worker.py for its locale knobs.
 Environment variables honored here:
   KWARA_DB_PATH         — SQLite database path
                           (default: <this dir>/data/kwara.db)
+  KWARA_INDEX_DB_PATH   — central cross-case signal index DB (Phase 5.1);
+                          spans cases across multiple KWARA_DB_PATH files
+                          (default: ~/.kwara/index.db)
   KWARA_HTTP_TIMEOUT    — per-request timeout for scanner.py (seconds, int)
                           (default: 10)
   KWARA_MAX_HOPS        — redirect chain cutoff (default: 20)
@@ -40,6 +43,14 @@ _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH: str = os.environ.get(
     "KWARA_DB_PATH",
     os.path.join(_THIS_DIR, "data", "kwara.db"),
+)
+
+# Cross-case signal index (Phase 5.1). A single central DB that accumulates
+# strong attribution signals across every case the analyst indexes — even
+# cases living in *different* kwara DB files. Default lives under the user's
+# home (not the per-investigation data dir) so it survives switching DB_PATH.
+INDEX_DB_PATH: str = os.path.expanduser(
+    os.environ.get("KWARA_INDEX_DB_PATH", "~/.kwara/index.db")
 )
 
 

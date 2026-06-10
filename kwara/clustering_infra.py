@@ -41,6 +41,7 @@ from param_attribution import (
     identify_param,
     merge_risk_tags,
 )
+from sql import LATEST_DONE_SCAN_RUN, latest_usable_snapshot
 
 
 def _is_direct_ip(host: str) -> bool:
@@ -76,7 +77,7 @@ def asn_clusters(conn: sqlite3.Connection, case_id: int) -> list:
     Returns list of dicts sorted by url_count desc.
     """
     rows = conn.execute(
-        """SELECT sr.final_url,
+        f"""SELECT sr.final_url,
                   COALESCE(s.final_domain, '') AS snap_domain,
                   COALESCE(s.ip_address, sr.ip_address) AS ip_address,
                   COALESCE(s.asn, sr.asn) AS asn,
@@ -88,11 +89,7 @@ def asn_clusters(conn: sqlite3.Connection, case_id: int) -> list:
                   me.id AS post_id
            FROM url_artifacts ua
            JOIN message_evidence me ON me.id = ua.message_id
-           JOIN scan_runs sr ON sr.id = (
-               SELECT id FROM scan_runs
-               WHERE url_artifact_id = ua.id AND status = 'done'
-               ORDER BY id DESC LIMIT 1
-           )
+           JOIN scan_runs sr ON sr.id = {LATEST_DONE_SCAN_RUN}
            LEFT JOIN snapshots s ON s.scan_run_id = sr.id
                AND s.id = (
                    SELECT id FROM snapshots WHERE scan_run_id = sr.id
@@ -216,16 +213,12 @@ def shared_certificates(conn: sqlite3.Connection, case_id: int) -> dict:
     domain_count desc then cert_count desc.
     """
     rows = conn.execute(
-        """SELECT sr.tls_info_json, sr.final_url,
+        f"""SELECT sr.tls_info_json, sr.final_url,
                   ua.id AS ua_id,
                   me.id AS post_id
            FROM url_artifacts ua
            JOIN message_evidence me ON me.id = ua.message_id
-           JOIN scan_runs sr ON sr.id = (
-               SELECT id FROM scan_runs
-               WHERE url_artifact_id = ua.id AND status = 'done'
-               ORDER BY id DESC LIMIT 1
-           )
+           JOIN scan_runs sr ON sr.id = {LATEST_DONE_SCAN_RUN}
            WHERE ua.case_id = ?
              AND sr.tls_info_json IS NOT NULL
              AND TRIM(sr.tls_info_json) != ''""",
@@ -351,13 +344,9 @@ def certificate_authorities(conn: sqlite3.Connection, case_id: int) -> list:
       issuer, domain_count, url_count, cert_count, domains, earliest_notBefore
     """
     rows = conn.execute(
-        """SELECT sr.tls_info_json, sr.final_url, ua.id AS ua_id
+        f"""SELECT sr.tls_info_json, sr.final_url, ua.id AS ua_id
            FROM url_artifacts ua
-           JOIN scan_runs sr ON sr.id = (
-               SELECT id FROM scan_runs
-               WHERE url_artifact_id = ua.id AND status = 'done'
-               ORDER BY id DESC LIMIT 1
-           )
+           JOIN scan_runs sr ON sr.id = {LATEST_DONE_SCAN_RUN}
            WHERE ua.case_id = ?
              AND sr.tls_info_json IS NOT NULL
              AND TRIM(sr.tls_info_json) != ''""",
@@ -426,29 +415,18 @@ def shared_tracking_ids(conn: sqlite3.Connection, case_id: int) -> list:
     Singletons (ID seen on only one domain) are excluded.
     """
     rows = conn.execute(
-        """SELECT s.tracking_ids_json,
+        f"""SELECT s.tracking_ids_json,
                   COALESCE(s.final_domain, '') AS final_domain,
                   ua.id AS ua_id,
                   me.id AS post_id
            FROM url_artifacts ua
            JOIN message_evidence me ON me.id = ua.message_id
-           JOIN scan_runs sr ON sr.id = (
-               SELECT id FROM scan_runs
-               WHERE url_artifact_id = ua.id AND status = 'done'
-               ORDER BY id DESC LIMIT 1
-           )
-           JOIN snapshots s ON s.id = (
-               -- Pick the latest *usable* snapshot, not just latest-by-id
-               -- (codex review fix #2). A bad re-snapshot (Cloudflare
-               -- challenge, timeout, empty HTML) on top of an earlier good
-               -- one previously erased the earlier attribution silently.
-               SELECT id FROM snapshots
-               WHERE scan_run_id = sr.id
-                 AND capture_status = 'ok'
-                 AND tracking_ids_json IS NOT NULL
-                 AND TRIM(tracking_ids_json) != ''
-               ORDER BY id DESC LIMIT 1
-           )
+           JOIN scan_runs sr ON sr.id = {LATEST_DONE_SCAN_RUN}
+           -- Pick the latest *usable* snapshot, not just latest-by-id
+           -- (codex review fix #2). A bad re-snapshot (Cloudflare challenge,
+           -- timeout, empty HTML) on top of an earlier good one previously
+           -- erased the earlier attribution silently.
+           JOIN snapshots s ON s.id = {latest_usable_snapshot("tracking_ids_json")}
            WHERE ua.case_id = ?""",
         (case_id,),
     ).fetchall()
@@ -541,7 +519,7 @@ def ad_tracking_platforms(conn: sqlite3.Connection, case_id: int) -> list:
     ties before html-only rows before url-only rows.
     """
     rows = conn.execute(
-        """SELECT ua.id AS ua_id, me.id AS post_id,
+        f"""SELECT ua.id AS ua_id, me.id AS post_id,
                   ua.original_url, sr.final_url,
                   s.tracking_ids_json,
                   COALESCE(s.final_domain, '') AS snap_domain
@@ -552,19 +530,11 @@ def ad_tracking_platforms(conn: sqlite3.Connection, case_id: int) -> list:
                    SELECT id FROM scan_runs WHERE url_artifact_id = ua.id
                    ORDER BY id DESC LIMIT 1
                )
+           -- Pick the latest *usable* snapshot (codex fix #2). HTML pixel
+           -- signals only count when the capture actually succeeded; a later
+           -- failed re-snapshot shouldn't shadow an earlier good one.
            LEFT JOIN snapshots s ON s.scan_run_id = sr.id
-               AND s.id = (
-                   -- Pick the latest *usable* snapshot (codex fix #2).
-                   -- HTML pixel signals only count when the capture
-                   -- actually succeeded; a later failed re-snapshot
-                   -- shouldn't shadow an earlier good one.
-                   SELECT id FROM snapshots
-                   WHERE scan_run_id = sr.id
-                     AND capture_status = 'ok'
-                     AND tracking_ids_json IS NOT NULL
-                     AND TRIM(tracking_ids_json) != ''
-                   ORDER BY id DESC LIMIT 1
-               )
+               AND s.id = {latest_usable_snapshot("tracking_ids_json")}
            WHERE ua.case_id = ?""",
         (case_id,),
     ).fetchall()
@@ -705,22 +675,11 @@ def shared_endpoints(conn: sqlite3.Connection, case_id: int) -> list:
     floated to the top of each tier.
     """
     rows = conn.execute(
-        """SELECT s.request_domains_json,
+        f"""SELECT s.request_domains_json,
                   COALESCE(s.final_domain, '') AS final_domain
            FROM url_artifacts ua
-           JOIN scan_runs sr ON sr.id = (
-               SELECT id FROM scan_runs
-               WHERE url_artifact_id = ua.id AND status = 'done'
-               ORDER BY id DESC LIMIT 1
-           )
-           JOIN snapshots s ON s.id = (
-               SELECT id FROM snapshots
-               WHERE scan_run_id = sr.id
-                 AND capture_status = 'ok'
-                 AND request_domains_json IS NOT NULL
-                 AND TRIM(request_domains_json) != ''
-               ORDER BY id DESC LIMIT 1
-           )
+           JOIN scan_runs sr ON sr.id = {LATEST_DONE_SCAN_RUN}
+           JOIN snapshots s ON s.id = {latest_usable_snapshot("request_domains_json")}
            WHERE ua.case_id = ?""",
         (case_id,),
     ).fetchall()
