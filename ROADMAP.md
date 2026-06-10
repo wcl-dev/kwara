@@ -1,7 +1,8 @@
 # kwara 開發 Roadmap
 
-> 最後更新：2026-04-29
-> 目前狀態：Phase 1 + 2 + 3 完成、過 5 輪 codex review、192/192 測試綠燈、QSH 100 筆端到端驗證通過。
+> 最後更新：2026-06-10
+> 目前狀態：Phase 1 + 2 + 3 + 4 完成、過 5 輪 codex review、267/267 測試綠燈、QSH 100 筆端到端驗證通過。
+> 下一批：Phase 5（跨案件 index）→ Phase 6（對外報告）→ Phase 7（watchlist + feed，新增候選）。
 
 ---
 
@@ -12,7 +13,10 @@
 | Phase 1 | URL 參數聚合、TLS 憑證、Account Patterns、Providers、UI 三段式重塑、模組解耦（i18n / clustering god-module split / pipeline 副作用拆分） | `param_attribution.py`、`clustering_url.py`、`clustering_infra.py`、`views/tab_*.py` |
 | Phase 2 | HTML 內嵌 Pixel/GA/GTM/Ads/TikTok 指紋抽取、跨網域 ID 聚合、Providers 整合 URL+HTML 雙訊號 | `fingerprints.py`、`clustering_infra.py` |
 | Phase 3 | Wrapper-domain 偵測、輕量 HTML-only fetch、HAR 第三方 endpoint 聚合、第二批指紋（Clarity/Hotjar/LINE Tag/X Pixel） | `clustering_url.wrapper_relationships`、`lightweight_fetch.py`、`fingerprints.py`（擴充） |
+| **Phase 4 OPSEC Forensics（已交付）** | **4.1 Cloaking 偵測、4.2 Response header 鑑識（4 函式）、4.3 OPSEC profile、4.4 chunk failure auto-abort；第三批指紋（AdSense / FB Page）；Phase 4 訊號回灌 Insights 摘要；Phase 4 thresholds 移入 config** | **`cloaking.py`、`header_analysis.py`、`opsec.py`、`views/_sub_cloaking.py`、`_sub_headers.py`、`_sub_opsec.py`、`insights.py`** |
 | 證據完整性（5 輪 codex review） | per-capture artifact dirs、manifest.sha256、HMAC 簽章、案件刪除 realpath 限制、manual upload 不再 mutate 既有 row、export→restore 路徑對齊 | `snapshots._per_capture_dir`、`exporter.py`、`restore_from_export.py`、`app.py`、`views/_sub_page.py` |
+
+> Phase 4 各子項（4.1–4.4）的設計細節仍保留在下方「Phase 4」章節作為設計紀錄；它們**已全部 shipped**，列在上表基線。
 
 ---
 
@@ -182,6 +186,23 @@
 **開發效果**：第三方留存證據自動化；不依賴分析師記性。
 
 **預估**：0.5 天
+
+---
+
+## Phase 7 — Watchlist + Forward Capture（新增候選，依賴 Phase 5）
+
+**問題**：kwara 目前是 query-on-demand，每次都「事後」對已知 URL 做歸因。無法在 operator 一架新站、新 cert 簽出來那一刻就抓到。
+
+**做法**（建立在 Phase 5.1 跨案件 index 之上）：
+- 每次案件結束把強訊號（GA4/Pixel ID、cert serial、`x-server-hosted`、假 `x-powered-by` 字串、HAR 直連 IP）抽到 watchlist。
+- 對 watchlist 訂閱外部 feed：**PublicWWW**（HTML 反查）、**certstream**（CT log firehose）、**WhoisDS**（每日 newly-registered）、**Shodan/Censys**（HTTP banner）。
+- 命中新域 → 自動丟回 kwara 案件管線（調查→保全→分析全套）。
+
+**開發效果**：把「預測下一波」從 at-launch capture 的角度落地——operator 的新資產一上線就進案件。
+
+**前置依賴**：Phase 5.1 跨案件 index（watchlist 的存放體）；解決 single-user local tool 怎麼跑長駐 cron（launchd / lazy run / 極小 daemon）。
+
+**預估**：~2 天（不含 feed API 額度評估）。與 Backlog「威脅情資 feed 整合」「定期 re-check」為同一架構塊，三者一起想。
 
 ---
 

@@ -38,6 +38,15 @@ cases（案件）
 
 ## 分頁說明
 
+頂層共六個分頁，依工作流順序排列。其中**調查 → 保全 → 分析**是「三段式工作流」，六個證據步驟分布其中：
+
+```
+輸入 → 已收集 → 〔調查 → 保全 → 分析〕→ 匯出
+                  掃描     頁面     洞察 / 帳號樣態 / 服務商
+                  網路路徑 佐證     Cloaking / Headers / OPSEC
+                  網域情報
+```
+
 ### 1. 輸入（Input）
 
 新增包含可疑 URL 的來源貼文。
@@ -51,39 +60,35 @@ cases（案件）
 
 以表格形式檢視所有已匯入的貼文與擷取的 URL。
 
-### 3. 分析（Analysis）— 證據鏈
+### 3. 調查（Investigate）
 
-六個子分頁引導你完成蒐證工作流。由左至右依序操作：
+三個子分頁，蒐集每條 URL 的網路層證據：
 
-#### 掃描（Scan）
+- **掃描（Scan）** — 追蹤 redirect chain 至真實落地頁。可批次掃描（多執行緒平行）或逐一掃描。中斷的掃描可重設。
+- **網路路徑（Network）** — 檢視掃描時自動擷取的 Redirect Chain、TLS 憑證、HTTP 回應標頭（含每跳完整 header 集合）。
+- **網域情報（Domain）** — 落地網域的 WHOIS 註冊、IP 位址、ASN 託管資訊。可批次或逐一查詢。
 
-追蹤每條 URL 的 redirect chain 至真實落地頁。可批次掃描（8 執行緒平行）或逐一掃描。中斷的掃描可重設。
+### 4. 保全（Preserve）
 
-#### 網路路徑（Network）
+兩個子分頁，保全頁面證據並取得第三方佐證：
 
-檢視掃描時自動擷取的證據——不需額外操作：Redirect Chain、TLS 憑證、HTTP 回應標頭。
+- **頁面證據（Page）** — 瀏覽器截圖、HTML 原始碼、HAR 網路流量紀錄。可批次或逐一截圖、支援手動上傳；亦提供輕量 HTML-only 抓取模式（不啟動瀏覽器、快上 10 倍）。
+- **第三方佐證（Corroboration）** — 將落地頁提交至 Internet Archive、urlscan.io，並取得 RFC 3161 受信任時間戳。掃描後自動觸發，可手動重試。
 
-#### 網域情報（Domain）
+### 5. 分析（Analyze）
 
-落地網域的 WHOIS 註冊、IP 位址、ASN 託管資訊。可批次查詢或逐一查詢。
+六個子分頁，跨 URL 聚合已蒐集的證據：
 
-#### 頁面證據（Page）
+- **分析洞察（Insights）** — 規則式案件摘要：落地集中度、風險旗標、跨貼文參數歸屬、TLS/ASN 聚合、追蹤碼吻合、**Phase 4 主動防偵測訊號（cloaking / 偽造版本 / server 模板 / 強 UA 阻擋）**，以及資料缺口提示。先看這頁。
+- **帳號樣態（Account Patterns）** — 帳號 × 內容矩陣（不自動下協同判定，攤給分析師判讀）。
+- **服務提供商（Providers）** — 問責視角：涉案短連結服務商、網域註冊商、託管、CA、廣告/追蹤平台。
+- **Cloaking** — conditional cloaker 偵測（帶參數 vs 不帶參數的內容差異）。逐 URL verdict + case-wide 統計。
+- **Headers** — 每跳 response header 鑑識：per-domain 常數、跨域 server 模板、偽造版本字串、Set-Cookie origin 洩漏。
+- **OPSEC** — 每個落地網域的 lightweight vs Playwright 成功率對比，揭露「擋 UA 但放 Chromium」的 WAF 部署。
 
-瀏覽器截圖、HTML 原始碼、HAR 網路流量紀錄。可批次截圖或逐一截圖，支援手動上傳。
+> **Phase 4 三個子分頁（Cloaking / Headers / OPSEC）是證據力最強的訊號層**，其判定也會回灌到 Insights 摘要的最上方。詳見 [kwara_分析原理.md](kwara_分析原理.md)。
 
-#### 第三方佐證（Corroboration）
-
-將落地頁提交至 Internet Archive、urlscan.io，並取得 RFC 3161 受信任時間戳。掃描後自動觸發，可手動重試。
-
-#### 分析洞察（Insights）
-
-規則式案件摘要：落地集中度、風險旗標統計、跨貼文參數歸屬、ASN 基礎設施聚合、資料缺口提示。
-
-### 4. 服務提供商（Providers）
-
-列出涉案的短連結服務商與網域註冊商。
-
-### 5. 匯出（Export）
+### 6. 匯出（Export）
 
 下載 ZIP 證據封包（CSV、截圖、HTML、HAR、稽核紀錄、SHA-256 manifest、可選 HMAC 簽章、中英雙語 README）。
 
