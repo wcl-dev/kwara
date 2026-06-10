@@ -80,7 +80,7 @@ def render(conn, case_id):
         "hops":   r["hop_count"] if r["hop_count"] is not None else "—",
         "final":  r["final_url"] or "—",
     } for r in url_rows])
-    st.dataframe(df_scan, use_container_width=True, hide_index=True)
+    st.dataframe(df_scan, width='stretch', hide_index=True)
 
     with st.expander(t("scan.expander_individual", n=len(url_rows))):
         for r in url_rows:

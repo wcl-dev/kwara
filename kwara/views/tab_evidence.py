@@ -16,7 +16,7 @@ def render(conn, case_id):
     ).fetchall()
 
     if messages:
-        st.dataframe(pd.DataFrame([dict(r) for r in messages]), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame([dict(r) for r in messages]), width='stretch', hide_index=True)
     else:
         st.info(t("evidence.no_posts"))
 
@@ -36,6 +36,6 @@ def render(conn, case_id):
     ).fetchall()
 
     if artifacts:
-        st.dataframe(pd.DataFrame([dict(r) for r in artifacts]), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame([dict(r) for r in artifacts]), width='stretch', hide_index=True)
     else:
         st.info(t("evidence.no_urls"))
