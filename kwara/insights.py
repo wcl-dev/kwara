@@ -31,6 +31,7 @@ from param_attribution import (
     OWNER_KIND_PLATFORM,
     PLATFORM_DISPLAY_NAMES,
 )
+from sql import LATEST_DONE_SCAN_RUN
 
 
 def _bullet_owner_note(row: dict) -> str:
@@ -64,13 +65,9 @@ def _count_cloaking_suspects(conn: sqlite3.Connection, case_id: int) -> int:
     surfacing in the headline summary — it never reached Insights before.
     """
     rows = conn.execute(
-        """SELECT sr.cloaking_signal_json
+        f"""SELECT sr.cloaking_signal_json
            FROM url_artifacts ua
-           JOIN scan_runs sr ON sr.id = (
-               SELECT id FROM scan_runs
-               WHERE url_artifact_id = ua.id AND status = 'done'
-               ORDER BY id DESC LIMIT 1
-           )
+           JOIN scan_runs sr ON sr.id = {LATEST_DONE_SCAN_RUN}
            WHERE ua.case_id = ?
              AND sr.cloaking_signal_json IS NOT NULL
              AND TRIM(sr.cloaking_signal_json) != ''""",

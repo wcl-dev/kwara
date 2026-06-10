@@ -34,6 +34,7 @@ from param_attribution import (
     identify_param,
     merge_risk_tags,
 )
+from sql import LATEST_DONE_SCAN_RUN
 
 
 def shared_destinations(conn: sqlite3.Connection, case_id: int) -> tuple:
@@ -45,18 +46,14 @@ def shared_destinations(conn: sqlite3.Connection, case_id: int) -> tuple:
     Returns (resolved, unresolved) tuple of lists sorted by: has_risk_tags desc, post_count desc.
     """
     rows = conn.execute(
-        """SELECT sr.final_url,
+        f"""SELECT sr.final_url,
                   ua.id AS ua_id, ua.original_url,
                   me.id AS post_id, me.platform, me.actor_label,
                   s.risk_tags,
                   sr.intel_risk_tags
            FROM url_artifacts ua
            JOIN message_evidence me ON me.id = ua.message_id
-           JOIN scan_runs sr ON sr.id = (
-               SELECT id FROM scan_runs
-               WHERE url_artifact_id = ua.id AND status = 'done'
-               ORDER BY id DESC LIMIT 1
-           )
+           JOIN scan_runs sr ON sr.id = {LATEST_DONE_SCAN_RUN}
            LEFT JOIN snapshots s ON s.scan_run_id = sr.id
                AND s.id = (
                    SELECT id FROM snapshots WHERE scan_run_id = sr.id
@@ -143,16 +140,12 @@ def wrapper_relationships(conn: sqlite3.Connection, case_id: int) -> list:
       }]
     """
     rows = conn.execute(
-        """SELECT ua.id AS ua_id, ua.original_url,
+        f"""SELECT ua.id AS ua_id, ua.original_url,
                   sr.final_url, sr.hop_count,
                   me.id AS post_id
            FROM url_artifacts ua
            JOIN message_evidence me ON me.id = ua.message_id
-           JOIN scan_runs sr ON sr.id = (
-               SELECT id FROM scan_runs
-               WHERE url_artifact_id = ua.id AND status = 'done'
-               ORDER BY id DESC LIMIT 1
-           )
+           JOIN scan_runs sr ON sr.id = {LATEST_DONE_SCAN_RUN}
            WHERE ua.case_id = ? AND sr.final_url IS NOT NULL""",
         (case_id,),
     ).fetchall()
