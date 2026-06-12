@@ -24,6 +24,7 @@ All evidence is stored locally in SQLite and can be exported as a ZIP evidence p
 - **Three-stage workflow** — Investigate → Preserve → Analyze, with the six evidence steps distributed across them
 - **Operator-level signal clustering** — cross-domain matching of HTML tracking IDs (11 platforms), TLS certificates, URL parameters, and wrapper redirects
 - **Active-evasion forensics (Phase 4)** — cloaking detection, HTTP header forensics (origin leak / fabricated versions / server templates), and OPSEC path differential
+- **Monetisation forensics (Phase 8)** — fetches each domain's `ads.txt` and clusters shared DIRECT ad accounts + byte-identical templates, frequency-weighted to separate shared monetisation managers (weak) from operator-cluster signals (strong)
 - **Third-party proof** — Wayback Machine, urlscan.io, and RFC 3161 timestamps provide independent records
 - **Per-case locale** — set victim's region so screenshots reflect what they actually saw (defeats geo-cloaking)
 - **URL parameter attribution** — auto-identifies 50+ tracking parameters (UTM, fbclid, gclid, etc.)
@@ -73,7 +74,6 @@ On Windows with dependencies already installed, double-click `start_kwara.bat` f
 | `kwara/views/` | UI tab modules (one file per tab for easy editing) |
 | `kwara/config.py` | Centralized configuration and environment variable defaults |
 | `kwara/corroboration.py` | Third-party evidence services (Wayback, urlscan, RFC 3161) |
-| `whois_osint/` | Standalone WHOIS batch query script ([README](whois_osint/README.md)) |
 | `docs/` | Illustrated crosswalk: forensic targets ↔ the digital-advertising ecosystem (HTML) |
 | `restore_from_export.py` | Restore database from an exported evidence pack ZIP |
 

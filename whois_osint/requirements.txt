@@ -1,5 +1,0 @@
-# OSINT WHOIS 查詢工作流程
-# 嚴禁使用付費 API，僅使用開源 whois
-python-whois>=0.9.0
-tldextract>=5.0.0
-openpyxl>=3.1.0

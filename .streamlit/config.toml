@@ -1,0 +1,27 @@
+# kwara UI theme — Swiss 報告風（ui-redesign-prototype）
+# 原則：黑白高對比、單一強調藍、直角、強格線；紅色保留給真正的警示。
+# tokens 的 Python 對應在 kwara/views/_tokens.py，兩邊要同步改。
+
+[theme]
+base = "light"
+primaryColor = "#1D4ED8"            # 唯一強調色：選取狀態、primary button、focus
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F5F5F5"
+textColor = "#111111"
+borderColor = "#D9D9D9"
+linkColor = "#1D4ED8"
+baseRadius = "none"                 # Swiss 直角
+buttonRadius = "none"
+font = "Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif"
+headingFont = "Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif"
+codeFont = "'SF Mono', Menlo, Consolas, monospace"
+codeTextColor = "#111111"           # 識別碼是中性資料，不是錯誤——蓋掉預設粉紅
+codeBackgroundColor = "#F0F0F0"
+dataframeHeaderBackgroundColor = "#F5F5F5"
+metricValueFontWeight = 700
+# 圖表分類色：與 kwara/ui_tokens.py GROUP_PALETTE 同源同順序
+chartCategoricalColors = ["#1D4ED8", "#0E7490", "#7C3AED", "#B45309", "#111111", "#15803D"]
+
+[theme.sidebar]
+backgroundColor = "#F5F5F5"
+secondaryBackgroundColor = "#FFFFFF"

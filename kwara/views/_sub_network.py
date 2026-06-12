@@ -81,3 +81,32 @@ def render(conn, case_id):
         )
     else:
         st.caption(t("net.no_headers"))
+
+    # ── ads.txt monetisation (Phase 8) — per-domain, regardless of grouping ──
+    _ads_row = conn.execute(
+        "SELECT ads_txt_json FROM scan_runs WHERE id = ?", (sel["scan_run_id"],)
+    ).fetchone()
+    _ads_raw = _ads_row["ads_txt_json"] if _ads_row else None
+
+    st.subheader(t("net.ads_txt"))
+    if _ads_raw:
+        _ads = json.loads(_ads_raw)
+        _recs = _ads.get("records") or []
+        _direct = [r for r in _recs if (r.get("relationship") or "").upper() == "DIRECT"]
+        st.caption(t("net.ads_txt_summary", status=_ads.get("status") or "—",
+                     n=len(_recs), direct=len(_direct)))
+        _owner, _mgr = _ads.get("owner_domain"), _ads.get("manager_domain")
+        if _owner or _mgr:
+            st.caption(t("net.ads_txt_declared", owner=_owner or "—", manager=_mgr or "—"))
+        if _direct:
+            st.dataframe(
+                pd.DataFrame(
+                    [{"Ad System": r.get("adsystem"),
+                      "Seller ID": r.get("seller_id"),
+                      "Cert Auth ID": r.get("cert_authority_id") or "—"}
+                     for r in _direct],
+                ),
+                width='stretch', hide_index=True,
+            )
+    else:
+        st.caption(t("net.no_ads_txt"))
