@@ -1,9 +1,15 @@
 """kwara — Digital Evidence Collection & Corroboration Toolkit (Streamlit UI)
 
-This file handles only the sidebar (language, cases, settings) and tab routing.
-Each tab's content lives in pages/tab_*.py for easier maintenance.
+Group-centric left-rail navigation (st.navigation):
+  • an Overview verdict page as the default landing surface
+  • a Group dossier and an Operator Graph drawn from the shared-signal
+    clustering engines
+  • Collection (add URLs → auto-attribution → optional screenshots) and
+    Analysis grouped by analytic question
+
+The sidebar owns case lifecycle (create / select / delete) plus language
+and settings. Page bodies reuse the existing views/ render() functions.
 """
-import json
 import os
 import shutil
 import sys
@@ -42,9 +48,6 @@ def _show_guide():
     st.markdown(t("guide.content"))
 
 
-# ---------------------------------------------------------------------------
-# Sidebar
-# ---------------------------------------------------------------------------
 _LOCALE_PRESETS = {
     "Taiwan (zh-TW)": ("zh-TW", "Asia/Taipei"),
     "US (en-US)": ("en-US", "America/New_York"),
@@ -55,6 +58,11 @@ _LOCALE_PRESETS = {
     "Custom": ("", ""),
 }
 
+
+# ---------------------------------------------------------------------------
+# Sidebar — language, case lifecycle (create / select / delete), settings.
+# The navigation rail is auto-added by st.navigation below.
+# ---------------------------------------------------------------------------
 with st.sidebar:
     st.title(t("sidebar.title"))
 
@@ -117,9 +125,9 @@ with st.sidebar:
                            WHERE ua.case_id = ?""",
                         (current_case_id,),
                     ).fetchall()
-                    # Confine cleanup to the snapshot data root (codex review
-                    # #6). Without this, a corrupted/crafted DB row could
-                    # supply an arbitrary path to shutil.rmtree.
+                    # Confine cleanup to the snapshot data root. Without this, a
+                    # corrupted/crafted DB row could supply an arbitrary path to
+                    # shutil.rmtree.
                     _SNAP_ROOT = os.path.realpath(os.path.join(
                         os.path.dirname(__file__), "data", "snapshots"
                     ))
@@ -180,64 +188,219 @@ with st.sidebar:
         for label, val in _settings:
             st.caption(f"**{label}:** {val}")
 
-# ---------------------------------------------------------------------------
-# Guard
-# ---------------------------------------------------------------------------
-st.markdown(t("page.header"))
+    st.divider()
+    st.caption(f"DB: `{os.path.basename(DB_PATH)}`")
 
-if current_case_id is None:
-    st.warning(t("page.warn_select"))
-    st.stop()
 
-# Read per-case locale
-_case_row = conn.execute(
-    "SELECT browser_locale, browser_timezone FROM cases WHERE id = ?",
-    (current_case_id,),
-).fetchone()
-_case_locale = (_case_row["browser_locale"] if _case_row and _case_row["browser_locale"] else None)
-_case_tz = (_case_row["browser_timezone"] if _case_row and _case_row["browser_timezone"] else None)
+# Per-case locale (needed by the Preserve / Page capture view).
+_case_locale = _case_tz = None
+if current_case_id is not None:
+    _r = conn.execute(
+        "SELECT browser_locale, browser_timezone FROM cases WHERE id = ?",
+        (current_case_id,),
+    ).fetchone()
+    _case_locale = _r["browser_locale"] if _r and _r["browser_locale"] else None
+    _case_tz = _r["browser_timezone"] if _r and _r["browser_timezone"] else None
+
 
 # ---------------------------------------------------------------------------
-# Tabs — each delegates to its own module in views/
-# Three-stage workflow: Investigate → Preserve → Analyze.
+# Page bodies — closures over conn + current_case_id (st.Page wants a no-arg
+# callable). Each reuses existing render() functions; the two NEW pages
+# (Overview, Graph) live in views/page_*.py.
 # ---------------------------------------------------------------------------
 from views import (
-    tab_analyze,
+    _sub_cloaking,
+    _sub_corroboration,
+    _sub_domain,
+    _sub_headers,
+    _sub_insights,
+    _sub_network,
+    _sub_opsec,
+    _sub_page,
+    _sub_scan,
+    page_graph,
+    page_group,
+    page_crosscase,
+    page_overview,
     tab_crosscase,
     tab_evidence,
     tab_export,
     tab_input,
-    tab_investigate,
-    tab_preserve,
+    tab_providers,
 )
 
-tab_in, tab_ev, tab_iv, tab_pv, tab_az, tab_xc, tab_ex = st.tabs([
-    t("tab.input"),
-    t("tab.collected"),
-    t("tab.investigate"),
-    t("tab.preserve"),
-    t("tab.analyze"),
-    t("tab.crosscase"),
-    t("tab.export"),
-])
 
-with tab_in:
-    tab_input.render(conn, current_case_id)
+def _need_case():
+    if current_case_id is None:
+        st.warning("先在側欄選一個案件。Select a case in the sidebar.")
+        return False
+    return True
 
-with tab_ev:
-    tab_evidence.render(conn, current_case_id)
 
-with tab_iv:
-    tab_investigate.render(conn, current_case_id)
+def pg_overview():
+    if _need_case():
+        page_overview.render(conn, current_case_id, goto_group=_PAGE_GROUP)
 
-with tab_pv:
-    tab_preserve.render(conn, current_case_id, case_locale=_case_locale, case_tz=_case_tz)
 
-with tab_az:
-    tab_analyze.render(conn, current_case_id)
+def pg_group():
+    if _need_case():
+        page_group.render(conn, current_case_id)
 
-with tab_xc:
-    tab_crosscase.render(conn, current_case_id)
 
-with tab_ex:
+# Collection flow. The principle (per user): adding URLs auto-runs the cheap
+# no-screenshot attribution; screenshots are an opt-in "get more" step.
+_COLLECT = ["進件", "頁面擷取", "掃描", "佐證", "網路詳情", "網域情報"]
+_COLLECT_HELP = {
+    "進件":     "貼上 FB 貼文／留言或匯入 CSV → 抽出連結並**自動歸因（免截圖）**，群組與關聯圖隨即浮現。",
+    "頁面擷取": "（取得更多）對重點 URL 以瀏覽器擷取截圖／HTML／HAR——補上 JS 注入的追蹤碼，並作為保全證據。",
+    "掃描":     "（進階／手動）重新追蹤跳轉鏈、記錄 TLS 憑證與 HTTP 標頭。",
+    "佐證":     "將落地頁存檔到 Wayback、提交 urlscan.io、取得 RFC 3161 受信時間戳。",
+    "網路詳情": "檢視掃描結果：憑證、跳轉路徑、回應標頭、ads.txt。",
+    "網域情報": "查詢 WHOIS 註冊資訊、IP 與 ASN 託管。",
+}
+
+_AUTO_ATTR_CAP = 20   # auto-run for modest batches; a big paste is an explicit click
+
+
+def _auto_fast_attribution():
+    """After URLs are added, attribute them automatically (no screenshots) so
+    groups appear without the analyst clicking anything. Runs once per new
+    batch; a large batch becomes an explicit button (a long blocking render
+    on auto would feel like a hang)."""
+    import pipeline
+    pending = pipeline._artifacts_needing_scan(conn, current_case_id)
+    if not pending:
+        return
+    sig = (current_case_id, len(pending))
+
+    def _run(force=False):
+        with st.status("自動歸因中（免截圖：掃描 → 追蹤碼 → ads.txt → WHOIS）…") as s:
+            summary = pipeline.run_fast_attribution(conn, current_case_id, force=force)
+            s.update(label="歸因完成", state="complete")
+        st.session_state["auto_attr_sig"] = sig
+        st.success(
+            f"已自動歸因 {len(pending)} 個連結 → 到「總覽」「關聯圖」看群組。"
+            "想要更多訊號（JS 注入的追蹤碼）就到「頁面擷取」截圖。"
+        )
+        if summary["errors"]:
+            st.caption(f"（{len(summary['errors'])} 個被站點擋掉，已略過）")
+
+    st.divider()
+    if len(pending) > _AUTO_ATTR_CAP:
+        st.info(f"有 **{len(pending)}** 個連結待歸因（批量較大，手動啟動以免畫面卡住）。")
+        if st.button(f"歸因這 {len(pending)} 個（免截圖）", type="primary", key="big_attr"):
+            _run()
+    elif st.session_state.get("auto_attr_sig") != sig:
+        _run()
+
+
+def pg_collection():
+    if not _need_case():
+        return
+    st.subheader("蒐證")
+    st.caption("加入 URL 會**自動歸因（免截圖）**看關聯；要更多訊號／保全證據再到「頁面擷取」截圖。")
+    step = st.segmented_control(
+        "step", _COLLECT, default="進件", label_visibility="collapsed",
+    )
+    st.caption(_COLLECT_HELP.get(step, ""))
+    st.divider()
+    if step == "進件":
+        tab_input.render(conn, current_case_id)
+        _auto_fast_attribution()          # input → auto no-screenshot analysis
+        st.divider()
+        tab_evidence.render(conn, current_case_id)
+    elif step == "頁面擷取":
+        _sub_page.render(conn, current_case_id, case_locale=_case_locale, case_tz=_case_tz)
+    elif step == "掃描":
+        _sub_scan.render(conn, current_case_id)
+    elif step == "佐證":
+        _sub_corroboration.render(conn, current_case_id)
+    elif step == "網路詳情":
+        _sub_network.render(conn, current_case_id)
+    else:
+        _sub_domain.render(conn, current_case_id)
+
+
+# Analysis grouped by analytic purpose (neutral, nominal headings).
+_ANALYSIS_Q = {
+    "歸因與基礎設施": ["insights", "providers"],
+    "行為觀察":       ["cloaking", "opsec"],
+    "伺服器標頭鑑識": ["headers"],
+}
+_ANALYSIS_HELP = {
+    "歸因與基礎設施": "跨網站共用訊號的聚類，與課責對象（註冊商、託管、CA、廣告帳號）。",
+    "行為觀察":       "內容偽裝（cloaking）偵測，與自動化檢測回應差異（OPSEC）。",
+    "伺服器標頭鑑識": "逐跳 HTTP 回應標頭：常數、跨域模板、偽造版本、cookie 網域。",
+}
+
+
+def pg_analysis():
+    if not _need_case():
+        return
+    st.subheader("分析")
+    st.caption("總覽與卷宗以外的進階交叉分析，供分析師深入檢視。")
+    q = st.segmented_control(
+        "question", list(_ANALYSIS_Q.keys()),
+        default=list(_ANALYSIS_Q.keys())[0], label_visibility="collapsed",
+    )
+    st.caption(_ANALYSIS_HELP.get(q, ""))
+    st.divider()
+    panels = _ANALYSIS_Q[q]
+    if "insights" in panels:
+        _sub_insights.render(conn, current_case_id)
+        st.divider()
+    if "cloaking" in panels:
+        _sub_cloaking.render(conn, current_case_id)
+        st.divider()
+    if "opsec" in panels:
+        _sub_opsec.render(conn, current_case_id)
+        st.divider()
+    if "headers" in panels:
+        _sub_headers.render(conn, current_case_id)
+        st.divider()
+    if "providers" in panels:
+        tab_providers.render(conn, current_case_id)
+
+
+def pg_graph():
+    if _need_case():
+        page_graph.render(conn, current_case_id)
+
+
+def pg_crosscase():
+    page_crosscase.render(conn, current_case_id)
+
+
+def pg_export():
+    if not _need_case():
+        return
+    st.subheader("匯出")
+    st.caption("打包整案為 ZIP 證據封包：CSV、截圖、HTML、HAR、稽核紀錄、"
+               "SHA-256 manifest 與可選 HMAC 簽章。")
     tab_export.render(conn, current_case_id)
+
+
+# ---------------------------------------------------------------------------
+# Navigation rail — grouped sections (Logz/Grafana style).
+# Group-centric: Overview (group breakdown) → Group dossier → Collection.
+# ---------------------------------------------------------------------------
+# Page objects created first so pg_overview's "查看卷宗" can st.switch_page to
+# the dossier (referenced via the module global _PAGE_GROUP at call time).
+_PAGE_GROUP = st.Page(pg_group, title="群組卷宗 Dossier", icon=":material/folder_open:")
+
+nav = st.navigation({
+    "案件 Case": [
+        st.Page(pg_overview,    title="總覽 Overview",     icon=":material/assessment:", default=True),
+        _PAGE_GROUP,
+        st.Page(pg_collection,  title="蒐證 Collection",   icon=":material/travel_explore:"),
+    ],
+    "分析 Analysis": [
+        st.Page(pg_analysis,    title="分析 Analysis",     icon=":material/analytics:"),
+        st.Page(pg_graph,       title="關聯圖 Graph",      icon=":material/hub:"),
+    ],
+    "全域 Global": [
+        st.Page(pg_crosscase,   title="跨案件 Cross-case", icon=":material/public:"),
+        st.Page(pg_export,      title="匯出 Export",       icon=":material/download:"),
+    ],
+})
+nav.run()
