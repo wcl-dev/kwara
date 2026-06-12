@@ -1,7 +1,8 @@
 # kwara 開發 Roadmap
 
 > 最後更新：2026-06-10
-> 目前狀態：Phase 1 + 2 + 3 + 4 + 5.1 完成、過 5 輪 codex review、277/277 測試綠燈、QSH 100 筆端到端驗證通過。
+> 目前狀態：Phase 1 + 2 + 3 + 4 + 5.1 + 8 完成、過 5 輪 codex review、287/287 測試綠燈、QSH 100 筆端到端驗證通過。
+> 2026-06-10 特化決策：收斂為「跨案件操作者基礎設施歸因引擎」，移除 Account Patterns / whois_osint（見下方「已移除」）。
 > 下一批：Phase 5.2（header 衍生訊號入索引）/ Phase 6（對外報告）/ Phase 7（watchlist + feed，依賴 5.1）。
 
 ---
@@ -208,6 +209,49 @@
 
 ---
 
+## Phase 8 — ads.txt / sellers.json 變現歸因 ✅（已交付 2026-06-10）
+
+> 透明化協定（IAB Tech Lab）內化。**已在 DB 既有 14 個案件域名上跑過實證**，不是紙上提案。
+>
+> **已交付**：`adstxt.py`（抓取 + 解析 OWNERDOMAIN/MANAGERDOMAIN + 存 `scan_runs.ads_txt_json`，`allow_redirects=False` 守契約 9，403 也記錄）；pipeline `_try_fetch_ads_txt`（snapshot 後自動跑）+ `run_ads_txt`（UI 重抓）；`clustering_infra.shared_ad_accounts`（`by_account` 頻率加權 operator/manager + `by_template` sha256 群組）；`index_db` 兩類新訊號（`ads_txt_seller` 只收 operator 級、`ads_txt_template` sha256）；Providers 分頁 UI；24 個新測試（287/287 綠）。sellers.json 反解未做（Google 多 is_confidential，列未來選配）。
+
+**問題**：kwara 今天的硬訊號（GA4/Pixel、TLS cert、header 指紋、cloaking）都繞著「誰在追蹤訪客」。但 clickbait/MFA 站的本質是**變現**——`/ads.txt` 是站方**自我宣告**「我授權哪些廣告系統、用哪個帳號收錢」的公開檔案，等於把金流帳號攤在門口，kwara 卻完全沒讀。
+
+**實證（2026-06-10，11 個回 200 的案件域名）**：
+- **`mrbigtalking.com` / `storynia.com` / `cookicway.com` 的 ads.txt 逐字節相同**（同一份 98 行檔案）→ 共用變現模板，證據力比肩「假 `x-powered-by` 字串共用」。
+- DIRECT 行洩漏台灣本地 SSP：`clickforce.com.tw`、`tenmax.io`、`ucfunnel.com`/`aralego.com`、`innity.com` → 在地指紋價值高。
+- `luckyelse` / `picelse` / `tvsilo` 對 ads.txt 請求回 **403** → 又一條 OPSEC/cloaking 訊號，與既有 WAF 發現一致。
+
+**⚠️ 設計關鍵 — 必須頻率加權（否則直接誤判）**：實證發現約 15 個 google `DIRECT pub-id` 同時出現在**全部 11 個域名**上。這**不是**「11 站同操作者」，而是**共用變現代管商 / MFA reseller 網路**把自家帳號模板化灌進每個客戶站。這與 kwara 既有的「常見 ID vs 稀有 ID」難題同構（見契約 5）：
+- 出現在全部/多數域名的帳號 → 代管商（網路級，**弱化**操作者區分力，不可當同操作者結論）
+- 出現在**稀有子集**的帳號 → 真正操作者聚類訊號（例：`pub-1237260803267758` 只在 dsawjk + wiusbh）
+- **ads.txt sha256 相同** → 最乾淨的操作者模板訊號
+
+**做法**：
+1. **抓取** — `scanner.py` 對每個 final domain 順手抓 `https://{domain}/ads.txt`（比照 cloaking 順手抓「去 param」版本的模式）；存 raw + sha256 到 `scan_runs.ads_txt_json`（解析後的 records + raw hash + 取得時 status code）。
+2. **解析** — 新模組 `adstxt.py`：解析 `(adsystem, seller_id, relationship, cert_authority_id)` 四元組；分流 DIRECT / RESELLER；特別 parse ads.txt **1.1 的 `OWNERDOMAIN` / `MANAGERDOMAIN` 變數**（站方自我宣告的擁有者/代管者域名 → declared-attribution 一等欄位，可造假但造假本身也是訊號）。附負面測試（比照契約 4 對 fingerprint 的要求）。
+3. **聚類** — `clustering_infra.py` 加 `shared_ad_accounts` 面向：**帶頻率加權**，只把稀有子集共用與 sha256 相同升級為強訊號；常見帳號標記為代管商級（弱）。
+4. **跨案件** — DIRECT seller_id + ads.txt sha256 餵進 `index_db.py`（Phase 5.1）成為第 6/7 類強訊號；同時是 Phase 7 watchlist 的 pivot key（**PublicWWW 本來就能反查 ads.txt 內容** → forward search 直接可用）。
+5. **sellers.json（選配 enrichment）** — DIRECT 的 `google.com, pub-XXX` 可查 `realtimebidding.google.com/sellers.json` 反解 seller 名稱/域名。**但 Google 多數標 `is_confidential`、常解不出**，所以當「能解就加分」，不當主力。
+
+**對應模組**：
+- `adstxt.py`（新）— 解析 + OWNERDOMAIN/MANAGERDOMAIN
+- `scanner.py`（擴充）— 順手抓 ads.txt
+- `db.py`（schema）— `scan_runs.ads_txt_json` 欄位
+- `clustering_infra.py`（擴充）— `shared_ad_accounts`（頻率加權）
+- `index_db.py`（擴充）— DIRECT seller_id / ads.txt hash 入索引
+- `views/_sub_*` 或併入 Providers — 「共用變現帳號矩陣 + 模板雜湊群組」
+
+**證據力定位**：DIRECT pub-id 是**金流歸屬**——某種意義比 GA4 共用更硬（GA4 可能只是分析工具共用，DIRECT 帳號是「錢進誰口袋」）。
+
+**新增契約候選（落地時納入下方契約表）**：ads.txt 訊號**強度必須頻率加權**——「跨域名共用」不等於「同操作者」；只有稀有子集共用或 sha256 相同才升級為強訊號。
+
+**預估**：~1 天（schema + scanner hook 小；adstxt.py 解析 + 頻率加權聚類 + 一個 view）。
+
+**優先序建議**：高契合特化方向、已實證、成本低。建議排在 Phase 5.2 之後、與 Phase 6 並列或更前（變現帳號是對外檢舉時最具說服力的「誰獲利」證據，反而強化 6.1/6.2）。
+
+---
+
 ## Backlog（中等信心，需先驗證命中率再投資）
 
 | 候選 | 不確定性 | 觸發條件 |
@@ -222,8 +266,16 @@
 ## 不會做（跟設計理念衝突）
 
 - **多人 / SaaS 化** — kwara 是 single-user local SQLite by design；分析師主權 + 隱私 + 速度都比共享優先
-- **AI 自動下協同行為判定** — Account Patterns 已拍板「不自動 flag、避免過擬合」；分析師看矩陣自己判斷
+- **AI 自動下協同行為判定** — 自動 flag 易過擬合單一資料集；分析師自己看訊號判斷
 - **任意爬蟲式廣面收集** — kwara 是 evidence-grade、不是 scraper；只跑分析師明確匯入的 URL
+
+## 已移除（2026-06-10 特化決策）
+
+kwara 收斂為**跨案件操作者基礎設施歸因引擎**——核心資產是一組可 pivot 的硬訊號（tracking ID、TLS cert、header 指紋、cloaking、即將加入的 ads.txt 變現帳號），全部匯入跨案件 index + watchlist。落在此使命光譜外的功能移除：
+
+- **Account Patterns（帳號樣態分頁）** — 發文者 × 內容的 pivot 矩陣屬**社群帳號行為分析（CIB）**學科，與工具其餘全部「基礎設施硬訊號」功能不同調。移除 `views/_sub_account_patterns.py`、`clustering_url.account_content_matrix` / `content_time_distribution` / `_extract_content_id`、相關 i18n 與測試。**git 歷史保留**，日後若要做獨立 CIB 工具可撈回。
+- **`whois_osint/` 子目錄** — 功能已被 in-package `whois_lookup.py` + `ip_lookup.py` 吸收，是早期原型，移除以免重複維護。
+- **根目錄一次性腳本** — 已執行完的 case-specific ad-hoc（`_import_*` / `_export_qsh_csv` / `_scan_case_3` / `_snapshot_case_3`）歸檔到 `scripts/oneshot/`；可重用工具（`_run_pending_snapshots`、`_retry_failed_scans`、`restore_from_export`）留根目錄。
 
 ---
 
@@ -241,6 +293,7 @@
 | 8 | Manifest 自保護：export 必出 `manifest.sha256`；無 `KWARA_HMAC_KEY` 時 `manifest.json` 必含 `integrity_warning` | `exporter.py` |
 | 9 | Lightweight fetch `allow_redirects=False`：信任 scan 已解的 final_url；3xx 變 `error` snapshot | `lightweight_fetch.py` |
 | 10 | Case 刪除限制在 `data/snapshots/` 之下（realpath 驗證） | `app.py` |
+| 11 | ads.txt 訊號強度**必須頻率加權**：「跨網域共用 DIRECT 帳號」不等於「同操作者」；出現在 >= `ADS_TXT_MANAGER_BREADTH` 比例網域的帳號標 manager（弱），只有稀有子集或 sha256 相同才升級為 operator（強）。跨案件索引**不收 manager 級**帳號。 | `clustering_infra.shared_ad_accounts`、`index_db`、`config.ADS_TXT_MANAGER_BREADTH` |
 
 ---
 
@@ -257,6 +310,7 @@
   └─ 5.1 跨案件查詢（~1 天）
 
 中期（1 個月內）
+  ├─ 8   ads.txt / sellers.json 變現歸因（~1 天，已實證、高契合特化方向）
   ├─ 6.1 PDF executive summary（1.5 天）
   ├─ 6.2 abuse 表單 pre-fill（1 天）
   └─ 6.3 urlscan / Wayback 自動提交（0.5 天）
