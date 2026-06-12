@@ -15,7 +15,7 @@ kwara takes suspicious URLs from social media posts and walks them through a six
 3. **Domain** — look up WHOIS registration, IP, and ASN hosting
 4. **Page** — capture browser screenshots, HTML source, and HAR network logs
 5. **Corroboration** — archive the landing page on Internet Archive, submit to urlscan.io, and obtain an RFC 3161 trusted timestamp
-6. **Insights** — generate rule-based case summaries with risk flags, parameter attribution, infrastructure clustering, and Phase 4 active-evasion signals (cloaking, fabricated server versions, shared server templates, strong UA-gating)
+6. **Insights** — generate rule-based case summaries with risk flags, parameter attribution, infrastructure clustering, and active-evasion signals (cloaking, fabricated server versions, shared server templates, strong UA-gating)
 
 All evidence is stored locally in SQLite and can be exported as a ZIP evidence pack with SHA-256 manifest and optional HMAC signature.
 
@@ -23,8 +23,8 @@ All evidence is stored locally in SQLite and can be exported as a ZIP evidence p
 
 - **Three-stage workflow** — Investigate → Preserve → Analyze, with the six evidence steps distributed across them
 - **Operator-level signal clustering** — cross-domain matching of HTML tracking IDs (11 platforms), TLS certificates, URL parameters, and wrapper redirects
-- **Active-evasion forensics (Phase 4)** — cloaking detection, HTTP header forensics (origin leak / fabricated versions / server templates), and OPSEC path differential
-- **Monetisation forensics (Phase 8)** — fetches each domain's `ads.txt` and clusters shared DIRECT ad accounts + byte-identical templates, frequency-weighted to separate shared monetisation managers (weak) from operator-cluster signals (strong)
+- **Active-evasion forensics** — cloaking detection, HTTP header forensics (origin leak / fabricated versions / server templates), and OPSEC path differential
+- **Monetisation forensics** — fetches each domain's `ads.txt` and clusters shared DIRECT ad accounts + byte-identical templates, frequency-weighted to separate shared monetisation managers (weak) from operator-cluster signals (strong)
 - **Third-party proof** — Wayback Machine, urlscan.io, and RFC 3161 timestamps provide independent records
 - **Per-case locale** — set victim's region so screenshots reflect what they actually saw (defeats geo-cloaking)
 - **URL parameter attribution** — auto-identifies 50+ tracking parameters (UTM, fbclid, gclid, etc.)
