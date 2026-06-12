@@ -46,7 +46,7 @@ def t(_key: str, **kwargs) -> str:
 # How-to-use guide (stored as single blocks per language)
 # ---------------------------------------------------------------------------
 _GUIDE_EN = """\
-**kwara** collects, scans, and documents URL shortener and domain abuse evidence. Work through the tabs left to right — each step builds on the previous one.
+**kwara** attributes the sites behind suspicious URLs to operator groups by following the monetisation and tracking signals of the digital-advertising ecosystem, and documents the evidence along the way. Work through the tabs left to right — each step builds on the previous one.
 
 ---
 
@@ -80,7 +80,7 @@ Download a ZIP evidence pack with SHA-256 manifest, optional HMAC signature, and
 """
 
 _GUIDE_ZH = """\
-**kwara** 收集、掃描並記錄 URL 短連結與網域濫用的數位證據。從左到右依序操作各分頁，每一步建立在前一步的成果之上。
+**kwara** 沿數位廣告生態的變現與追蹤訊號，把可疑連結背後的網站歸因到操作者群組，並沿途蒐集、佐證數位證據。從左到右依序操作各分頁，每一步建立在前一步的成果之上。
 
 ---
 

@@ -1,8 +1,8 @@
 **[正體中文](kwara_說明文件.md)**
 
-# kwara — Digital Evidence Collection & Corroboration Toolkit
+# kwara — Operator Attribution & Digital Evidence Toolkit
 
-kwara is a local toolkit that helps investigators collect, scan, and corroborate digital evidence of URL shortlink abuse, domain fraud, and online scams. All data is stored in a local SQLite database.
+kwara is a local toolkit for operator attribution and digital evidence, specialised in the digital-advertising ecosystem: it collects, scans and corroborates evidence from suspicious URLs (shortlink abuse, domain fraud, online scams), then clusters the sites behind them into operator groups via monetisation and measurement signals. All data is stored in a local SQLite database.
 
 ---
 

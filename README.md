@@ -2,7 +2,7 @@
 
 # kwara
 
-Digital evidence collection and corroboration toolkit for investigating URL shortlink abuse, domain fraud, and online scams.
+Operator-attribution and digital-evidence toolkit specialised in the digital-advertising ecosystem — it clusters the sites behind suspicious URLs (shortlink abuse, domain fraud, online scams) into operator groups via monetisation and measurement signals (tracking IDs, ads.txt / sellers.json accounts, TLS certificates, HTTP fingerprints), and packages the result as reproducible evidence.
 
 ## What kwara does
 
