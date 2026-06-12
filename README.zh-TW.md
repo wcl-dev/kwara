@@ -74,6 +74,7 @@ Windows 已安裝依賴的情況下，從專案根目錄雙擊 `start_kwara.bat`
 | `kwara/views/` | UI tab 模組（每個 tab 一個檔案，方便編輯） |
 | `kwara/config.py` | 集中配置與環境變數預設值 |
 | `kwara/corroboration.py` | 第三方證據服務（Wayback、urlscan、RFC 3161） |
+| `docs/` | 圖解對照誌：鑑識標的 ↔ 數位廣告生態（HTML） |
 | `restore_from_export.py` | 從匯出的 ZIP 證據封包還原資料庫 |
 
 ## Clone 後
@@ -83,3 +84,5 @@ Windows 已安裝依賴的情況下，從專案根目錄雙擊 `start_kwara.bat`
 3. **不要**提交 `.venv`、`kwara/data/`、快照目錄（`.gitignore` 已涵蓋）
 
 詳細操作說明請見 [`kwara_說明文件.md`](kwara_說明文件.md)。
+
+想了解 kwara 的各個鑑識標的如何對應到數位廣告產業（SSP／DSP／DMP、IAB `ads.txt`／`sellers.json`、追蹤 pixel），見圖解對照誌 [`docs/kwara_adtech_crosswalk.html`](docs/kwara_adtech_crosswalk.html)（在本機開啟可看互動圖解）。
