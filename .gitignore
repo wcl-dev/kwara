@@ -68,3 +68,6 @@ qsh_pdf/out_html/
 
 # FB 採集示範資料（demo/ 內檔案逐機更新，不入 repo）
 demo/
+
+# 案件報告產物（含偵查資料，勿提交至公開 repo）
+reports/

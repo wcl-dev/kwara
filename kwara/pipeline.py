@@ -293,3 +293,120 @@ def run_snapshot_batch(conn: sqlite3.Connection, scan_run_ids: list[int],
             _try_detect_cloaking(conn, row["scan_run_id"])
             _try_fetch_ads_txt(conn, row["scan_run_id"])
     return snapshot_ids
+
+
+# ---------------------------------------------------------------------------
+# Fast attribution — populate operator-clustering signals WITHOUT Playwright.
+# Decouples "are these linked?" (cheap: scan + lightweight HTML + ads.txt +
+# WHOIS) from "preserve the evidence" (heavy: screenshots / HTML / HAR).
+# ---------------------------------------------------------------------------
+def _artifacts_needing_scan(conn: sqlite3.Connection, case_id: int) -> list[int]:
+    """URL artifacts in the case with no completed scan yet (pure query)."""
+    return [r["id"] for r in conn.execute(
+        """SELECT ua.id FROM url_artifacts ua
+           WHERE ua.case_id = ?
+             AND NOT EXISTS (SELECT 1 FROM scan_runs sr
+                             WHERE sr.url_artifact_id = ua.id AND sr.status = 'done')
+           ORDER BY ua.id""",
+        (case_id,),
+    ).fetchall()]
+
+
+def _scan_runs_needing(conn: sqlite3.Connection, case_id: int,
+                       force: bool = False) -> dict:
+    """For each artifact's latest DONE scan_run, which cheap steps it still
+    needs (pure query — the testable core of fast attribution):
+
+      lightweight : default — no usable ('ok') snapshot of ANY kind yet.
+                    force   — no FULL (playwright/manual) snapshot yet; a stale
+                    'http_only' snapshot may be refreshed.
+      ads / intel : default — empty; force — always re-run.
+
+    Shadow guard (always on, both modes): a scan_run with a full
+    playwright/manual 'ok' snapshot is NEVER a lightweight target, so richer
+    evidence is never overwritten by a cheap HTML-only fetch. capture_method
+    distinguishes them ('playwright'/'manual'/legacy-NULL = full;
+    'http_only' = lightweight).
+    """
+    rows = conn.execute(
+        """SELECT sr.id AS sid, sr.ads_txt_json, sr.domain_enriched_at,
+                  (SELECT COUNT(*) FROM snapshots s
+                   WHERE s.scan_run_id = sr.id AND s.capture_status = 'ok') AS ok_any,
+                  (SELECT COUNT(*) FROM snapshots s
+                   WHERE s.scan_run_id = sr.id AND s.capture_status = 'ok'
+                     AND (s.capture_method IS NULL
+                          OR s.capture_method IN ('playwright', 'manual'))) AS ok_full
+           FROM scan_runs sr
+           JOIN url_artifacts ua ON ua.id = sr.url_artifact_id
+           WHERE ua.case_id = ?
+             AND sr.id = (SELECT id FROM scan_runs WHERE url_artifact_id = ua.id
+                          AND status = 'done' ORDER BY id DESC LIMIT 1)""",
+        (case_id,),
+    ).fetchall()
+    out: dict[str, list[int]] = {"lightweight": [], "ads": [], "intel": []}
+    for r in rows:
+        need_lw = (r["ok_full"] == 0) if force else (r["ok_any"] == 0)
+        if need_lw:
+            out["lightweight"].append(r["sid"])
+        if force or not ((r["ads_txt_json"] or "").strip()):
+            out["ads"].append(r["sid"])
+        if force or not (str(r["domain_enriched_at"] or "").strip()):
+            out["intel"].append(r["sid"])
+    return out
+
+
+def run_fast_attribution(conn: sqlite3.Connection, case_id: int,
+                         force: bool = False, progress=None) -> dict:
+    """Cheap attribution pass: scan + lightweight HTML (static tracking IDs) +
+    ads.txt + WHOIS/ASN, with NO Playwright screenshots/HAR. Populates the
+    operator-clustering signals so groups / the relationship graph appear
+    without the heavy evidence-capture step.
+
+    Caveat: only STATIC, HTML-embedded tracking IDs are seen here. JS-injected
+    IDs (e.g. GA4 loaded via GTM) need the full Playwright snapshot, so few or
+    zero groups after this does NOT prove the domains are independent.
+
+    Best-effort: per-item failures are collected in `errors`, never raised.
+    Returns {scanned, attributed, ads, intel, errors}.
+    """
+    summary: dict = {"scanned": 0, "attributed": 0, "ads": 0, "intel": 0, "errors": []}
+
+    def _tick(msg):
+        if progress:
+            progress(msg)
+
+    for aid in _artifacts_needing_scan(conn, case_id):
+        _tick(f"掃描 artifact {aid}")
+        try:
+            run_scan_only(conn, aid)
+            summary["scanned"] += 1
+        except Exception as e:  # noqa: BLE001 — best-effort batch
+            summary["errors"].append(f"scan {aid}: {e}")
+
+    targets = _scan_runs_needing(conn, case_id, force=force)
+
+    if targets["lightweight"]:
+        _tick("輕量 HTML 擷取（靜態追蹤碼）")
+        try:
+            run_lightweight_fetch_batch(conn, targets["lightweight"])
+            summary["attributed"] = len(targets["lightweight"])
+        except Exception as e:  # noqa: BLE001
+            summary["errors"].append(f"lightweight: {e}")
+
+    for sid in targets["ads"]:
+        _tick(f"ads.txt（scan_run {sid}）")
+        try:
+            run_ads_txt(conn, sid, force=force)
+            summary["ads"] += 1
+        except Exception as e:  # noqa: BLE001
+            summary["errors"].append(f"ads {sid}: {e}")
+
+    if targets["intel"]:
+        _tick("WHOIS / ASN")
+        try:
+            run_domain_intel_batch(conn, targets["intel"])
+            summary["intel"] = len(targets["intel"])
+        except Exception as e:  # noqa: BLE001
+            summary["errors"].append(f"intel: {e}")
+
+    return summary

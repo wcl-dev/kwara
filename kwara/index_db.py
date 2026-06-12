@@ -43,6 +43,7 @@ from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 from config import ADS_TXT_MANAGER_BREADTH
+from clustering_infra import MAJOR_AD_EXCHANGES, shared_ad_accounts
 from sql import LATEST_DONE_SCAN_RUN, latest_usable_snapshot
 
 # Signal type tags. Stable strings — stored in the DB and matched on lookup.
@@ -261,6 +262,15 @@ def extract_case_signals(
 
     denom = len(case_ads_domains) or 1
 
+    # Operator-tier filter — defer to shared_ad_accounts (single source of
+    # truth: breadth + major-exchange floor + template-overlap demotion). Any
+    # multi-domain account it did NOT call operator is excluded here too, so
+    # the index never recurs MFA/reseller noise (criteo/openx/…) across cases.
+    _ads_clusters = shared_ad_accounts(conn, case_id)
+    _demoted_multi = {(a["adsystem"], a["seller_id"])
+                      for a in _ads_clusters["by_account"]
+                      if a["tier"] != "operator"}
+
     # Second pass: emit, applying the operator-tier filter to accounts.
     for srid, run_at, domain, ads in parsed_ads:
         sha = (ads.get("raw_sha256") or "").strip()
@@ -279,6 +289,13 @@ def extract_case_signals(
             if key in seen_accounts:
                 continue
             seen_accounts.add(key)
+            # Floor A — major exchange (also catches case-singletons that
+            # shared_ad_accounts can't see). _demoted_multi — anything it
+            # demoted (breadth / template). breadth — belt for singletons.
+            if adsystem in MAJOR_AD_EXCHANGES:
+                continue
+            if key in _demoted_multi:
+                continue
             breadth = len(account_domains[key]) / denom
             if breadth >= ADS_TXT_MANAGER_BREADTH:
                 continue  # manager-wide account — don't pollute the index

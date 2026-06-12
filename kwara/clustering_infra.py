@@ -26,7 +26,29 @@ from urllib.parse import parse_qs, urlparse
 
 import ipaddress
 
-from config import ADS_TXT_MANAGER_BREADTH, HAR_NOISE_HOSTS
+from config import (
+    ADS_TXT_MANAGER_BREADTH,
+    ADS_TXT_TEMPLATE_MIN_SHARED,
+    ADS_TXT_TEMPLATE_OVERLAP,
+    HAR_NOISE_HOSTS,
+)
+
+# Major programmatic ad exchanges — used by millions of unrelated sites, so an
+# account here is NEVER per-operator attribution (a floor under the overlap
+# rule below). Google/AdSense is deliberately EXCLUDED: a `google.com, pub-…`
+# DIRECT line can be an operator's own AdSense account. Lowercase adsystem.
+MAJOR_AD_EXCHANGES = frozenset({
+    "criteo.com", "openx.com", "rubiconproject.com", "pubmatic.com",
+    "appnexus.com", "taboola.com", "outbrain.com", "smartadserver.com",
+    "indexexchange.com", "sovrn.com", "lijit.com", "triplelift.com",
+    "sharethrough.com", "gumgum.com", "media.net", "yahoo.com",
+    "spotx.tv", "spotxchange.com", "freewheel.tv", "themediagrid.com",
+    "districtm.io", "e-planning.net", "richaudience.com", "betweendigital.com",
+    "onetag.com", "33across.com", "adform.com", "amxrtb.com",
+    "improvedigital.com", "contextweb.com", "unrulymedia.com",
+    "video.unrulymedia.com", "smartyads.com", "adyoulike.com", "teads.tv",
+    "genieesspv.jp", "genieegroup.com", "rhythmone.com", "yieldmo.com",
+})
 from param_attribution import (
     PLATFORM_ADS_TXT_SELLER,
     PLATFORM_GOOGLE_ADS,
@@ -815,6 +837,41 @@ def shared_ad_accounts(conn: sqlite3.Connection, case_id: int) -> dict:
 
     denom = len(case_domains) or 1
 
+    # Inverse index: domain → set of its DIRECT account keys (for overlap).
+    domain_accounts: dict[str, set] = defaultdict(set)
+    for key, entry in account_data.items():
+        for d in entry["domains"]:
+            domain_accounts[d].add(key)
+
+    _overlap_cache: dict[tuple[str, str], bool] = {}
+
+    def _template_linked(d1: str, d2: str) -> bool:
+        """Do two domains run the same monetisation template? True when they
+        share enough DIRECT accounts (MIN_SHARED guard) AND a high fraction of
+        the smaller ads.txt (OVERLAP). The guard keeps a genuinely-rare account
+        that two domains happen to share *alone* from looking like a template."""
+        ck = (d1, d2) if d1 <= d2 else (d2, d1)
+        if ck in _overlap_cache:
+            return _overlap_cache[ck]
+        a, b = domain_accounts[d1], domain_accounts[d2]
+        shared = len(a & b)
+        smaller = min(len(a), len(b)) or 1
+        linked = (shared >= ADS_TXT_TEMPLATE_MIN_SHARED
+                  and shared / smaller >= ADS_TXT_TEMPLATE_OVERLAP)
+        _overlap_cache[ck] = linked
+        return linked
+
+    def _is_template_account(domains: list[str]) -> bool:
+        """An account is template-tier when ALL its carrier domains are mutually
+        template-linked — i.e. it is just one of many co-shared accounts in a
+        shared MFA/reseller stack, not a signal linking otherwise-distinct
+        domains."""
+        if len(domains) < 2:
+            return False
+        return all(_template_linked(domains[i], domains[j])
+                   for i in range(len(domains))
+                   for j in range(i + 1, len(domains)))
+
     # ── Cluster A: shared DIRECT accounts (frequency-weighted) ─────────
     by_account: list[dict] = []
     for (adsystem, seller_id), entry in account_data.items():
@@ -822,7 +879,19 @@ def shared_ad_accounts(conn: sqlite3.Connection, case_id: int) -> dict:
             continue
         domain_count = len(entry["domains"])
         breadth_ratio = domain_count / denom
-        tier = "manager" if breadth_ratio >= ADS_TXT_MANAGER_BREADTH else "operator"
+        doms_sorted = sorted(entry["domains"])
+        # Tier: operator (rare, strong) unless demoted to manager by one of —
+        #   A. floor — a major programmatic exchange (never operator);
+        #   breadth — appears on most of the case's ads.txt domains;
+        #   B. template — carriers run the same heavily-overlapping ads.txt.
+        if adsystem in MAJOR_AD_EXCHANGES:
+            tier = "manager"
+        elif breadth_ratio >= ADS_TXT_MANAGER_BREADTH:
+            tier = "manager"
+        elif _is_template_account(doms_sorted):
+            tier = "manager"
+        else:
+            tier = "operator"
         by_account.append({
             "platform_id":   PLATFORM_ADS_TXT_SELLER,
             "adsystem":      adsystem,
