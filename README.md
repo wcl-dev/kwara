@@ -4,8 +4,6 @@
 
 Digital evidence collection and corroboration toolkit for investigating URL shortlink abuse, domain fraud, and online scams.
 
-**Repository:** [github.com/wcl-dev/kwara](https://github.com/wcl-dev/kwara)
-
 ## What kwara does
 
 kwara takes suspicious URLs from social media posts and walks them through a six-step evidence chain:
@@ -39,18 +37,23 @@ All evidence is stored locally in SQLite and can be exported as a ZIP evidence p
 
 ## Quick Start
 
+All commands run from the repository root:
+
 ```bash
-cd kwara
+git clone https://github.com/wcl-dev/kwara && cd kwara
 python -m venv .venv
-.venv/Scripts/activate    # Windows
-python -m pip install -r requirements.txt
+source .venv/bin/activate           # macOS / Linux
+# .venv\Scripts\activate            # Windows
+python -m pip install -r kwara/requirements.txt
 python -m playwright install chromium
-streamlit run app.py
+streamlit run kwara/app.py
 ```
 
 On Windows with dependencies already installed, double-click `start_kwara.bat` from the project root.
 
 > If `playwright install chromium` has not been run, screenshot features won't work but scanning, WHOIS, and analysis still function.
+
+This branch also ships a UI-redesign prototype with left-rail navigation and group-centric pages — run it side by side with `streamlit run kwara/app_v2.py` (same database, same codebase).
 
 ## Optional environment variables
 
@@ -77,12 +80,9 @@ On Windows with dependencies already installed, double-click `start_kwara.bat` f
 | `docs/` | Illustrated crosswalk: forensic targets ↔ the digital-advertising ecosystem (HTML) |
 | `restore_from_export.py` | Restore database from an exported evidence pack ZIP |
 
-## After cloning
+> Do **not** commit `.venv`, `kwara/data/`, or snapshot directories — `.gitignore` already covers them.
 
-1. Create venv → `pip install -r kwara/requirements.txt` → `python -m playwright install chromium`
-2. Run `streamlit run app.py` inside `kwara/`
-3. Do **not** commit `.venv`, `kwara/data/`, or snapshot directories (covered by `.gitignore`)
+## Learn more
 
-See [`kwara_guide.md`](kwara_guide.md) for detailed usage instructions.
-
-For a visual, encyclopedia-style explainer mapping kwara's forensic targets to the digital-advertising ecosystem (SSP/DSP/DMP, IAB `ads.txt`/`sellers.json`, tracking pixels), see [`docs/kwara_adtech_crosswalk.html`](docs/kwara_adtech_crosswalk.html). *(Traditional Chinese; open locally for the interactive diagrams.)*
+- **Usage guide** — [`kwara_guide.md`](kwara_guide.md)
+- **Ad-tech crosswalk** — a visual, encyclopedia-style explainer mapping kwara's forensic targets to the digital-advertising ecosystem (SSP/DSP/DMP, IAB `ads.txt`/`sellers.json`, tracking pixels). Read it online at [wcl-dev.github.io/kwara/kwara_adtech_crosswalk.en.html](https://wcl-dev.github.io/kwara/kwara_adtech_crosswalk.en.html) ([中文版](https://wcl-dev.github.io/kwara/kwara_adtech_crosswalk.html)), or open `docs/kwara_adtech_crosswalk.en.html` in a browser after cloning.

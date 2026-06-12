@@ -4,8 +4,6 @@
 
 數位證據蒐集與佐證工具，用於調查 URL 短連結濫用、網域詐騙與線上詐騙。
 
-**Repository：** [github.com/wcl-dev/kwara](https://github.com/wcl-dev/kwara)
-
 ## kwara 能做什麼
 
 kwara 接收社群貼文中的可疑 URL，引導你走過六步驟的證據鏈：
@@ -39,18 +37,23 @@ kwara 接收社群貼文中的可疑 URL，引導你走過六步驟的證據鏈�
 
 ## 快速開始
 
+所有指令都在 repo 根目錄執行：
+
 ```bash
-cd kwara
+git clone https://github.com/wcl-dev/kwara && cd kwara
 python -m venv .venv
-.venv/Scripts/activate    # Windows
-python -m pip install -r requirements.txt
+source .venv/bin/activate           # macOS / Linux
+# .venv\Scripts\activate            # Windows
+python -m pip install -r kwara/requirements.txt
 python -m playwright install chromium
-streamlit run app.py
+streamlit run kwara/app.py
 ```
 
 Windows 已安裝依賴的情況下，從專案根目錄雙擊 `start_kwara.bat` 即可。
 
 > 未執行 `playwright install chromium` 時，截圖功能不可用，但掃描、WHOIS 和分析仍正常運作。
+
+本分支另附 UI 改版原型（左欄導覽、群組導向頁面），可與現行版並行使用：`streamlit run kwara/app_v2.py`（共用同一資料庫與程式碼）。
 
 ## 可選環境變數
 
@@ -77,12 +80,9 @@ Windows 已安裝依賴的情況下，從專案根目錄雙擊 `start_kwara.bat`
 | `docs/` | 圖解對照誌：鑑識標的 ↔ 數位廣告生態（HTML） |
 | `restore_from_export.py` | 從匯出的 ZIP 證據封包還原資料庫 |
 
-## Clone 後
+> **不要**提交 `.venv`、`kwara/data/`、快照目錄——`.gitignore` 已涵蓋。
 
-1. 建立 venv → `pip install -r kwara/requirements.txt` → `python -m playwright install chromium`
-2. 在 `kwara/` 內執行 `streamlit run app.py`
-3. **不要**提交 `.venv`、`kwara/data/`、快照目錄（`.gitignore` 已涵蓋）
+## 延伸閱讀
 
-詳細操作說明請見 [`kwara_說明文件.md`](kwara_說明文件.md)。
-
-想了解 kwara 的各個鑑識標的如何對應到數位廣告產業（SSP／DSP／DMP、IAB `ads.txt`／`sellers.json`、追蹤 pixel），見圖解對照誌 [`docs/kwara_adtech_crosswalk.html`](docs/kwara_adtech_crosswalk.html)（在本機開啟可看互動圖解）。
+- **操作說明** — [`kwara_說明文件.md`](kwara_說明文件.md)
+- **廣告生態對照誌** — 圖解 kwara 各鑑識標的如何對應數位廣告產業（SSP／DSP／DMP、IAB `ads.txt`／`sellers.json`、追蹤 pixel）。線上閱讀：[wcl-dev.github.io/kwara/kwara_adtech_crosswalk.html](https://wcl-dev.github.io/kwara/kwara_adtech_crosswalk.html)（[English](https://wcl-dev.github.io/kwara/kwara_adtech_crosswalk.en.html)），或 clone 後用瀏覽器開啟 `docs/kwara_adtech_crosswalk.html`。
