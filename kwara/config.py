@@ -203,6 +203,21 @@ ADS_TXT_MAX_BYTES: int = int(os.environ.get("KWARA_ADS_TXT_MAX_BYTES", "262144")
 ADS_TXT_MANAGER_BREADTH: float = float(
     os.environ.get("KWARA_ADS_TXT_MANAGER_BREADTH", "0.8")
 )
+# Template (shared-monetisation) demotion. Two landing domains whose DIRECT
+# account sets overlap heavily are running the same monetisation TEMPLATE (an
+# MFA / reseller stack), so their shared accounts are NOT per-operator
+# attribution — they get demoted to manager-tier regardless of breadth. This
+# catches what within-case breadth alone misses: globally-ubiquitous exchanges
+# (criteo/openx/…) that sit on only a few of a small case's domains (caught by
+# the 2026-06-11 consolidated-case load, which falsely merged α+β+farm10).
+# OVERLAP = fraction of the smaller ads.txt shared; MIN_SHARED guards against
+# demoting a genuinely-rare account that two domains happen to share alone.
+ADS_TXT_TEMPLATE_OVERLAP: float = float(
+    os.environ.get("KWARA_ADS_TXT_TEMPLATE_OVERLAP", "0.4")
+)
+ADS_TXT_TEMPLATE_MIN_SHARED: int = int(
+    os.environ.get("KWARA_ADS_TXT_TEMPLATE_MIN_SHARED", "8")
+)
 
 
 # ── Shortlink SaaS catalog (clustering.py + snapshots.py + app.py) ───────

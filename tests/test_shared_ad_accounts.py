@@ -140,6 +140,46 @@ def test_breadth_weighting_operator_vs_manager():
     assert res["by_account"][0]["tier"] == "operator"
 
 
+def test_major_exchange_account_is_manager_floor():
+    # Floor A: a major programmatic exchange is never operator-tier, even at
+    # low within-case breadth. A non-floor account at the same breadth stays
+    # operator (proves the floor is selective, not blanket).
+    conn = _make_db(); cid = _make_case(conn)
+    shared = [("criteo.com", "100"), ("clickforce.com.tw", "pub-OP")]
+    _add(conn, cid, "https://a/", "a.com", _ads_json(shared, raw_text="a"))
+    _add(conn, cid, "https://b/", "b.com", _ads_json(shared, raw_text="b"))
+    for i in range(3):  # filler -> breadth 2/5 = 0.4 < 0.8
+        _add(conn, cid, f"https://f{i}/", f"f{i}.com",
+             _ads_json([(f"x{i}.com", "1")], raw_text=f"f{i}"))
+    tiers = {(x["adsystem"], x["seller_id"]): x["tier"]
+             for x in shared_ad_accounts(conn, cid)["by_account"]}
+    assert tiers[("criteo.com", "100")] == "manager"             # floor A
+    assert tiers[("clickforce.com.tw", "pub-OP")] == "operator"  # non-floor, low overlap
+
+
+def test_high_overlap_demotes_shared_account_to_template_manager():
+    # Rule B: when two domains run the same heavily-overlapping ads.txt (a
+    # shared MFA stack), their shared accounts are template/manager-tier — even
+    # an otherwise-rare one. A rare account whose carriers DON'T overlap stays
+    # operator. (Regression for the 2026-06-11 α+β+farm10 false merge.)
+    conn = _make_db(); cid = _make_case(conn)
+    mfa = [(f"net{i}.com", f"s{i}") for i in range(10)]   # shared stack
+    a_acc = mfa + [("clickforce.com.tw", "pub-OP"), ("rareadnet.com", "pub-RARE")]
+    b_acc = mfa + [("clickforce.com.tw", "pub-OP")]
+    c_acc = [("rareadnet.com", "pub-RARE"), ("solo.com", "z")]
+    _add(conn, cid, "https://a/", "a.com", _ads_json(a_acc, raw_text="a"))
+    _add(conn, cid, "https://b/", "b.com", _ads_json(b_acc, raw_text="b"))
+    _add(conn, cid, "https://c/", "c.com", _ads_json(c_acc, raw_text="c"))
+    _add(conn, cid, "https://d/", "d.com", _ads_json([("solo2.com", "z")], raw_text="d"))
+    _add(conn, cid, "https://e/", "e.com", _ads_json([("solo3.com", "z")], raw_text="e"))
+    tiers = {(x["adsystem"], x["seller_id"]): x["tier"]
+             for x in shared_ad_accounts(conn, cid)["by_account"]}
+    # a & b share 11 accounts (MFA stack + clickforce) -> template -> manager
+    assert tiers[("clickforce.com.tw", "pub-OP")] == "manager"
+    # rareadnet: carriers a & c share only that 1 account -> genuine -> operator
+    assert tiers[("rareadnet.com", "pub-RARE")] == "operator"
+
+
 def test_only_direct_lines_feed_accounts():
     """RESELLER lines must not create account clusters."""
     conn = _make_db()
