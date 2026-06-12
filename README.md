@@ -74,6 +74,7 @@ On Windows with dependencies already installed, double-click `start_kwara.bat` f
 | `kwara/views/` | UI tab modules (one file per tab for easy editing) |
 | `kwara/config.py` | Centralized configuration and environment variable defaults |
 | `kwara/corroboration.py` | Third-party evidence services (Wayback, urlscan, RFC 3161) |
+| `docs/` | Illustrated crosswalk: forensic targets ↔ the digital-advertising ecosystem (HTML) |
 | `restore_from_export.py` | Restore database from an exported evidence pack ZIP |
 
 ## After cloning
@@ -83,3 +84,5 @@ On Windows with dependencies already installed, double-click `start_kwara.bat` f
 3. Do **not** commit `.venv`, `kwara/data/`, or snapshot directories (covered by `.gitignore`)
 
 See [`kwara_guide.md`](kwara_guide.md) for detailed usage instructions.
+
+For a visual, encyclopedia-style explainer mapping kwara's forensic targets to the digital-advertising ecosystem (SSP/DSP/DMP, IAB `ads.txt`/`sellers.json`, tracking pixels), see [`docs/kwara_adtech_crosswalk.html`](docs/kwara_adtech_crosswalk.html). *(Traditional Chinese; open locally for the interactive diagrams.)*
