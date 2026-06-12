@@ -71,3 +71,9 @@ demo/
 
 # 案件報告產物（含偵查資料，勿提交至公開 repo）
 reports/
+
+# 案件專屬 / 一次性文件（內部，不入公開 repo）
+/QSH_E2E_TEST_REPORT_2026-04-28.md
+/PRESENTATION_SOURCE.md
+/shortlink_abuse_evidence_kit_mvp_8290f6f4.plan.md
+/backfill_tracking_ids.py
