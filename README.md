@@ -53,7 +53,6 @@ On Windows with dependencies already installed, double-click `start_kwara.bat` f
 
 > If `playwright install chromium` has not been run, screenshot features won't work but scanning, WHOIS, and analysis still function.
 
-This branch also ships a UI-redesign prototype with left-rail navigation and group-centric pages — run it side by side with `streamlit run kwara/app_v2.py` (same database, same codebase).
 
 ## Optional environment variables
 

@@ -53,7 +53,6 @@ Windows 已安裝依賴的情況下，從專案根目錄雙擊 `start_kwara.bat`
 
 > 未執行 `playwright install chromium` 時，截圖功能不可用，但掃描、WHOIS 和分析仍正常運作。
 
-本分支另附 UI 改版原型（左欄導覽、群組導向頁面），可與現行版並行使用：`streamlit run kwara/app_v2.py`（共用同一資料庫與程式碼）。
 
 ## 可選環境變數
 
