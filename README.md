@@ -21,7 +21,7 @@ All evidence is stored locally in SQLite and can be exported as a ZIP evidence p
 
 ## Key features
 
-- **Three-stage workflow** — Investigate → Preserve → Analyze, with the six evidence steps distributed across them
+- **Group-centric workflow** — an Overview verdict landing page, per-operator-group dossiers, and an operator relationship graph, with Collection / Analysis / Cross-case / Export in a left-rail navigation
 - **Operator-level signal clustering** — cross-domain matching of HTML tracking IDs (11 platforms), TLS certificates, URL parameters, and wrapper redirects
 - **Active-evasion forensics** — cloaking detection, HTTP header forensics (origin leak / fabricated versions / server templates), and OPSEC path differential
 - **Monetisation forensics** — fetches each domain's `ads.txt` and clusters shared DIRECT ad accounts + byte-identical templates, frequency-weighted to separate shared monetisation managers (weak) from operator-cluster signals (strong)
