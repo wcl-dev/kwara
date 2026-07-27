@@ -19,6 +19,10 @@ streamlit run app.py
 
 > Without Playwright/Chromium, scanning and WHOIS still work — only screenshots require a browser.
 
+This guide covers the **Streamlit interface**. Everything here can also be done
+without a browser — see [docs/agent-interface.md](docs/agent-interface.md) for
+the CLI and MCP server.
+
 ---
 
 ## Data Model
@@ -36,33 +40,39 @@ Each case is independent. Switch or create cases from the sidebar.
 
 ---
 
-## Tab Guide
+## Interface Guide
 
-### 1. Input
+Left-rail navigation, three sections. **Start at Overview** — it gives you the
+verdict and the group breakdown, which tells you where to dig.
+
+```
+Case       Overview → Group Dossier → Collection
+Analysis   Analysis → Graph
+Global     Cross-case → Export
+```
+
+### Case → Overview
+
+The landing page: verdict, operator-group breakdown, evidence completeness, and data gaps.
+
+### Case → Group Dossier
+
+One operator group in full — member domains, the shared signals linking them, and each domain's evidence status.
+
+### Case → Collection
+
+Six steps, switched from the control at the top of the page.
+
+#### Ingest
 
 Add source posts containing suspicious URLs.
 
 - **Single Post** — paste message text, fill in platform/actor/time, optionally attach a screenshot.
 - **CSV Batch** — upload a CSV with columns: `platform`, `permalink`, `actor_label`, `posted_at`, `message_text`.
 
-URLs are extracted and deduplicated automatically.
-
-### 2. Collected
-
-Review all ingested posts and extracted URLs in table format.
-
-The six top-level tabs run in workflow order. **Investigate → Preserve → Analyze** is the three-stage workflow; the six evidence steps are distributed across them:
-
-```
-Input → Collected → [ Investigate → Preserve → Analyze ] → Export
-                       Scan          Page        Insights / Account Patterns / Providers
-                       Network       Corrob.     Cloaking / Headers / OPSEC
-                       Domain
-```
-
-### 3. Investigate
-
-Three sub-tabs that collect network-layer evidence for each URL.
+URLs are extracted and deduplicated automatically, then **attributed without
+screenshots** — groups and the relationship graph appear immediately. You do
+*not* need to capture pages before seeing whether the sites are linked.
 
 #### Scan
 
@@ -88,11 +98,7 @@ WHOIS registration and hosting intelligence for the landing domain:
 
 Batch-query all pending URLs or query individually.
 
-### 4. Preserve
-
-Two sub-tabs that capture page evidence and obtain third-party proof.
-
-#### Page
+#### Page Capture
 
 Browser-rendered evidence of the landing page:
 
@@ -115,9 +121,13 @@ Submit the landing page to independent third-party services:
 
 Corroboration runs automatically after scanning. Use the button to retry or re-corroborate.
 
-### 5. Analyze
+### Analysis → Analysis
 
-Six sub-tabs that cluster the collected evidence across URLs.
+Panels are grouped by the question you are asking, not by the module that answers it.
+
+**Attribution & infrastructure** — Insights + Providers
+**Behavioural observation** — Cloaking + OPSEC
+**Server-header forensics** — Headers
 
 #### Insights
 
@@ -126,10 +136,6 @@ Rule-based case summary (no LLM). Read this first:
 - **Headline** — total URLs, scanned count, landing domains, parameter clusters
 - **Key findings** — landing concentration, risk flags, cross-post parameter attribution (50+ trackers), tracking-ID matches, TLS/ASN clustering, and **Phase 4 active-evasion signals (cloaking suspects, fabricated server versions, shared server templates, strong UA-gating)**
 - **Data gaps** — alerts for missing WHOIS, snapshots, TLS certificates, and corroboration
-
-#### Account Patterns
-
-Poster × content-ID matrix. Deliberately does **not** auto-flag coordination — the analyst reads the raw distribution.
 
 #### Providers
 
@@ -147,7 +153,17 @@ Per-hop response-header forensics: per-domain constant headers (origin leak), cr
 
 Per-domain success-rate comparison between the lightweight fetch and Playwright paths — exposes "blocks User-Agent but renders in Chromium" WAF deployments, a same-operator signal independent of GA4/TLS.
 
-### 6. Export
+### Analysis → Graph
+
+Domains and the shared identity assets connecting them, coloured by operator
+group. Headless callers can write it out as SVG/PNG/PDF.
+
+### Global → Cross-case
+
+Which past cases a given tracking ID, certificate serial, registrar, ASN, or
+domain appeared in — plus signals recurring across multiple investigations.
+
+### Global → Export
 
 Download a ZIP evidence pack containing:
 

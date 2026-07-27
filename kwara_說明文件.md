@@ -19,6 +19,9 @@ streamlit run app.py
 
 > 未安裝 Playwright/Chromium 時，掃描和 WHOIS 仍可用——僅截圖功能需要瀏覽器。
 
+這份文件說明的是 **Streamlit 介面**。同樣的事情不開瀏覽器也做得到——CLI 與 MCP
+用法見 [docs/agent-interface.md](docs/agent-interface.md)。
+
 ---
 
 ## 資料模型
@@ -36,61 +39,52 @@ cases（案件）
 
 ---
 
-## 分頁說明
+## 介面說明
 
-頂層共六個分頁，依工作流順序排列。其中**調查 → 保全 → 分析**是「三段式工作流」，六個證據步驟分布其中：
+左欄導覽分三個區塊。**進案先看「總覽」**——它給出判定結論與群組拆解，再決定往哪裡深掘。
 
 ```
-輸入 → 已收集 → 〔調查 → 保全 → 分析〕→ 匯出
-                  掃描     頁面     洞察 / 帳號樣態 / 服務商
-                  網路路徑 佐證     Cloaking / Headers / OPSEC
-                  網域情報
+案件 Case        總覽 Overview → 群組卷宗 Dossier → 蒐證 Collection
+分析 Analysis    分析 Analysis → 關聯圖 Graph
+全域 Global      跨案件 Cross-case → 匯出 Export
 ```
 
-### 1. 輸入（Input）
+### 案件 Case
 
-新增包含可疑 URL 的來源貼文。
+**總覽（Overview）** — 判定結論、操作者群組拆解、證據完整度與資料缺口。落地頁面。
 
-- **單篇貼文** — 貼上訊息文字，填寫平台/發文者/時間，可附加截圖。
-- **CSV 批次** — 上傳含 `platform`、`permalink`、`actor_label`、`posted_at`、`message_text` 欄位的 CSV。
+**群組卷宗（Dossier）** — 單一操作者群組的完整卷宗：成員網域、把它們串起來的共用訊號、各自的證據狀態。
 
-系統自動擷取並去重 URL。
+**蒐證（Collection）** — 六個步驟，用上方切換：
 
-### 2. 已收集（Collected）
+| 步驟 | 做什麼 |
+|---|---|
+| 進件 | 貼上貼文／匯入 CSV → 抽出連結並**自動歸因（免截圖）**，群組與關聯圖隨即浮現 |
+| 頁面擷取 | 對重點 URL 用瀏覽器擷取截圖／HTML／HAR——補上 JS 注入的追蹤碼，並作為保全證據 |
+| 掃描 | （進階／手動）重新追蹤跳轉鏈、記錄 TLS 憑證與 HTTP 標頭 |
+| 佐證 | 存檔到 Wayback、提交 urlscan.io、取得 RFC 3161 受信時間戳 |
+| 網路詳情 | 檢視掃描結果：憑證、跳轉路徑、回應標頭、ads.txt |
+| 網域情報 | WHOIS 註冊資訊、IP 與 ASN 託管 |
 
-以表格形式檢視所有已匯入的貼文與擷取的 URL。
+> 「進件」之後**不必**急著截圖。自動歸因已足以讓群組浮現；截圖是為了補 JS 注入的追蹤碼與保全證據，成本高得多。
 
-### 3. 調查（Investigate）
+### 分析 Analysis
 
-三個子分頁，蒐集每條 URL 的網路層證據：
+**分析（Analysis）** — 依分析問題分組，而非依技術模組：
 
-- **掃描（Scan）** — 追蹤 redirect chain 至真實落地頁。可批次掃描（多執行緒平行）或逐一掃描。中斷的掃描可重設。
-- **網路路徑（Network）** — 檢視掃描時自動擷取的 Redirect Chain、TLS 憑證、HTTP 回應標頭（含每跳完整 header 集合）。
-- **網域情報（Domain）** — 落地網域的 WHOIS 註冊、IP 位址、ASN 託管資訊。可批次或逐一查詢。
+- **歸因與基礎設施** — 分析洞察（Insights，規則式案件摘要）＋ 服務提供商（Providers，問責視角：註冊商、託管、CA、廣告帳號）
+- **行為觀察** — Cloaking（帶參數 vs 不帶參數的內容差異）＋ OPSEC（lightweight vs Playwright 成功率對比，揭露「擋爬蟲、放瀏覽器」的 WAF 部署）
+- **伺服器標頭鑑識** — 每跳 response header：per-domain 常數、跨域 server 模板、偽造版本字串、Set-Cookie origin 洩漏
 
-### 4. 保全（Preserve）
+> **Cloaking / OPSEC / Headers 是證據力最強的訊號層**，其判定會回灌到 Insights 摘要的最上方。詳見 [kwara_分析原理.md](kwara_分析原理.md)。
 
-兩個子分頁，保全頁面證據並取得第三方佐證：
+**關聯圖（Graph）** — 網域與共用識別資產的關聯圖，按操作者群組配色。無介面用法可輸出成 SVG/PNG 檔。
 
-- **頁面證據（Page）** — 瀏覽器截圖、HTML 原始碼、HAR 網路流量紀錄。可批次或逐一截圖、支援手動上傳；亦提供輕量 HTML-only 抓取模式（不啟動瀏覽器、快上 10 倍）。
-- **第三方佐證（Corroboration）** — 將落地頁提交至 Internet Archive、urlscan.io，並取得 RFC 3161 受信任時間戳。掃描後自動觸發，可手動重試。
+### 全域 Global
 
-### 5. 分析（Analyze）
+**跨案件（Cross-case）** — 某個追蹤碼／憑證序號／註冊商／ASN／網域，過去出現在哪些案件；以及跨多案件再現的訊號。
 
-六個子分頁，跨 URL 聚合已蒐集的證據：
-
-- **分析洞察（Insights）** — 規則式案件摘要：落地集中度、風險旗標、跨貼文參數歸屬、TLS/ASN 聚合、追蹤碼吻合、**Phase 4 主動防偵測訊號（cloaking / 偽造版本 / server 模板 / 強 UA 阻擋）**，以及資料缺口提示。先看這頁。
-- **帳號樣態（Account Patterns）** — 帳號 × 內容矩陣（不自動下協同判定，攤給分析師判讀）。
-- **服務提供商（Providers）** — 問責視角：涉案短連結服務商、網域註冊商、託管、CA、廣告/追蹤平台。
-- **Cloaking** — conditional cloaker 偵測（帶參數 vs 不帶參數的內容差異）。逐 URL verdict + case-wide 統計。
-- **Headers** — 每跳 response header 鑑識：per-domain 常數、跨域 server 模板、偽造版本字串、Set-Cookie origin 洩漏。
-- **OPSEC** — 每個落地網域的 lightweight vs Playwright 成功率對比，揭露「擋 UA 但放 Chromium」的 WAF 部署。
-
-> **Phase 4 三個子分頁（Cloaking / Headers / OPSEC）是證據力最強的訊號層**，其判定也會回灌到 Insights 摘要的最上方。詳見 [kwara_分析原理.md](kwara_分析原理.md)。
-
-### 6. 匯出（Export）
-
-下載 ZIP 證據封包（CSV、截圖、HTML、HAR、稽核紀錄、SHA-256 manifest、可選 HMAC 簽章、中英雙語 README）。
+**匯出（Export）** — ZIP 證據封包（CSV、截圖、HTML、HAR、稽核紀錄、SHA-256 manifest、可選 HMAC 簽章、中英雙語 README）。
 
 ---
 

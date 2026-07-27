@@ -11,7 +11,6 @@ The sidebar owns case lifecycle (create / select / delete) plus language
 and settings. Page bodies reuse the existing views/ render() functions.
 """
 import os
-import shutil
 import sys
 from datetime import datetime, timezone
 
@@ -19,6 +18,7 @@ import streamlit as st
 
 sys.path.insert(0, os.path.dirname(__file__))
 
+import cases
 from config import DB_PATH
 from db import get_conn, init_db, migrate_db
 from i18n import t, set_lang, get_lang, LANGUAGES
@@ -93,14 +93,15 @@ with st.sidebar:
 
         if st.button(t("sidebar.btn_create"), key="btn_create_case"):
             if new_title.strip():
-                now = now_utc()
                 _final_loc = (_custom_loc or _lp[0]).strip() or None
                 _final_tz  = (_custom_tz or _lp[1]).strip() or None
-                conn.execute(
-                    "INSERT INTO cases (title, description, created_at, updated_at, browser_locale, browser_timezone) VALUES (?, ?, ?, ?, ?, ?)",
-                    (new_title.strip(), new_desc.strip(), now, now, _final_loc, _final_tz),
+                cases.create_case(
+                    conn,
+                    title=new_title,
+                    description=new_desc,
+                    browser_locale=_final_loc,
+                    browser_timezone=_final_tz,
                 )
-                conn.commit()
                 st.success(t("sidebar.success_created", title=new_title.strip()))
                 st.rerun()
             else:
@@ -118,52 +119,7 @@ with st.sidebar:
             _confirm = st.text_input(t("sidebar.delete_confirm"), key="delete_confirm_input")
             if st.button(t("sidebar.delete_btn"), key="btn_delete_case", type="primary"):
                 if _confirm == "DELETE":
-                    _snap_rows = conn.execute(
-                        """SELECT s.screenshot_path, s.html_path, s.har_path
-                           FROM snapshots s JOIN scan_runs sr ON sr.id = s.scan_run_id
-                           JOIN url_artifacts ua ON ua.id = sr.url_artifact_id
-                           WHERE ua.case_id = ?""",
-                        (current_case_id,),
-                    ).fetchall()
-                    # Confine cleanup to the snapshot data root. Without this, a
-                    # corrupted/crafted DB row could supply an arbitrary path to
-                    # shutil.rmtree.
-                    _SNAP_ROOT = os.path.realpath(os.path.join(
-                        os.path.dirname(__file__), "data", "snapshots"
-                    ))
-                    _dirs_to_clean = set()
-                    for _sr in _snap_rows:
-                        for _col in ("screenshot_path", "html_path", "har_path"):
-                            _p = _sr[_col]
-                            if not _p or not os.path.exists(_p):
-                                continue
-                            _real = os.path.realpath(os.path.dirname(_p))
-                            if _real == _SNAP_ROOT or _real.startswith(_SNAP_ROOT + os.sep):
-                                _dirs_to_clean.add(_real)
-                    for _d in _dirs_to_clean:
-                        shutil.rmtree(_d, ignore_errors=True)
-                    conn.execute("DELETE FROM audit_log WHERE case_id = ?", (current_case_id,))
-                    conn.execute("DELETE FROM export_runs WHERE case_id = ?", (current_case_id,))
-                    conn.execute(
-                        """DELETE FROM snapshots WHERE scan_run_id IN
-                           (SELECT sr.id FROM scan_runs sr JOIN url_artifacts ua ON ua.id = sr.url_artifact_id WHERE ua.case_id = ?)""",
-                        (current_case_id,),
-                    )
-                    conn.execute(
-                        """DELETE FROM redirect_hops WHERE scan_run_id IN
-                           (SELECT sr.id FROM scan_runs sr JOIN url_artifacts ua ON ua.id = sr.url_artifact_id WHERE ua.case_id = ?)""",
-                        (current_case_id,),
-                    )
-                    conn.execute(
-                        """DELETE FROM scan_runs WHERE url_artifact_id IN
-                           (SELECT id FROM url_artifacts WHERE case_id = ?)""",
-                        (current_case_id,),
-                    )
-                    conn.execute("DELETE FROM url_artifacts WHERE case_id = ?", (current_case_id,))
-                    conn.execute("DELETE FROM message_evidence WHERE case_id = ?", (current_case_id,))
-                    conn.execute("DELETE FROM report_status WHERE case_id = ?", (current_case_id,))
-                    conn.execute("DELETE FROM cases WHERE id = ?", (current_case_id,))
-                    conn.commit()
+                    cases.delete_case(conn, current_case_id, confirm="DELETE")
                     st.success(t("sidebar.delete_done"))
                     st.rerun()
                 else:

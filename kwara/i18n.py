@@ -1,5 +1,5 @@
 """
-Lightweight i18n for kwara Streamlit UI.
+Lightweight i18n for kwara.
 
 Usage:
     from i18n import t, set_lang, get_lang, LANGUAGES
@@ -8,12 +8,15 @@ Usage:
     st.write(t("scan.progress_text", done=5, total=10))
 
 The default language is derived from config.LANG (env var KWARA_LANG).
-Users can override it at runtime via the language selector in the sidebar,
-which writes to st.session_state["lang"].
+Under Streamlit, the sidebar selector overrides it at runtime via
+st.session_state["lang"] so each browser session picks its own language.
+
+Headless callers (CLI, MCP server) have no session state, so the language
+lives in a module-level variable instead. Streamlit is imported lazily and
+optionally: importing this module must not drag the whole UI framework into
+an agent process, and calling t() outside Streamlit must not warn.
 """
 from __future__ import annotations
-
-import streamlit as st
 
 from config import LANG as _CONFIG_LANG
 
@@ -21,13 +24,40 @@ LANGUAGES = {"en": "English", "zh-TW": "正體中文"}
 # Map config.LANG ("zh"/"en") to an i18n key ("zh-TW"/"en").
 _DEFAULT = "zh-TW" if _CONFIG_LANG == "zh" else "en"
 
+# Fallback store for non-Streamlit processes.
+_LANG = _DEFAULT
+
+
+def _session_state():
+    """st.session_state when running inside a Streamlit script, else None."""
+    import sys
+
+    st = sys.modules.get("streamlit")
+    if st is None:
+        return None
+    try:
+        from streamlit.runtime.scriptrunner import get_script_run_ctx
+
+        if get_script_run_ctx() is None:
+            return None
+    except Exception:  # noqa: BLE001 — unknown Streamlit version; assume headless
+        return None
+    return st.session_state
+
 
 def get_lang() -> str:
-    return st.session_state.get("lang", _DEFAULT)
+    state = _session_state()
+    if state is None:
+        return _LANG
+    return state.get("lang", _DEFAULT)
 
 
 def set_lang(lang: str) -> None:
-    st.session_state["lang"] = lang
+    global _LANG
+    _LANG = lang
+    state = _session_state()
+    if state is not None:
+        state["lang"] = lang
 
 
 def t(_key: str, **kwargs) -> str:

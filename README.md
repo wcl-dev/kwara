@@ -19,6 +19,7 @@ All evidence is stored locally in SQLite and can be exported as a ZIP evidence p
 
 ## Key features
 
+- **Two surfaces, one core** — a Streamlit UI for reading evidence with your own eyes, and a headless CLI + MCP server for automation and agents. Both call the same analysis code
 - **Group-centric workflow** — an Overview verdict landing page, per-operator-group dossiers, and an operator relationship graph, with Collection / Analysis / Cross-case / Export in a left-rail navigation
 - **Operator-level signal clustering** — cross-domain matching of HTML tracking IDs (11 platforms), TLS certificates, URL parameters, and wrapper redirects
 - **Active-evasion forensics** — cloaking detection, HTTP header forensics (origin leak / fabricated versions / server templates), and OPSEC path differential
@@ -26,7 +27,7 @@ All evidence is stored locally in SQLite and can be exported as a ZIP evidence p
 - **Third-party proof** — Wayback Machine, urlscan.io, and RFC 3161 timestamps provide independent records
 - **Per-case locale** — set victim's region so screenshots reflect what they actually saw (defeats geo-cloaking)
 - **URL parameter attribution** — auto-identifies 50+ tracking parameters (UTM, fbclid, gclid, etc.)
-- **Bilingual UI** — English and Traditional Chinese, switchable from the sidebar
+- **Bilingual** — English and Traditional Chinese, switchable from the sidebar or via `--lang`
 - **Evidence pack export** — ZIP with CSVs, screenshots, HTML, HAR, audit log, SHA-256 manifest, and bilingual README
 - **Fully offline-capable** — all data stored in local SQLite; third-party services are optional
 
@@ -54,6 +55,36 @@ On Windows with dependencies already installed, double-click `start_kwara.bat` f
 > If `playwright install chromium` has not been run, screenshot features won't work but scanning, WHOIS, and analysis still function.
 
 
+## Headless: CLI and MCP
+
+Everything the UI can do to a case is available without a browser. The CLI is
+the source of truth for automation; the MCP server is a thin wrapper over the
+same functions, so the two cannot drift apart.
+
+```bash
+python -m kwara.cli case new --title "Op Nightingale" --locale-preset tw
+python -m kwara.cli ingest url --case 1 https://suspicious.example/x
+python -m kwara.cli run attribute --case 1          # cheap pass, no browser
+python -m kwara.cli analyze clusters --case 1
+python -m kwara.cli analyze graph --case 1 --out graph.svg
+python -m kwara.cli export case --case 1
+```
+
+stdout is JSON and nothing else — progress and errors go to stderr, so piping
+into `jq` is always safe. Add `--text` for human-readable output.
+
+To drive kwara from an agent:
+
+```bash
+python -m pip install -r kwara/requirements-agent.txt
+claude mcp add kwara -- /abs/path/to/.venv/bin/python -m kwara.mcp_server
+```
+
+Deleting a case is CLI-only and unbounded snapshot capture is not exposed over
+MCP — see [docs/agent-interface.md](docs/agent-interface.md) for the full
+command reference, the tool list, and the reasoning.
+
+
 ## Optional environment variables
 
 | Variable | Default | Purpose |
@@ -72,10 +103,13 @@ On Windows with dependencies already installed, double-click `start_kwara.bat` f
 
 | Directory | Description |
 |---|---|
-| `kwara/` | Main application (Streamlit UI, SQLite, scanning, export) |
-| `kwara/views/` | UI tab modules (one file per tab for easy editing) |
+| `kwara/` | Main application (core analysis, SQLite, scanning, export) |
+| `kwara/cli.py` | Headless CLI — the source of truth for automation |
+| `kwara/mcp_server.py` | MCP server; a thin wrapper over the CLI's functions |
+| `kwara/views/` | Streamlit UI tab modules (one file per tab) |
 | `kwara/config.py` | Centralized configuration and environment variable defaults |
 | `kwara/corroboration.py` | Third-party evidence services (Wayback, urlscan, RFC 3161) |
+| `docs/agent-interface.md` | Full CLI command reference and MCP tool list |
 | `docs/` | Illustrated crosswalk: forensic targets ↔ the digital-advertising ecosystem (HTML) |
 | `restore_from_export.py` | Restore database from an exported evidence pack ZIP |
 

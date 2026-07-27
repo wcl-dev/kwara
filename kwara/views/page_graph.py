@@ -10,58 +10,14 @@ source of truth), so the graph, the Overview, and the dossier all agree.
 Rendered client-side from a DOT string via st.graphviz_chart — no new
 dependency, fully offline. A group filter lets the analyst focus on one
 cluster instead of reading the whole hairball.
+
+The DOT builder itself lives in graph.py (core, UI-free) so the CLI and MCP
+server emit exactly the same graph this page shows.
 """
 import streamlit as st
 
-from clusters import case_clusters, group_color, node_id
-from ui_tokens import GRAPH_EDGE, NEUTRAL_FILL
-
-_SIG_SHAPE = {
-    "tracking":     "box",
-    "cert":         "octagon",
-    "ads_template": "folder",
-    "ads_account":  "note",
-}
-_SIG_LABEL = {
-    "tracking": "追蹤碼", "cert": "TLS 憑證",
-    "ads_template": "ads.txt 模板", "ads_account": "ads.txt 帳號",
-}
-
-
-def _esc(s: str) -> str:
-    return str(s).replace("\\", "\\\\").replace('"', '\\"')
-
-
-def build_dot(groups) -> str:
-    """DOT for the given groups (already filtered). Coloured per group."""
-    lines = [
-        "digraph rel {", "  rankdir=LR;", '  bgcolor="transparent";',
-        '  graph [nodesep=0.22, ranksep=0.55];',
-        '  node [fontname="Helvetica", fontsize=9];',
-        f'  edge [color="{GRAPH_EDGE}", arrowhead=none];',
-    ]
-    for g in groups:
-        clr = group_color(g["gid"])
-        # cluster box per group so components are visually separated
-        lines.append(f'  subgraph cluster_{g["gid"]} {{')
-        lines.append(f'    label="{g["label"]}"; color="{clr}"; fontcolor="{clr}";')
-        for d in g["domains"]:
-            lines.append(
-                f'    {node_id("dom", d)} [label="{_esc(d)}", shape=ellipse, '
-                f'style=filled, fillcolor="{NEUTRAL_FILL}", color="{clr}"];'
-            )
-        for i, s in enumerate(g["signals"]):
-            sid = node_id("sig", f'{g["gid"]}:{s["type"]}:{s["value"]}:{i}')
-            shape = _SIG_SHAPE.get(s["type"], "box")
-            lines.append(
-                f'    {sid} [label="{_esc(s["label"])}\\n{_esc(s["value"])}", '
-                f'shape={shape}, style=filled, fillcolor="{clr}", fontcolor="white"];'
-            )
-            for d in s["domains"]:
-                lines.append(f'    {sid} -> {node_id("dom", d)};')
-        lines.append("  }")
-    lines.append("}")
-    return "\n".join(lines)
+from clusters import case_clusters, group_color
+from graph import build_dot  # noqa: F401 — re-exported for existing callers
 
 
 def render(conn, case_id):

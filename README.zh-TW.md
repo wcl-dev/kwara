@@ -19,6 +19,7 @@ kwara 接收社群貼文中的可疑 URL，引導你走過六步驟的證據鏈�
 
 ## 主要特色
 
+- **兩套介面、同一核心** — Streamlit 介面供人工檢視證據，無介面 CLI + MCP server 供自動化與 agent 操作；兩者呼叫同一份分析程式碼
 - **群組導向工作流** — 以「總覽判定頁 → 操作者群組卷宗 → 關聯圖」為核心，蒐證／分析／跨案件／匯出以左側導覽列組織
 - **操作者層訊號聚合** — 跨網域比對 HTML 追蹤碼（11 平台）、TLS 憑證、URL 參數、wrapper 跳轉
 - **主動防偵測對抗** — cloaking 偵測、HTTP header 鑑識（origin 洩漏 / 偽造版本 / server 模板）、OPSEC 路徑差異
@@ -26,7 +27,7 @@ kwara 接收社群貼文中的可疑 URL，引導你走過六步驟的證據鏈�
 - **第三方佐證** — Wayback Machine、urlscan.io、RFC 3161 時間戳提供獨立紀錄
 - **Per-case 語系設定** — 依受害者所在地設定截圖瀏覽器語系，突破地理封鎖
 - **URL 參數歸屬** — 自動辨識 50+ 已知追蹤參數（UTM、fbclid、gclid 等）
-- **雙語介面** — 英文與正體中文，側欄即時切換
+- **雙語** — 英文與正體中文，側欄即時切換或以 `--lang` 指定
 - **證據封包匯出** — ZIP 含 CSV、截圖、HTML、HAR、稽核紀錄、SHA-256 manifest、中英雙語 README
 - **完全可離線運作** — 所有資料存於本機 SQLite；第三方服務為選用
 
@@ -54,6 +55,34 @@ Windows 已安裝依賴的情況下，從專案根目錄雙擊 `start_kwara.bat`
 > 未執行 `playwright install chromium` 時，截圖功能不可用，但掃描、WHOIS 和分析仍正常運作。
 
 
+## 無介面操作：CLI 與 MCP
+
+UI 能對案件做的事，不開瀏覽器也全部做得到。CLI 是自動化的唯一真相來源，MCP
+server 只是薄薄包一層、呼叫同一批函式，兩者不會各自漂移。
+
+```bash
+python -m kwara.cli case new --title "夜鶯專案" --locale-preset tw
+python -m kwara.cli ingest url --case 1 https://suspicious.example/x
+python -m kwara.cli run attribute --case 1          # 輕量歸因，免瀏覽器
+python -m kwara.cli analyze clusters --case 1
+python -m kwara.cli analyze graph --case 1 --out graph.svg
+python -m kwara.cli export case --case 1
+```
+
+stdout 只會有 JSON——進度與錯誤都走 stderr，所以接 `jq` 永遠安全。要人讀的格式
+加 `--text`。
+
+要讓 agent 直接操作 kwara：
+
+```bash
+python -m pip install -r kwara/requirements-agent.txt
+claude mcp add kwara -- /abs/path/to/.venv/bin/python -m kwara.mcp_server
+```
+
+刪除案件僅限 CLI、無上限的截圖擷取不對 MCP 開放——完整指令參考、工具清單與設計
+理由見 [docs/agent-interface.md](docs/agent-interface.md)。
+
+
 ## 可選環境變數
 
 | 變數 | 預設值 | 用途 |
@@ -72,10 +101,13 @@ Windows 已安裝依賴的情況下，從專案根目錄雙擊 `start_kwara.bat`
 
 | 目錄 | 說明 |
 |---|---|
-| `kwara/` | 主應用程式（Streamlit UI、SQLite、掃描、匯出） |
-| `kwara/views/` | UI tab 模組（每個 tab 一個檔案，方便編輯） |
+| `kwara/` | 主應用程式（核心分析、SQLite、掃描、匯出） |
+| `kwara/cli.py` | 無介面 CLI——自動化的唯一真相來源 |
+| `kwara/mcp_server.py` | MCP server；薄薄包一層 CLI 的函式 |
+| `kwara/views/` | Streamlit UI tab 模組（每個 tab 一個檔案） |
 | `kwara/config.py` | 集中配置與環境變數預設值 |
 | `kwara/corroboration.py` | 第三方證據服務（Wayback、urlscan、RFC 3161） |
+| `docs/agent-interface.md` | 完整 CLI 指令參考與 MCP 工具清單 |
 | `docs/` | 圖解對照誌：鑑識標的 ↔ 數位廣告生態（HTML） |
 | `restore_from_export.py` | 從匯出的 ZIP 證據封包還原資料庫 |
 
