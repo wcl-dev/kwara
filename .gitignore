@@ -56,6 +56,12 @@ kwara/data/*.db.*
 
 # 案件報告產物（含偵查資料，勿提交至公開 repo）
 reports/
+# 判別器實驗資料（discovery.py 的實測產出）。含 5,232 個第三方網站的
+# ads.txt 內容與廣告帳號 —— 那是別人的資料，不放進公開 repo。
+# FINDINGS.md 是研究紀錄，data/ 的參照母體無法從 repo 或 DB 重建，
+# 兩者都只存在本機，勿刪。
+/discovery/
+
 
 # 案件專屬 / 一次性文件（內部，不入公開 repo）
 /QSH_E2E_TEST_REPORT_2026-04-28.md
