@@ -17,6 +17,7 @@ from discovery import (
     VERDICT_OFF_SITE,
     VERDICT_TEMPLATE_MATCH,
     VERDICT_UNREACHABLE,
+    cluster_by_template,
     known_templates,
     screen_ads_txt,
 )
@@ -144,3 +145,57 @@ def test_screen_domains_dedups_without_losing_caller_order(monkeypatch):
         ["b.tw", "a.com", "b.tw", "c.com"], {}, workers=1,
         on_result=lambda r: submitted.append(r["domain"]))
     assert submitted == ["b.tw", "a.com", "c.com"]
+
+
+# ── cluster_by_template: self-clustering ──────────────────────────────────
+
+def _obs(domain, sha, n, status="ok"):
+    return {"domain": domain, "raw_sha256": sha, "status": status,
+            "record_count": n}
+
+
+def test_self_clustering_groups_domains_sharing_a_file():
+    """Needs no prior knowledge of any domain — the point of the stage that
+    screening against a small known set cannot reach."""
+    cl = cluster_by_template([_obs("a.com", "SHA1", 40), _obs("b.com", "SHA1", 40),
+                              _obs("c.com", "SHA2", 40)])
+    assert len(cl) == 1
+    assert cl[0]["domains"] == ["a.com", "b.com"]
+    assert cl[0]["kind"] == "portfolio"
+
+
+def test_self_clustering_drops_shared_empty_templates():
+    """Six clusters covering 121 domains shared a byte-identical ads.txt with
+    NO DIRECT accounts on the 2026-08-05 sweep. An empty file is common to
+    countless unrelated parked domains and is not a deployer signal."""
+    cl = cluster_by_template([_obs("a.com", "EMPTY", 0), _obs("b.com", "EMPTY", 0)])
+    assert cl == []
+
+
+def test_self_clustering_flags_platform_generated_templates():
+    """A byte-identical 900-account file across sites is a monetisation
+    platform emitting one file for its clients, not one operator's estate."""
+    cl = cluster_by_template([_obs("a.com", "BIG", 900), _obs("b.com", "BIG", 900),
+                              _obs("c.com", "SML", 40), _obs("d.com", "SML", 40)])
+    kinds = {c["sha256"]: c["kind"] for c in cl}
+    assert kinds == {"BIG": "platform", "SML": "portfolio"}
+    assert cl[0]["kind"] == "portfolio"   # operator portfolios rank first
+
+
+def test_self_clustering_ignores_failed_fetches():
+    cl = cluster_by_template([_obs("a.com", "SHA", 40, status="non_200"),
+                              _obs("b.com", "SHA", 40, status="ok")])
+    assert cl == []
+
+
+def test_status_code_and_ownership_fields_survive_screening():
+    """403 (active block) and 404 (no file) are different signals; OWNERDOMAIN
+    and MANAGERDOMAIN are ads.txt's own first-party ownership claims."""
+    out = screen_ads_txt({"status": "non_200", "status_code": 403,
+                          "records": [], "raw_sha256": "x"}, {})
+    assert out["status_code"] == 403
+    ok = screen_ads_txt({"status": "ok", "raw_sha256": "s", "status_code": 200,
+                         "records": [{"a": 1}], "owner_domain": "owner.example",
+                         "manager_domain": "mgr.example"}, {})
+    assert ok["owner_domain"] == "owner.example"
+    assert ok["manager_domain"] == "mgr.example"

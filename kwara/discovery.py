@@ -45,6 +45,7 @@ import sqlite3
 from typing import Any, Iterable
 
 import hashlib
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from urllib.parse import urlparse
@@ -54,6 +55,7 @@ import requests
 from adstxt import parse_ads_txt
 from config import (
     ADS_TXT_MAX_BYTES,
+    ADS_TXT_PLATFORM_ACCOUNTS,
     ADS_TXT_TIMEOUT,
     DISCOVERY_MAX_REDIRECTS,
     DISCOVERY_WORKERS,
@@ -109,6 +111,14 @@ def screen_ads_txt(ads: dict[str, Any] | None,
     records = ads.get("records") or []
     sha = (ads.get("raw_sha256") or "").strip()
 
+    # status_code travels with every verdict: a 403 (an active block, often a
+    # challenge page) and a 404 (simply no file) mean very different things,
+    # and folding both into one bucket loses the OPSEC signal that motivated
+    # separating them in the first place.
+    base = {"status": status, "status_code": ads.get("status_code"),
+            "owner_domain": ads.get("owner_domain"),
+            "manager_domain": ads.get("manager_domain")}
+
     if status != "ok" or not records:
         # A 403/404/redirect is not a miss to hide — the status is itself an
         # OPSEC signal (a farm behind a challenge still matters), so it is
@@ -117,17 +127,73 @@ def screen_ads_txt(ads: dict[str, Any] | None,
                    "off_site_redirect": VERDICT_OFF_SITE}.get(
                        status, VERDICT_NO_ADS_TXT)
         return {"verdict": verdict, "matched_sha": None,
-                "matched_domains": [], "record_count": len(records),
-                "status": status}
+                "matched_domains": [], "record_count": len(records), **base}
 
     hit = known.get(sha)
     if hit:
         return {"verdict": VERDICT_TEMPLATE_MATCH, "matched_sha": sha,
                 "matched_domains": list(hit), "record_count": len(records),
-                "status": status}
+                **base}
     return {"verdict": VERDICT_NO_MATCH, "matched_sha": None,
-            "matched_domains": [], "record_count": len(records),
-            "status": status}
+            "matched_domains": [], "record_count": len(records), **base}
+
+
+def cluster_by_template(observations: Iterable[dict[str, Any]]) -> list[dict]:
+    """Group candidates that serve a byte-identical ads.txt as EACH OTHER.
+
+    Screening asks "does this candidate match something we already know",
+    which is bounded by how big the known set is — 6 templates screening 9,501
+    candidates found one sibling. This asks the self-referential question
+    instead: which candidates share a file with one another? It needs no prior
+    knowledge of any domain, and on the 2026-08-05 sweep it surfaced 54
+    operator-portfolio clusters over 188 domains against that same one hit.
+
+    Two guards, both learned the hard way on that data:
+
+    empty templates — six clusters covering 121 domains shared a byte-identical
+    ads.txt that declared NO DIRECT accounts. An empty or boilerplate file is
+    common to countless unrelated parked domains and says nothing about a
+    deployer, so those are dropped outright.
+
+    platform-generated templates — 31 clusters carried 300+ accounts each.
+    A byte-identical 900-account file across five sites is a monetisation
+    platform emitting the same file for its clients, not one operator running
+    five sites. Those are returned but flagged `platform`, because "same bytes
+    = same deployer" holds while the deployer may be a platform rather than
+    the site owner.
+
+    `observations` are screening results carrying `domain`, `raw_sha256` and
+    `records` (or `record_count`). Returns clusters of 2+ domains, largest
+    first.
+    """
+    by_sha: dict[str, set] = defaultdict(set)
+    accounts: dict[str, int] = {}
+    for o in observations:
+        sha = (o.get("raw_sha256") or o.get("sha") or "").strip()
+        domain = (o.get("domain") or "").strip().lower()
+        if not sha or not domain or o.get("status") != "ok":
+            continue
+        by_sha[sha].add(domain)
+        recs = o.get("records")
+        n = len(recs) if recs is not None else (o.get("record_count") or 0)
+        accounts[sha] = max(accounts.get(sha, 0), n)
+
+    out: list[dict] = []
+    for sha, domains in by_sha.items():
+        if len(domains) < 2 or accounts.get(sha, 0) < 1:
+            continue                      # singleton, or a shared empty file
+        out.append({
+            "sha256": sha,
+            "sha256_short": sha[:12],
+            "domains": sorted(domains),
+            "domain_count": len(domains),
+            "account_count": accounts[sha],
+            "kind": ("platform" if accounts[sha] >= ADS_TXT_PLATFORM_ACCOUNTS
+                     else "portfolio"),
+        })
+    out.sort(key=lambda c: (c["kind"] != "portfolio", -c["domain_count"],
+                            c["sha256"]))
+    return out
 
 
 def fetch_for_screening(domain: str, *,
@@ -189,9 +255,15 @@ def fetch_for_screening(domain: str, *,
     if resp.status_code != 200:
         out.update({"status": "non_200", "records": [], "record_count": 0})
         return out
-    records, _vars = parse_ads_txt(body_bytes.decode("utf-8", errors="replace"))
+    records, variables = parse_ads_txt(body_bytes.decode("utf-8", errors="replace"))
     out.update({"status": "ok", "records": records,
-                "record_count": len(records)})
+                "record_count": len(records),
+                # ads.txt's own self-declared ownership fields. Kept because
+                # they are a first-party claim about who runs and who monetises
+                # the site — the one ownership lead left after sellers.json
+                # turned out to redact or omit exactly the small operators.
+                "owner_domain": variables.get("owner_domain"),
+                "manager_domain": variables.get("manager_domain")})
     return out
 
 

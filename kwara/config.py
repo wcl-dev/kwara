@@ -335,3 +335,15 @@ TSA_URL: str = os.environ.get(
     "KWARA_TSA_URL",
     "https://freetsa.org/tsr",
 )
+
+
+# ── Self-clustering (discovery.cluster_by_template) ──────────────────────
+# A byte-identical ads.txt means the same deployer — but on the 2026-08-05
+# sweep, 31 of 91 clusters carried 300+ DIRECT accounts each. A 900-account
+# file replicated across five sites is a monetisation platform emitting the
+# same file for its clients, not one operator running five sites. Clusters at
+# or above this size are flagged `platform` rather than `portfolio`: still
+# reported, but not read as one operator's own estate.
+ADS_TXT_PLATFORM_ACCOUNTS: int = int(
+    os.environ.get("KWARA_ADS_TXT_PLATFORM_ACCOUNTS", "300")
+)
