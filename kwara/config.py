@@ -218,6 +218,50 @@ ADS_TXT_TEMPLATE_OVERLAP: float = float(
 ADS_TXT_TEMPLATE_MIN_SHARED: int = int(
     os.environ.get("KWARA_ADS_TXT_TEMPLATE_MIN_SHARED", "8")
 )
+# The template demotion above used to require EVERY carrier pair to be linked.
+# One thin ads.txt among many carriers defeated the whole test: measured pair
+# ratios for the 23-domain accounts in the 2026-08-05 consolidated case ran
+# 0.65–0.81 and never reached 1.0, so nothing was demoted. Fraction of linked
+# pairs instead of unanimity.
+ADS_TXT_TEMPLATE_PAIR_RATIO: float = float(
+    os.environ.get("KWARA_ADS_TXT_TEMPLATE_PAIR_RATIO", "0.6")
+)
+# Corpus-independent footprint. ADS_TXT_MANAGER_BREADTH above is measured
+# against the CURRENT case, so a narrow case hides how far an account really
+# spreads — aralego|par-8A22… read as operator on 8 domains in case 3 while
+# carrying 19 apexes DB-wide, including unrelated mainstream farms. Tier is
+# therefore decided on the account's footprint across EVERY case in the DB,
+# counted in registrable domains so that subdomains of one apex
+# (redacted139.operatorhub.example + operatorhub.example) cannot inflate it.
+#
+# NOTE these are absolute counts, not ratios, and deliberately so: a ratio
+# needs a reference population of *normal* sites, and an investigation corpus
+# is all suspects. The authoritative answer is the SSP's own sellers.json
+# `seller_type` (PUBLISHER vs INTERMEDIARY); until that is wired up these
+# thresholds are a conservative stand-in.
+ADS_TXT_OPERATOR_MAX_APEXES: int = int(
+    os.environ.get("KWARA_ADS_TXT_OPERATOR_MAX_APEXES", "4")
+)
+ADS_TXT_MANAGER_MIN_APEXES: int = int(
+    os.environ.get("KWARA_ADS_TXT_MANAGER_MIN_APEXES", "10")
+)
+
+
+# ── Evidence-coverage weighting (narrative.verdict) ──────────────────────
+# `coverage` answers "how much evidence is on the table", so no single class
+# may own the figure. Until 2026-08-05 it was a raw weighted count capped at
+# 100, and a case carrying 193 operator-tier ads.txt accounts scored 1544 on
+# that term alone — the WEAKEST evidence class saturated the number by itself
+# and it stopped discriminating between cases.
+#
+# Now each class contributes at most COVERAGE_CLASS_CAP instances and holds a
+# fixed share of the total: grouping evidence (what actually binds domains to
+# one operator — tracking IDs, certs, header templates, identical ads.txt)
+# 60%, observed evasion behaviour 30%, monetisation accounts 10%. Monetisation
+# is last on purpose: clusters.py explicitly refuses to let ads.txt accounts
+# bind operator groups, so they must not drive the headline figure either.
+COVERAGE_CLASS_CAP: int = int(os.environ.get("KWARA_COVERAGE_CLASS_CAP", "3"))
+COVERAGE_WEIGHTS: dict[str, int] = {"grouping": 6, "behaviour": 3, "money": 1}
 
 
 # ── Shortlink SaaS catalog (clustering.py + snapshots.py + app.py) ───────

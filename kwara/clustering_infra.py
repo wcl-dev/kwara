@@ -28,10 +28,14 @@ import ipaddress
 
 from config import (
     ADS_TXT_MANAGER_BREADTH,
+    ADS_TXT_MANAGER_MIN_APEXES,
+    ADS_TXT_OPERATOR_MAX_APEXES,
     ADS_TXT_TEMPLATE_MIN_SHARED,
     ADS_TXT_TEMPLATE_OVERLAP,
+    ADS_TXT_TEMPLATE_PAIR_RATIO,
     HAR_NOISE_HOSTS,
 )
+from utils.domain import extract_domain_from_url
 
 # Major programmatic ad exchanges — used by millions of unrelated sites, so an
 # account here is NEVER per-operator attribution (a floor under the overlap
@@ -750,6 +754,43 @@ def shared_endpoints(conn: sqlite3.Connection, case_id: int) -> list:
     return out
 
 
+def _account_apex_footprint(conn: sqlite3.Connection) -> dict[tuple[str, str], set]:
+    """(adsystem, seller_id) → set of registrable domains carrying it, across
+    every case in this DB.
+
+    Deliberately case-independent: this is the denominator-free rarity measure
+    that `tier` leans on, and it must not change when the analyst loads more
+    URLs into the case under review. Apexes, not hostnames, so that
+    redacted139.operatorhub.example + operatorhub.example counts once.
+    """
+    footprint: dict[tuple[str, str], set] = defaultdict(set)
+    rows = conn.execute(
+        f"""SELECT sr.ads_txt_json, sr.final_url
+            FROM url_artifacts ua
+            JOIN scan_runs sr ON sr.id = {LATEST_DONE_SCAN_RUN}
+            WHERE sr.ads_txt_json IS NOT NULL
+              AND TRIM(sr.ads_txt_json) != ''"""
+    ).fetchall()
+    for r in rows:
+        try:
+            ads = json.loads(r["ads_txt_json"])
+        except (ValueError, TypeError):
+            continue
+        if not isinstance(ads, dict) or ads.get("status") != "ok":
+            continue
+        apex = extract_domain_from_url(r["final_url"] or "")
+        if not apex:
+            continue
+        for rec in (ads.get("records") or []):
+            if (rec.get("relationship") or "").upper() != "DIRECT":
+                continue
+            adsystem = (rec.get("adsystem") or "").lower()
+            seller_id = (rec.get("seller_id") or "").strip()
+            if adsystem and seller_id:
+                footprint[(adsystem, seller_id)].add(apex)
+    return footprint
+
+
 def shared_ad_accounts(conn: sqlite3.Connection, case_id: int) -> dict:
     """Cluster landing domains by their ads.txt monetisation evidence.
 
@@ -757,16 +798,26 @@ def shared_ad_accounts(conn: sqlite3.Connection, case_id: int) -> dict:
     two cluster lists:
 
       by_account  : a DIRECT (adsystem, seller_id) account appears on 2+
-                    distinct domains in this case. Frequency-weighted via
-                    `tier`:
-                      operator — appears on a *rare subset* of the case's
-                                 ads.txt domains (breadth_ratio <
-                                 ADS_TXT_MANAGER_BREADTH). Strong: a shared
-                                 money account on few domains.
-                      manager  — appears on most/all domains. Weak: this is
-                                 a shared monetisation manager / reseller
-                                 network templated across client sites, NOT
-                                 a same-operator signal.
+                    distinct domains in this case. Weighted via `tier`:
+                      operator  — footprint genuinely rare across the whole
+                                  DB (<= ADS_TXT_OPERATOR_MAX_APEXES apexes).
+                                  Strong: a shared money account on few sites.
+                      manager   — a major exchange; or on most of the case's
+                                  ads.txt domains; or its carriers mostly run
+                                  the same overlapping stack; or a DB-wide
+                                  footprint >= ADS_TXT_MANAGER_MIN_APEXES.
+                                  Weak: a shared monetisation manager /
+                                  reseller network templated across client
+                                  sites, NOT a same-operator signal.
+                      uncertain — between the two. Local evidence cannot
+                                  settle it; reported rather than guessed.
+                    Each row carries the evidence behind its tier:
+                    `global_apex_count`, `pair_link_ratio`, `breadth_ratio`.
+
+                    Tier is decided on the DB-wide footprint, NOT on the
+                    current case, because a case is whatever the analyst
+                    happened to load — a case-relative measure lets corpus
+                    composition change the verdict for the same account.
       by_template : 2+ domains served a byte-identical ads.txt (same raw
                     sha256). Strongest operator signal — a shared
                     monetisation template.
@@ -775,9 +826,9 @@ def shared_ad_accounts(conn: sqlite3.Connection, case_id: int) -> dict:
     noise, not the publisher's own money account). `case_domains` (distinct
     domains carrying a parseable ads.txt) is the breadth denominator.
 
-    by_account sorted operator-tier-first then domain_count desc; by_template
-    sorted domain_count desc. platform_id on every by_account row is the
-    canonical PLATFORM_ADS_TXT_SELLER (contract 1).
+    by_account sorted operator → uncertain → manager, then domain_count desc;
+    by_template sorted domain_count desc. platform_id on every by_account row
+    is the canonical PLATFORM_ADS_TXT_SELLER (contract 1).
     """
     rows = conn.execute(
         f"""SELECT sr.ads_txt_json, sr.final_url,
@@ -837,6 +888,13 @@ def shared_ad_accounts(conn: sqlite3.Connection, case_id: int) -> dict:
 
     denom = len(case_domains) or 1
 
+    # Footprint of each account across EVERY case in this DB, in apexes. The
+    # within-case breadth above cannot see that an account carried by 8 domains
+    # here sits on 19 apexes elsewhere in the same DB — and a case is whatever
+    # the analyst happened to load, so a case-relative measure lets corpus
+    # composition decide the verdict. See config.ADS_TXT_*_APEXES.
+    global_apexes = _account_apex_footprint(conn)
+
     # Inverse index: domain → set of its DIRECT account keys (for overlap).
     domain_accounts: dict[str, set] = defaultdict(set)
     for key, entry in account_data.items():
@@ -861,16 +919,22 @@ def shared_ad_accounts(conn: sqlite3.Connection, case_id: int) -> dict:
         _overlap_cache[ck] = linked
         return linked
 
-    def _is_template_account(domains: list[str]) -> bool:
-        """An account is template-tier when ALL its carrier domains are mutually
-        template-linked — i.e. it is just one of many co-shared accounts in a
-        shared MFA/reseller stack, not a signal linking otherwise-distinct
-        domains."""
+    def _template_pair_ratio(domains: list[str]) -> float:
+        """Fraction of carrier-domain pairs that are template-linked.
+
+        Was an all() over every pair, which a single thin ads.txt among many
+        carriers defeated outright — real 23-carrier accounts measured 0.65–0.81
+        and were never demoted. A fraction degrades gracefully instead.
+        """
         if len(domains) < 2:
-            return False
-        return all(_template_linked(domains[i], domains[j])
-                   for i in range(len(domains))
-                   for j in range(i + 1, len(domains)))
+            return 0.0
+        pairs = linked = 0
+        for i in range(len(domains)):
+            for j in range(i + 1, len(domains)):
+                pairs += 1
+                if _template_linked(domains[i], domains[j]):
+                    linked += 1
+        return linked / (pairs or 1)
 
     # ── Cluster A: shared DIRECT accounts (frequency-weighted) ─────────
     by_account: list[dict] = []
@@ -880,31 +944,48 @@ def shared_ad_accounts(conn: sqlite3.Connection, case_id: int) -> dict:
         domain_count = len(entry["domains"])
         breadth_ratio = domain_count / denom
         doms_sorted = sorted(entry["domains"])
-        # Tier: operator (rare, strong) unless demoted to manager by one of —
-        #   A. floor — a major programmatic exchange (never operator);
-        #   breadth — appears on most of the case's ads.txt domains;
-        #   B. template — carriers run the same heavily-overlapping ads.txt.
-        if adsystem in MAJOR_AD_EXCHANGES:
+        pair_ratio = _template_pair_ratio(doms_sorted)
+        global_apex_count = len(global_apexes.get((adsystem, seller_id), ()))
+        # Tier. `operator` is the strong claim, so it must be EARNED by
+        # measured rarity rather than assumed in the absence of a demotion —
+        # the previous default asserted same-operator whenever no guard fired,
+        # which is how a 23-domain intermediary came out operator-tier.
+        #   manager — a major exchange (floor); or on most of the case's
+        #             ads.txt domains; or its carriers mostly run the same
+        #             overlapping stack; or a DB-wide footprint too broad.
+        #   operator — footprint genuinely rare DB-wide.
+        #   uncertain — in between. Neither claim is supportable from local
+        #             evidence, so kwara reports the ambiguity instead of
+        #             guessing (see contract 6 in docs/analysis-design.md).
+        if (adsystem in MAJOR_AD_EXCHANGES
+                or breadth_ratio >= ADS_TXT_MANAGER_BREADTH
+                or pair_ratio >= ADS_TXT_TEMPLATE_PAIR_RATIO
+                or global_apex_count >= ADS_TXT_MANAGER_MIN_APEXES):
             tier = "manager"
-        elif breadth_ratio >= ADS_TXT_MANAGER_BREADTH:
-            tier = "manager"
-        elif _is_template_account(doms_sorted):
-            tier = "manager"
-        else:
+        elif global_apex_count <= ADS_TXT_OPERATOR_MAX_APEXES:
             tier = "operator"
+        else:
+            tier = "uncertain"
         by_account.append({
             "platform_id":   PLATFORM_ADS_TXT_SELLER,
             "adsystem":      adsystem,
             "seller_id":     seller_id,
             "tier":          tier,
             "breadth_ratio": round(breadth_ratio, 3),
+            # Evidence behind the tier — an analyst must be able to see why a
+            # verdict landed without re-deriving it (contract 3).
+            "global_apex_count": global_apex_count,
+            "pair_link_ratio":   round(pair_ratio, 3),
             "domains":       sorted(entry["domains"]),
             "domain_count":  domain_count,
             "url_count":     len(entry["urls"]),
             "post_count":    len(entry["posts"]),
         })
-    # operator-tier first (the real attribution signal), then domain_count.
-    by_account.sort(key=lambda x: (x["tier"] != "operator", -x["domain_count"],
+    # operator first (the real attribution signal), then uncertain, then
+    # manager; within a tier by domain_count.
+    _TIER_ORDER = {"operator": 0, "uncertain": 1, "manager": 2}
+    by_account.sort(key=lambda x: (_TIER_ORDER.get(x["tier"], 9),
+                                   -x["domain_count"],
                                    x["adsystem"], x["seller_id"]))
 
     # ── Cluster B: byte-identical ads.txt templates ───────────────────

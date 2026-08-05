@@ -251,16 +251,35 @@ OPSEC level 規則（刻意粗略，分析師最終判讀）：
 
 同一組 `(adsystem, seller_id)` 出現在 2 個以上網域。**只收 `DIRECT` 行**——`RESELLER` 是下游供應鏈轉售，不是發布者自己的收款帳號，收進來只會製造雜訊。
 
-但「共用廣告帳號」本身有一個致命的誤判來源：**變現代管商**。一家代管商會把同一組帳號套用到旗下所有客戶網站，這些網站彼此毫無關係。所以每筆 cluster 帶一個 `tier`，以 breadth_ratio（該帳號涵蓋的域數 ÷ 本案有可解析 `ads.txt` 的域數）判定：
+但「共用廣告帳號」本身有一個致命的誤判來源：**變現代管商**。一家代管商會把同一組帳號套用到旗下所有客戶網站，這些網站彼此毫無關係。所以每筆 cluster 帶一個 `tier`。
+
+### tier 的判定基準是全資料庫足跡，不是本案
+
+這一點是 2026-08-05 修正的核心，值得說明踩過的坑。原本的 `breadth_ratio` = 該帳號涵蓋的域數 ÷ 本案有可解析 `ads.txt` 的域數，低於門檻就判 `operator`。問題是**分母綁在本案語料上，而「本案」是分析師剛好載入了什麼**：
+
+- 語料窄 → 帳號的真實廣度被藏住。`aralego|par-8A22…` 在只有 QSH 域名的案件裡看起來只涵蓋 8 個域、判為 operator；但它在同一個資料庫裡實際橫跨 **18 個 apex**，包含 bigpublisher2、family1 這些毫無關聯的主流農場
+- 語料寬且同質 → 真正無所不在的中介反而掉到門檻以下。`kargo|8955` 涵蓋 23 個域、breadth 0.719 < 0.8，被判為 operator
+
+同一個帳號、同一個世界，換個案件組成就換一種判定。所以 tier 改為以**全資料庫足跡**（`global_apex_count`）決定，並且用**可註冊域（apex）**計數——`redacted139.operatorhub.example` 與 `operatorhub.example` 是同一項資產，算一個。
 
 | tier | 條件 | 解讀 |
 |---|---|---|
-| `operator` | breadth_ratio < `ADS_TXT_MANAGER_BREADTH`（預設 0.8） | 帳號只出現在少數域上——共用收款帳號，**強訊號** |
-| `manager` | 涵蓋大部分或全部域 | 這是套用到所有客戶站的代管商／轉售網路，**不是**同操作者訊號 |
+| `manager` | 名列 `MAJOR_AD_EXCHANGES`；或 breadth_ratio ≥ `ADS_TXT_MANAGER_BREADTH`；或載體多數配對共用同一疊 ads.txt；或 `global_apex_count` ≥ `ADS_TXT_MANAGER_MIN_APEXES` | 代管商／轉售網路，**不是**同操作者訊號 |
+| `operator` | `global_apex_count` ≤ `ADS_TXT_OPERATOR_MAX_APEXES` | 全庫範圍內確實稀有，**強訊號** |
+| `uncertain` | 介於兩者之間 | 本機證據判不出來，**據實回報而非猜測**（見 §十二 原則 6） |
 
-分母 `case_domains` 只計「`status == 'ok'` 且真的有 records」的網域——403 或空白的 `ads.txt` 不該灌水分母，否則 breadth_ratio 會被系統性低估、把代管商誤判成 operator。
+**`operator` 必須被「賺到」**。舊版的預設值是 operator——沒有任何降級規則觸發就宣告同操作者，這正是 23 域的中介被判成強訊號的原因。強主張應該要求正面證據，不是預設值。
 
-**這是必須保留的契約**：`by_account` 不做頻率加權就直接呈現，等於把「同一家代管商的客戶」宣告成「同一個操作者」。這類誤判在對外報告裡的代價極高。
+另外兩個實作細節：
+
+- 分母 `case_domains` 只計「`status == 'ok'` 且真的有 records」的網域——403 或空白的 `ads.txt` 不該灌水分母
+- 載體配對的模板連結率原本用 `all()`（全部配對都連結才降級），一個 ads.txt 特別薄的載體就能讓整條規則失效。實測 23 域帳號的配對連結率落在 0.65–0.81，永遠到不了 1.0。已改為比例門檻 `ADS_TXT_TEMPLATE_PAIR_RATIO`
+
+**這是必須保留的契約**：`by_account` 不做加權就直接呈現，等於把「同一家代管商的客戶」宣告成「同一個操作者」。
+
+### 已知限制
+
+比率型的判定需要一個「正常網站」的參照母體，而調查語料**全部都是嫌疑者**——所以絕對門檻只是保守的替代品，不是解答。權威答案在 SSP 自己發布的 `sellers.json`：其中 `seller_type` 欄位直接聲明該帳號是 `PUBLISHER` 還是 `INTERMEDIARY`。尚未接上。在那之前，`operator` 只代表「在你自己的資料庫裡稀有」，資料庫小的時候這個證據力有限。
 
 ---
 

@@ -23,6 +23,8 @@ from __future__ import annotations
 
 import sqlite3
 
+from config import COVERAGE_CLASS_CAP, COVERAGE_WEIGHTS
+
 from clustering_infra import (
     shared_ad_accounts,
     shared_certificates,
@@ -87,6 +89,26 @@ def signal_summary(conn: sqlite3.Connection, case_id: int) -> dict:
     }
 
 
+def evidence_coverage(grouping_n: int, behaviour_n: int, money_n: int) -> int:
+    """Evidence coverage 0–100 — how much evidence is on the table, NOT how
+    guilty the operator is.
+
+    Each class saturates at COVERAGE_CLASS_CAP instances and holds a fixed
+    share of the figure (see config.COVERAGE_WEIGHTS), so no single class can
+    own it. The previous raw weighted count let the weakest class — ads.txt
+    accounts — reach 1544 on a 100 ceiling by itself, which made the figure
+    identical for every well-populated case.
+    """
+    counts = {"grouping": grouping_n, "behaviour": behaviour_n, "money": money_n}
+    cap = max(1, COVERAGE_CLASS_CAP)
+    full = sum(COVERAGE_WEIGHTS.values()) * cap
+    if not full:
+        return 0
+    score = sum(w * min(max(counts.get(k, 0), 0), cap)
+                for k, w in COVERAGE_WEIGHTS.items())
+    return round(100 * score / full)
+
+
 def verdict(sig: dict) -> dict:
     """Tiered, scope-bounded verdict — no motive attribution.
 
@@ -105,8 +127,7 @@ def verdict(sig: dict) -> dict:
     grouping = "strong" if grouping_n else "none"
     behaviour = behaviour_n > 0
 
-    # Evidence coverage — how much evidence is on the table, not how guilty.
-    coverage = min(100, grouping_n * 16 + behaviour_n * 10 + money_n * 8)
+    coverage = evidence_coverage(grouping_n, behaviour_n, money_n)
 
     if grouping == "strong":
         colour = "#2c5f8a"

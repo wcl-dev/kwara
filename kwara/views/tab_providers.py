@@ -273,7 +273,8 @@ def _ad_tracking_section(conn, case_id):
         st.dataframe(pd.DataFrame(sel_p["domains"]), width='stretch', hide_index=True)
 
 
-_TIER_BADGE = {"operator": "🔴 operator", "manager": "⚪ manager"}
+_TIER_BADGE = {"operator": "🔴 operator", "uncertain": "🟡 uncertain",
+               "manager": "⚪ manager"}
 
 
 def _ad_accounts_section(conn, case_id):

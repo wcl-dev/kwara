@@ -180,6 +180,102 @@ def test_high_overlap_demotes_shared_account_to_template_manager():
     assert tiers[("rareadnet.com", "pub-RARE")] == "operator"
 
 
+def _filler(conn, cid, n, prefix="f"):
+    """n domains with a unique account each — dilutes within-case breadth
+    without creating clusters."""
+    for i in range(n):
+        _add(conn, cid, f"https://{prefix}{i}.com/", f"{prefix}{i}.com",
+             _ads_json([(f"{prefix}x{i}.com", "1")], raw_text=f"{prefix}{i}"))
+
+
+def test_db_wide_footprint_overrides_narrow_case_rarity():
+    """The regression that motivated the 3-tier rework (2026-08-05).
+
+    An account can look rare inside a narrow case while sitting on a broad
+    footprint elsewhere in the same DB — kargo|8955 read as operator-tier on
+    23 domains that way. Tier must follow the DB-wide footprint, so the SAME
+    account in the SAME case flips to manager once the rest of the DB is
+    visible. Without the fix this is operator (breadth 2/7 = 0.29 < 0.8, no
+    template overlap, not a listed exchange).
+    """
+    conn = _make_db()
+    cid = _make_case(conn)
+    acct = ("clickforce.com.tw", "pub-WIDE")
+    for d in ("a.com", "b.com"):
+        _add(conn, cid, f"https://{d}/", d, _ads_json([acct], raw_text=d))
+    _filler(conn, cid, 5)
+    # Same account across 10 more apexes, loaded under a DIFFERENT case.
+    other = _make_case(conn)
+    for i in range(10):
+        _add(conn, other, f"https://w{i}.com/", f"w{i}.com",
+             _ads_json([acct], raw_text=f"w{i}"))
+
+    row = next(a for a in shared_ad_accounts(conn, cid)["by_account"]
+               if (a["adsystem"], a["seller_id"]) == acct)
+    assert row["domain_count"] == 2          # still 2 carriers in THIS case
+    assert row["breadth_ratio"] < 0.8        # still rare by the old measure
+    assert row["global_apex_count"] == 12    # but broad DB-wide
+    assert row["tier"] == "manager"
+
+
+def test_footprint_counts_apexes_not_hostnames():
+    """Subdomains of one apex must not inflate the footprint: redacted139.operatorhub.example
+    + operatorhub.example is one operator asset, not two."""
+    conn = _make_db()
+    cid = _make_case(conn)
+    acct = ("clickforce.com.tw", "pub-SUBS")
+    hosts = [f"s{i}.a.com" for i in range(6)] + [f"s{i}.b.com" for i in range(6)]
+    for h in hosts:
+        _add(conn, cid, f"https://{h}/", h, _ads_json([acct], raw_text=h))
+    _filler(conn, cid, 20)
+
+    row = next(a for a in shared_ad_accounts(conn, cid)["by_account"]
+               if (a["adsystem"], a["seller_id"]) == acct)
+    assert row["domain_count"] == 12       # 12 hostnames carry it
+    assert row["global_apex_count"] == 2   # but only 2 registrable domains
+    assert row["tier"] == "operator"       # rare — 12 hostnames must not demote
+
+
+def test_uncertain_tier_between_thresholds():
+    """Between rare and broad, kwara reports the ambiguity instead of picking
+    a side (contract 6: no auto-verdict on evidence that cannot settle it)."""
+    conn = _make_db()
+    cid = _make_case(conn)
+    acct = ("clickforce.com.tw", "pub-MID")
+    for i in range(7):        # 7 apexes: > OPERATOR_MAX (4), < MANAGER_MIN (10)
+        _add(conn, cid, f"https://m{i}.com/", f"m{i}.com",
+             _ads_json([acct], raw_text=f"m{i}"))
+    _filler(conn, cid, 15)
+
+    row = next(a for a in shared_ad_accounts(conn, cid)["by_account"]
+               if (a["adsystem"], a["seller_id"]) == acct)
+    assert row["global_apex_count"] == 7
+    assert row["tier"] == "uncertain"
+
+
+def test_template_demotion_survives_one_odd_carrier():
+    """The template guard used to require EVERY carrier pair to be linked, so a
+    single thin ads.txt among the carriers defeated it entirely. A majority of
+    linked pairs must still demote."""
+    conn = _make_db()
+    cid = _make_case(conn)
+    stack = [(f"net{i}.com", f"s{i}") for i in range(10)]
+    shared = ("clickforce.com.tw", "pub-STACK")
+    # 4 carriers run the same fat stack; a 5th carries the account alone.
+    for d in ("a.com", "b.com", "c.com", "d.com"):
+        _add(conn, cid, f"https://{d}/", d,
+             _ads_json(stack + [shared], raw_text=d))
+    _add(conn, cid, "https://odd.com/", "odd.com",
+         _ads_json([shared, ("solo.com", "1")], raw_text="odd"))
+    _filler(conn, cid, 8)
+
+    row = next(a for a in shared_ad_accounts(conn, cid)["by_account"]
+               if (a["adsystem"], a["seller_id"]) == shared)
+    # 6 of 10 pairs linked (the four stack carriers) -> 0.6 >= threshold
+    assert row["pair_link_ratio"] >= 0.6
+    assert row["tier"] == "manager"
+
+
 def test_only_direct_lines_feed_accounts():
     """RESELLER lines must not create account clusters."""
     conn = _make_db()
