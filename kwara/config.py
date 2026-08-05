@@ -284,6 +284,22 @@ COVERAGE_CLASS_CAP: int = int(os.environ.get("KWARA_COVERAGE_CLASS_CAP", "3"))
 COVERAGE_WEIGHTS: dict[str, int] = {"grouping": 6, "behaviour": 3, "money": 1}
 
 
+# ── Candidate screening (discovery.py) ───────────────────────────────────
+# Concurrency for the ads.txt screening sweep. Bounded on purpose: a screening
+# run contacts thousands of unrelated third-party sites, and the tool has no
+# business hammering them. Raise only with a reason.
+DISCOVERY_WORKERS: int = int(os.environ.get("KWARA_DISCOVERY_WORKERS", "8"))
+# Screening follows redirects (a bare candidate domain routinely 301s apex->www
+# or http->https, and refusing to follow would report ordinary sites as having
+# no ads.txt). The hop limit is low because a legitimate /ads.txt is at most a
+# couple of hops away; anything longer is a redirect chain, not a canonical
+# host. The landing host is checked against the candidate's registrable domain
+# regardless of hop count — see discovery.fetch_for_screening.
+DISCOVERY_MAX_REDIRECTS: int = int(
+    os.environ.get("KWARA_DISCOVERY_MAX_REDIRECTS", "3")
+)
+
+
 # ── Shortlink SaaS catalog (clustering.py + snapshots.py + app.py) ───────
 # Domains that are themselves shortlink services. When a scan's final_domain
 # lands here it means the scan did not penetrate the redirect — the real

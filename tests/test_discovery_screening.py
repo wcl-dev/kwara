@@ -14,6 +14,7 @@ import tempfile
 from discovery import (
     VERDICT_NO_ADS_TXT,
     VERDICT_NO_MATCH,
+    VERDICT_OFF_SITE,
     VERDICT_TEMPLATE_MATCH,
     VERDICT_UNREACHABLE,
     known_templates,
@@ -112,3 +113,16 @@ def test_screening_uses_the_cross_case_index():
     out = screen_ads_txt(_ads("SHA_OLD"), known_templates(conn))
     assert out["verdict"] == VERDICT_TEMPLATE_MATCH
     assert out["matched_domains"] == ["farm-from-2024.com"]
+
+
+# ── fetch_for_screening: same-registrable-domain guard ────────────────────
+
+def test_off_site_redirect_is_never_parsed():
+    """Screening follows redirects (apex->www is routine for a bare candidate)
+    but must not inherit another domain's ads.txt — the hazard contract 9
+    guards against on the scan path."""
+    out = screen_ads_txt({"status": "off_site_redirect", "records": [],
+                          "landed_on": "https://someone-else.com/ads.txt"},
+                         {"SHA": ["known.com"]})
+    assert out["verdict"] == VERDICT_OFF_SITE
+    assert out["matched_sha"] is None
