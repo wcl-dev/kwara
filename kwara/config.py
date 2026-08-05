@@ -242,6 +242,26 @@ ADS_TXT_TEMPLATE_PAIR_RATIO: float = float(
 ADS_TXT_OPERATOR_MAX_APEXES: int = int(
     os.environ.get("KWARA_ADS_TXT_OPERATOR_MAX_APEXES", "4")
 )
+# Index gate for the carrier domain. The tier machinery only ever sees accounts
+# carried by 2+ domains in a case, so an account seen on exactly one domain
+# bypasses every demotion and lands in the cross-case index unfiltered. That is
+# deliberate for a genuinely rare account — cross-case recurrence of a rare
+# money account is the whole point of the index — but it breaks on a large
+# legitimate publisher: the 2026-08-05 rebuild indexed 1056 distinct seller
+# values, 91% carried by a single domain, and bigpublisher2.example (526) plus bigpublisher1.example
+# (351) supplied 83% of them. Those are ordinary programmatic supply shared
+# with thousands of unrelated sites, and they made ads_txt_seller the largest
+# recurring-signal class by 6x.
+#
+# So: a domain declaring this many DIRECT accounts is running a full
+# programmatic stack, and no single account in it distinguishes an operator.
+# Measured spread in the case DB — farms declared 1–284 DIRECT accounts, the
+# two large media publishers 860 and 1409 — so the default sits in that gap
+# and errs toward indexing. Gates the account signals only; the ads.txt
+# TEMPLATE hash is still indexed for every domain.
+ADS_TXT_INDEX_MAX_CARRIER_ACCOUNTS: int = int(
+    os.environ.get("KWARA_ADS_TXT_INDEX_MAX_CARRIER_ACCOUNTS", "500")
+)
 ADS_TXT_MANAGER_MIN_APEXES: int = int(
     os.environ.get("KWARA_ADS_TXT_MANAGER_MIN_APEXES", "10")
 )

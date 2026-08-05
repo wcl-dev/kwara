@@ -213,3 +213,38 @@ def test_singleton_not_reported_as_recurring():
     assert not any(r["signal_value"] == "G-ONCE" for r in rec)
     # ...but a direct lookup still finds the singleton.
     assert len(lookup(idx, "G-ONCE")) == 1
+
+
+def test_recurring_signals_separates_real_recurrence_from_overlapping_cases():
+    """A signal on ONE domain that merely spans two overlapping cases has not
+    resurfaced — it has been indexed twice. Measured on the 2026-08-05 index,
+    99 of 119 recurring ads.txt accounts were exactly that, so domain_count is
+    reported and ranks above case_count.
+    """
+    conn = get_index_conn(os.path.join(tempfile.mkdtemp(), "i.db"))
+
+    def put(value, case_id, domain, srid):
+        conn.execute(
+            """INSERT OR REPLACE INTO signals (signal_type, signal_value,
+               platform, source_db, case_id, case_title, scan_run_id,
+               final_domain, observed_at, indexed_at)
+               VALUES ('ads_txt_seller', ?, NULL, '/db', ?, 't', ?, ?, 'n', 'n')""",
+            (value, case_id, srid, domain))
+
+    # same domain, two overlapping cases — bookkeeping, not a recurrence
+    put("pub-DUP", 1, "one.com", 1)
+    put("pub-DUP", 2, "one.com", 2)
+    # two distinct domains — a genuine cross-case recurrence
+    put("pub-REAL", 1, "one.com", 3)
+    put("pub-REAL", 2, "two.com", 4)
+    conn.commit()
+
+    rows = {r["signal_value"]: r for r in recurring_signals(conn)}
+    assert rows["pub-DUP"]["case_count"] == 2
+    assert rows["pub-DUP"]["domain_count"] == 1
+    assert rows["pub-REAL"]["domain_count"] == 2
+    # genuine recurrence ranks first
+    assert recurring_signals(conn)[0]["signal_value"] == "pub-REAL"
+    # and can be isolated outright
+    strict = [r["signal_value"] for r in recurring_signals(conn, min_domains=2)]
+    assert strict == ["pub-REAL"]

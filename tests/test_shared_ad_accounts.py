@@ -376,6 +376,52 @@ def test_index_emits_operator_seller_not_manager():
     assert not any(v == "pub-MANAGER" for v, _ in sellers)
 
 
+def test_index_skips_accounts_of_a_full_programmatic_carrier():
+    """Floor D. A case-singleton account never reaches the tier machinery (that
+    only sees accounts on 2+ domains), so before this floor a large publisher's
+    entire supply chain entered the index labelled rare: the 2026-08-05 rebuild
+    took 1056 seller values, 91% carried by one domain, 83% of them from just
+    bigpublisher2.example and bigpublisher1.example. The TEMPLATE hash must still be indexed — the
+    discriminator depends on it.
+    """
+    conn = _make_db()
+    cid = _make_case(conn)
+    fat = [(f"net{i}.com", f"s{i}") for i in range(600)]
+    _add(conn, cid, "https://bigpublisher.com/", "bigpublisher.com",
+         _ads_json(fat, raw_text="big"))
+    _add(conn, cid, "https://smallfarm.com/", "smallfarm.com",
+         _ads_json([("clickforce.com.tw", "pub-FARM")], raw_text="small"))
+
+    signals = extract_case_signals(conn, cid, source_db="/tmp/x.db")
+    sellers = {(s["signal_value"], s["final_domain"]) for s in signals
+               if s["signal_type"] == SIGNAL_ADS_TXT_SELLER}
+    assert not any(d == "bigpublisher.com" for _, d in sellers)
+    assert ("pub-FARM", "smallfarm.com") in sellers
+    # the fat carrier still contributes its template hash
+    assert any(s["final_domain"] == "bigpublisher.com" for s in signals
+               if s["signal_type"] == SIGNAL_ADS_TXT_TEMPLATE)
+
+
+def test_index_still_records_a_shared_account_from_its_small_carrier():
+    """The floor is per-carrier, not per-account: an account shared by a fat
+    publisher and a small farm is still indexed where it is informative."""
+    conn = _make_db()
+    cid = _make_case(conn)
+    shared = ("clickforce.com.tw", "pub-SHARED")
+    fat = [(f"net{i}.com", f"s{i}") for i in range(600)] + [shared]
+    _add(conn, cid, "https://bigpublisher.com/", "bigpublisher.com",
+         _ads_json(fat, raw_text="big"))
+    _add(conn, cid, "https://smallfarm.com/", "smallfarm.com",
+         _ads_json([shared], raw_text="small"))
+    _filler(conn, cid, 5)
+
+    sellers = {(s["signal_value"], s["final_domain"])
+               for s in extract_case_signals(conn, cid, source_db="/tmp/x.db")
+               if s["signal_type"] == SIGNAL_ADS_TXT_SELLER}
+    assert ("pub-SHARED", "smallfarm.com") in sellers
+    assert ("pub-SHARED", "bigpublisher.com") not in sellers
+
+
 def test_index_emits_template_hashes():
     conn = _make_db()
     case_id = _make_case(conn)

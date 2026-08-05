@@ -42,7 +42,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
-from config import ADS_TXT_MANAGER_BREADTH
+from config import ADS_TXT_INDEX_MAX_CARRIER_ACCOUNTS, ADS_TXT_MANAGER_BREADTH
 from clustering_infra import MAJOR_AD_EXCHANGES, shared_ad_accounts
 from sql import LATEST_DONE_SCAN_RUN, latest_usable_snapshot
 
@@ -214,14 +214,18 @@ def extract_case_signals(
 
     # ── scan_run-level signals: ads.txt monetisation (Phase 8) ─────────────
     # Two signal kinds:
-    #   ads_txt_seller   — DIRECT seller account, but ONLY operator-tier ones
-    #                      (breadth below ADS_TXT_MANAGER_BREADTH). A handful
-    #                      of accounts shared by *every* domain is a shared
-    #                      monetisation manager; indexing those would flood
-    #                      recurring_signals with manager-wide noise. Rare
-    #                      accounts (incl. case-singletons) ARE indexed —
+    #   ads_txt_seller   — DIRECT seller account, but ONLY operator-tier ones.
+    #                      A handful of accounts shared by *every* domain is a
+    #                      shared monetisation manager; indexing those would
+    #                      flood recurring_signals with manager-wide noise.
+    #                      Rare accounts (incl. case-singletons) ARE indexed —
     #                      cross-case recurrence of a rare money account is
-    #                      exactly the operator signal we want.
+    #                      exactly the operator signal we want — but only when
+    #                      their CARRIER is not itself running a full
+    #                      programmatic stack (floor D below). A singleton is
+    #                      invisible to the tier machinery, so without that
+    #                      floor a large publisher's whole supply chain enters
+    #                      the index as "rare".
     #   ads_txt_template — the raw ads.txt sha256, one per domain. Cross-case
     #                      identical templates = operator reused the same file.
     ads_rows = conn.execute(
@@ -238,6 +242,7 @@ def extract_case_signals(
     parsed_ads: list[tuple] = []  # (scan_run_id, run_at, domain, ads_dict)
     case_ads_domains: set[str] = set()
     account_domains: dict[tuple[str, str], set] = defaultdict(set)
+    domain_accounts: dict[str, set] = defaultdict(set)   # carrier breadth
     for r in ads_rows:
         try:
             ads = json.loads(r["ads_txt_json"])
@@ -259,6 +264,7 @@ def extract_case_signals(
             seller_id = (rec.get("seller_id") or "").strip()
             if adsystem and seller_id:
                 account_domains[(adsystem, seller_id)].add(domain)
+                domain_accounts[domain].add((adsystem, seller_id))
 
     denom = len(case_ads_domains) or 1
 
@@ -277,6 +283,14 @@ def extract_case_signals(
         if sha and ads.get("status") == "ok" and (ads.get("records") or []):
             _emit(SIGNAL_ADS_TXT_TEMPLATE, sha, platform=None,
                   scan_run_id=srid, final_domain=domain, observed_at=run_at)
+        # Floor D — carrier breadth. A domain declaring hundreds of DIRECT
+        # accounts runs a full programmatic stack, so none of them singles out
+        # an operator. Gates the ACCOUNT signals only (the template hash above
+        # is already emitted): without it, case-singletons bypass every tier
+        # demotion and two large publishers supplied 83% of the index's
+        # seller values.
+        if len(domain_accounts[domain]) >= ADS_TXT_INDEX_MAX_CARRIER_ACCOUNTS:
+            continue
         seen_accounts: set[tuple[str, str]] = set()
         for rec in ads.get("records") or []:
             if (rec.get("relationship") or "").upper() != "DIRECT":
@@ -383,6 +397,7 @@ def lookup(
 def recurring_signals(
     index_conn: sqlite3.Connection,
     min_cases: int = 2,
+    min_domains: int = 1,
 ) -> list[dict]:
     """Signals that appear across >= `min_cases` distinct cases.
 
@@ -390,16 +405,32 @@ def recurring_signals(
     cert / registrar / ASN / domain resurfacing across separate
     investigations. Returns one row per (signal_type, signal_value) with the
     distinct-case count and the list of cases it spans.
+
+    READ `domain_count` BEFORE BELIEVING `case_count`. Cases overlap — an
+    analyst who loads a consolidated case alongside the narrower ones it was
+    built from has every signal in both, and `case_count` alone then reports
+    the same single observation as a cross-case recurrence. Measured on the
+    2026-08-05 index: 99 of 119 recurring ads.txt accounts sat on ONE domain
+    and merely spanned overlapping cases; only 20 crossed domains. A signal on
+    2+ distinct domains has genuinely resurfaced; one on a single domain has
+    only been indexed twice.
+
+    `min_domains` filters on that directly. It defaults to 1 because the test
+    is not meaningful for every signal type — `final_domain` is by definition
+    one domain, and the same site turning up in two investigations is exactly
+    what that signal is for. Rows are ordered by domain_count first, so real
+    recurrences rank above bookkeeping ones whatever the filter.
     """
     rows = index_conn.execute(
         """SELECT signal_type, signal_value,
                   COUNT(DISTINCT source_db || '|' || case_id) AS case_count,
+                  COUNT(DISTINCT final_domain) AS domain_count,
                   COUNT(*) AS hit_count
            FROM signals
            GROUP BY signal_type, signal_value
-           HAVING case_count >= ?
-           ORDER BY case_count DESC, hit_count DESC""",
-        (min_cases,),
+           HAVING case_count >= ? AND domain_count >= ?
+           ORDER BY domain_count DESC, case_count DESC, hit_count DESC""",
+        (min_cases, min_domains),
     ).fetchall()
 
     out: list[dict] = []
@@ -415,6 +446,7 @@ def recurring_signals(
             "signal_type":  r["signal_type"],
             "signal_value": r["signal_value"],
             "case_count":   r["case_count"],
+            "domain_count": r["domain_count"],
             "hit_count":    r["hit_count"],
             "platform":     next((c["platform"] for c in cases if c["platform"]), None),
             "cases":        [
