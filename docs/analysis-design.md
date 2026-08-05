@@ -264,11 +264,23 @@ OPSEC level 規則（刻意粗略，分析師最終判讀）：
 
 | tier | 條件 | 解讀 |
 |---|---|---|
-| `manager` | 名列 `MAJOR_AD_EXCHANGES`；或 breadth_ratio ≥ `ADS_TXT_MANAGER_BREADTH`；或載體多數配對共用同一疊 ads.txt；或 `global_apex_count` ≥ `ADS_TXT_MANAGER_MIN_APEXES` | 代管商／轉售網路，**不是**同操作者訊號 |
+| `manager` | **每個載體都宣告了 `MANAGERDOMAIN`**；或名列 `MAJOR_AD_EXCHANGES`；或 breadth_ratio ≥ `ADS_TXT_MANAGER_BREADTH`；或載體多數配對共用同一疊 ads.txt；或 `global_apex_count` ≥ `ADS_TXT_MANAGER_MIN_APEXES` | 代管商／轉售網路，**不是**同操作者訊號 |
 | `operator` | `global_apex_count` ≤ `ADS_TXT_OPERATOR_MAX_APEXES` | 全庫範圍內確實稀有，**強訊號** |
 | `uncertain` | 介於兩者之間 | 本機證據判不出來，**據實回報而非猜測**（見 §十二 原則 6） |
 
 **`operator` 必須被「賺到」**。舊版的預設值是 operator——沒有任何降級規則觸發就宣告同操作者，這正是 23 域的中介被判成強訊號的原因。強主張應該要求正面證據，不是預設值。
+
+### `MANAGERDOMAIN` 為什麼排在所有門檻前面
+
+上表第一個條件跟其餘四個性質不同：它不是推論，是**網站自己的聲明**。
+
+`MANAGERDOMAIN` 是 ads.txt 規格裡的變數，意思是「我的廣告由第三方代管」。一個網站這樣宣告，等於說「這份檔案裡的帳號屬於代管商，不屬於我」——**這是對自己不利的自白**，可信度遠高於任何門檻推估，也高於 SSP 在 sellers.json 裡的 `seller_type`（那是對己有利的方向，實測已證實不可信）。
+
+規則刻意嚴格：**必須「每一個」載體網域都宣告代管才降級**。只要有一個載體是自營的，那個帳號就可能真的是該操作者自己的，問題就該保持開放。
+
+實測威力：在合併語料的案件上，operator-tier 從 72 筆降到 4 筆，其中 160 筆是被這條規則降級的。它一次殺掉了三種門檻都殺不掉的假象——兩個大型發布商共用數百個帳號，而兩者都自承被代管。
+
+覆蓋率是它的限制：本機案件資料中 111 筆 ads.txt 只有 2 筆宣告了 `MANAGERDOMAIN`。但那 2 筆恰好是雜訊的最大來源。**有宣告時是決定性的，沒宣告時什麼也不說。**
 
 另外兩個實作細節：
 

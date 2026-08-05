@@ -848,6 +848,10 @@ def shared_ad_accounts(conn: sqlite3.Connection, case_id: int) -> dict:
     template_data: dict[str, set] = defaultdict(set)
     # distinct domains with a parseable ads.txt (breadth denominator)
     case_domains: set[str] = set()
+    # domain → the MANAGERDOMAIN it declares, when it declares one. ads.txt's
+    # own variable for "a third party monetises this inventory", so the
+    # accounts in that file are the manager's, not the site operator's.
+    declared_manager: dict[str, str] = {}
 
     for r in rows:
         try:
@@ -869,6 +873,9 @@ def shared_ad_accounts(conn: sqlite3.Connection, case_id: int) -> dict:
             sha = ads.get("raw_sha256")
             if sha:
                 template_data[sha].add(domain)
+            mgr = (ads.get("manager_domain") or "").strip().lower()
+            if mgr:
+                declared_manager[domain] = mgr
 
         for rec in records:
             if (rec.get("relationship") or "").upper() != "DIRECT":
@@ -946,6 +953,16 @@ def shared_ad_accounts(conn: sqlite3.Connection, case_id: int) -> dict:
         doms_sorted = sorted(entry["domains"])
         pair_ratio = _template_pair_ratio(doms_sorted)
         global_apex_count = len(global_apexes.get((adsystem, seller_id), ()))
+        # Every carrier declares a MANAGERDOMAIN => nobody carrying this
+        # account monetises for themselves, so it cannot be a same-operator
+        # signal. Stated by the sites themselves rather than inferred from a
+        # threshold, and stated against their own interest, which is why it
+        # outranks the heuristics. One self-managed carrier is enough to leave
+        # the question open — the account may genuinely be that operator's.
+        managers = sorted({declared_manager[d] for d in doms_sorted
+                           if d in declared_manager})
+        all_managed = bool(doms_sorted) and all(d in declared_manager
+                                                for d in doms_sorted)
         # Tier. `operator` is the strong claim, so it must be EARNED by
         # measured rarity rather than assumed in the absence of a demotion —
         # the previous default asserted same-operator whenever no guard fired,
@@ -957,7 +974,8 @@ def shared_ad_accounts(conn: sqlite3.Connection, case_id: int) -> dict:
         #   uncertain — in between. Neither claim is supportable from local
         #             evidence, so kwara reports the ambiguity instead of
         #             guessing (see contract 6 in docs/analysis-design.md).
-        if (adsystem in MAJOR_AD_EXCHANGES
+        if (all_managed
+                or adsystem in MAJOR_AD_EXCHANGES
                 or breadth_ratio >= ADS_TXT_MANAGER_BREADTH
                 or pair_ratio >= ADS_TXT_TEMPLATE_PAIR_RATIO
                 or global_apex_count >= ADS_TXT_MANAGER_MIN_APEXES):
@@ -976,6 +994,11 @@ def shared_ad_accounts(conn: sqlite3.Connection, case_id: int) -> dict:
             # verdict landed without re-deriving it (contract 3).
             "global_apex_count": global_apex_count,
             "pair_link_ratio":   round(pair_ratio, 3),
+            # Who the carriers say monetises them, and whether that covers all
+            # of them. An analyst reading a manager verdict should see whether
+            # it came from a first-party declaration or from a threshold.
+            "declared_managers": managers,
+            "all_carriers_managed": all_managed,
             "domains":       sorted(entry["domains"]),
             "domain_count":  domain_count,
             "url_count":     len(entry["urls"]),

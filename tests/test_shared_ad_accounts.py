@@ -433,3 +433,69 @@ def test_index_emits_template_hashes():
     tmpl = [s["signal_value"] for s in signals
             if s["signal_type"] == SIGNAL_ADS_TXT_TEMPLATE]
     assert tmpl.count("SHA_A") == 2  # one per domain — cross-case match fodder
+
+
+def _ads_with_manager(direct_sellers, manager=None, owner=None, *, raw_text=None):
+    d = _ads_json(direct_sellers, raw_text=raw_text)
+    d["manager_domain"] = manager
+    d["owner_domain"] = owner
+    return d
+
+
+def test_declared_manager_domain_demotes_without_a_threshold():
+    """ads.txt's own MANAGERDOMAIN says a third party monetises the site, so
+    the accounts in that file are the manager's, not the operator's. It is a
+    first-party statement against interest, which is why it outranks every
+    threshold — here breadth (2/7), footprint (2 apexes) and template overlap
+    all say operator, and the declaration still wins.
+    """
+    conn = _make_db()
+    cid = _make_case(conn)
+    acct = ("clickforce.com.tw", "pub-MANAGED")
+    for d in ("a.com", "b.com"):
+        _add(conn, cid, f"https://{d}/", d,
+             _ads_with_manager([acct], manager="adnetwork.example", raw_text=d))
+    _filler(conn, cid, 5)
+
+    row = next(a for a in shared_ad_accounts(conn, cid)["by_account"]
+               if (a["adsystem"], a["seller_id"]) == acct)
+    assert row["breadth_ratio"] < 0.8          # every threshold says operator
+    assert row["global_apex_count"] == 2
+    assert row["all_carriers_managed"] is True
+    assert row["declared_managers"] == ["adnetwork.example"]
+    assert row["tier"] == "manager"
+
+
+def test_one_self_managed_carrier_leaves_the_question_open():
+    """A single carrier that declares no manager is enough: the account may
+    genuinely be that operator's own, so the declaration must not demote."""
+    conn = _make_db()
+    cid = _make_case(conn)
+    acct = ("clickforce.com.tw", "pub-MIXED")
+    _add(conn, cid, "https://a.com/", "a.com",
+         _ads_with_manager([acct], manager="adnetwork.example", raw_text="a"))
+    _add(conn, cid, "https://b.com/", "b.com",
+         _ads_with_manager([acct], manager=None, raw_text="b"))
+    _filler(conn, cid, 5)
+
+    row = next(a for a in shared_ad_accounts(conn, cid)["by_account"]
+               if (a["adsystem"], a["seller_id"]) == acct)
+    assert row["all_carriers_managed"] is False
+    assert row["declared_managers"] == ["adnetwork.example"]
+    assert row["tier"] == "operator"
+
+
+def test_managers_are_reported_even_when_a_threshold_also_demotes():
+    """The analyst must be able to tell a first-party declaration from a
+    threshold guess, so the declaration travels with the row either way."""
+    conn = _make_db()
+    cid = _make_case(conn)
+    acct = ("criteo.com", "100")             # major-exchange floor also fires
+    for d in ("a.com", "b.com"):
+        _add(conn, cid, f"https://{d}/", d,
+             _ads_with_manager([acct], manager="mgr.example", raw_text=d))
+    _filler(conn, cid, 5)
+    row = next(a for a in shared_ad_accounts(conn, cid)["by_account"]
+               if (a["adsystem"], a["seller_id"]) == acct)
+    assert row["tier"] == "manager"
+    assert row["declared_managers"] == ["mgr.example"]
