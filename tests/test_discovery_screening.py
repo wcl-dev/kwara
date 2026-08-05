@@ -126,3 +126,21 @@ def test_off_site_redirect_is_never_parsed():
                          {"SHA": ["known.com"]})
     assert out["verdict"] == VERDICT_OFF_SITE
     assert out["matched_sha"] is None
+
+
+def test_screen_domains_dedups_without_losing_caller_order(monkeypatch):
+    """Callers front-load the candidates they care about (a .tw subset ahead of
+    thousands of international domains). Dedup must not scatter them: a set
+    comprehension here quietly randomised submission order through a
+    half-hour sweep."""
+    import discovery
+    monkeypatch.setattr(discovery, "screen_domain",
+                        lambda d, known, timeout=None: {
+                            "domain": d, "verdict": VERDICT_NO_MATCH,
+                            "matched_sha": None, "matched_domains": [],
+                            "record_count": 1})
+    submitted = []
+    discovery.screen_domains(
+        ["b.tw", "a.com", "b.tw", "c.com"], {}, workers=1,
+        on_result=lambda r: submitted.append(r["domain"]))
+    assert submitted == ["b.tw", "a.com", "c.com"]

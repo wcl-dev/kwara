@@ -227,7 +227,18 @@ def screen_domains(domains: Iterable[str], known: dict[str, list[str]], *,
     tool has no business hammering them. `on_result` is called per completed
     candidate so a long run can report progress.
     """
-    domains = [d for d in ({(x or "").strip().lower() for x in domains}) if d]
+    # Dedup while PRESERVING caller order. A set comprehension here silently
+    # discarded it, so a caller that had deliberately put its most relevant
+    # candidates first (e.g. .tw domains ahead of 9k international ones) got
+    # them scattered at random through a half-hour sweep.
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for x in domains:
+        d = (x or "").strip().lower()
+        if d and d not in seen:
+            seen.add(d)
+            ordered.append(d)
+    domains = ordered
     results: list[dict[str, Any]] = []
     with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
         futures = [pool.submit(screen_domain, d, known, timeout=timeout)
