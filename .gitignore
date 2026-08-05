@@ -29,8 +29,9 @@ kwara/*.csv
 whois_osint/whois_results*
 whois_osint/whois_cache.csv
 
-# Claude Code 本機設定
+# Claude Code 本機設定（settings.json 是共用的權限設定，刻意納管）
 .claude/
+!.claude/settings.json
 
 # 對外送件提案資料（與 kwara codebase 不同生命週期；放外面、不入 repo）
 FNF_OSINT_2026_*
@@ -44,30 +45,14 @@ kwara/data/*.db.*
 
 # 個人執行腳本（ad-hoc，與 kwara 工具不同生命週期；放外面、不入 repo）
 /_*.py
-# 已執行完的一次性腳本歸檔（2026-06-10 從 root 移入；保持不入 repo）
-/scripts/oneshot/
 
-# 報告產出（與 kwara 工具不同生命週期；放外面、不入 repo）
+# 案件產物（報告、排版工具鏈、採集素材）與 kwara 工具不同生命週期。
+# 2026-08-05 已全數移出至 repo 外的案件工作區；以下為防止再度累積的守門條款。
 /0510*.md
 /0510*.pdf
 /UNIFIED_CLUSTER_REPORT_*
-/kwara_分析原理.md
-/kwara_角色定位.md
-
-# qsh_pdf：報告專用內容（圖表來源、quarto 來源、編譯產物、樣式）
-# 注意：qsh_pdf/build-pdf.sh 與 qsh_pdf/pdf-style.css 是工具，不在此 ignore 範圍
-qsh_pdf/charts/*.mmd
-qsh_pdf/charts/*.png
-qsh_pdf/charts/*.svg
-qsh_pdf/charts/captions.txt
-qsh_pdf/qsh_report.qd
-qsh_pdf/smoke.qd
-qsh_pdf/report.css
-qsh_pdf/out/
-qsh_pdf/out_html/
-
-# FB 採集示範資料（demo/ 內檔案逐機更新，不入 repo）
-demo/
+/qsh_pdf/
+/demo/
 
 # 案件報告產物（含偵查資料，勿提交至公開 repo）
 reports/

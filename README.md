@@ -31,6 +31,17 @@ All evidence is stored locally in SQLite and can be exported as a ZIP evidence p
 - **Evidence pack export** — ZIP with CSVs, screenshots, HTML, HAR, audit log, SHA-256 manifest, and bilingual README
 - **Fully offline-capable** — all data stored in local SQLite; third-party services are optional
 
+## Where kwara fits
+
+kwara replaces none of the tools below. It fills the gap between them: turning an investigator's scattered findings into a package the recipient can verify without trusting the investigator.
+
+| Compared with | What they do | What kwara does |
+|---|---|---|
+| Fact-checking orgs (Cofacts, Taiwan FactCheck Center) | **Content** verification — is this claim true? | **Infrastructure** evidence — who is behind this URL, and which domains share an operator |
+| Influence-operations research (IORG, Doublethink Lab) | **Narrative** and **coordinated behaviour** research — how a story spreads | A **reproducible evidence pipeline** — infrastructure signals laid out flat for others to check |
+| WHOIS / ASN lookup tools | One domain, one query — a privacy proxy ends the trail | **Cross-domain clustering** — whether pixels, certificates, parameters, and headers link the domains |
+| General OSINT suites (Maltego, SpiderFoot) | Broad reach, needs a skilled operator, no case governance | **Per-case governance + evidence-pack export + RFC 3161 timestamps** — deliverable as-is |
+
 ## Requirements
 
 - **Python 3.10+**
@@ -110,6 +121,7 @@ command reference, the tool list, and the reasoning.
 | `kwara/config.py` | Centralized configuration and environment variable defaults |
 | `kwara/corroboration.py` | Third-party evidence services (Wayback, urlscan, RFC 3161) |
 | `docs/agent-interface.md` | Full CLI command reference and MCP tool list |
+| `docs/analysis-design.md` | How the analysis layer works and why — algorithms, thresholds, invariants |
 | `docs/` | Illustrated crosswalk: forensic targets ↔ the digital-advertising ecosystem (HTML) |
 | `restore_from_export.py` | Restore database from an exported evidence pack ZIP |
 
@@ -118,4 +130,5 @@ command reference, the tool list, and the reasoning.
 ## Learn more
 
 - **Usage guide** — [`kwara_guide.md`](kwara_guide.md)
+- **Analysis design** — [`docs/analysis-design.md`](docs/analysis-design.md) explains how each clustering function works and why it is cut that way: the two kinds of "shared parameter", certificate batch-issuance windows, why fingerprint regexes must be invocation-anchored, and the invariants a refactor must not break. Written in Traditional Chinese.
 - **Ad-tech crosswalk** — a visual, encyclopedia-style explainer mapping kwara's forensic targets to the digital-advertising ecosystem (SSP/DSP/DMP, IAB `ads.txt`/`sellers.json`, tracking pixels). Read it online at [wcl-dev.github.io/kwara/kwara_adtech_crosswalk.en.html](https://wcl-dev.github.io/kwara/kwara_adtech_crosswalk.en.html) ([中文版](https://wcl-dev.github.io/kwara/kwara_adtech_crosswalk.html)), or open `docs/kwara_adtech_crosswalk.en.html` in a browser after cloning.

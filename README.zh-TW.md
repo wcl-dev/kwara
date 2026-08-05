@@ -31,6 +31,17 @@ kwara 接收社群貼文中的可疑 URL，引導你走過六步驟的證據鏈�
 - **證據封包匯出** — ZIP 含 CSV、截圖、HTML、HAR、稽核紀錄、SHA-256 manifest、中英雙語 README
 - **完全可離線運作** — 所有資料存於本機 SQLite；第三方服務為選用
 
+## 與既有工具的分野
+
+kwara 不取代下列任何一個。它補位的是「**把調查者口袋裡的零散證據，組裝成一份對方不必信任你就能驗證的封包**」這一段。
+
+| 對比對象 | 他們做什麼 | kwara 做什麼 |
+|---|---|---|
+| Cofacts、台灣事實查核中心 | **內容**查核——這個訊息真假 | **基礎設施**蒐證——這個 URL 背後是誰、跟哪些網域同源 |
+| IORG、台灣民主實驗室 | **敘事**與**協同行為**研究——故事怎麼擴散 | **可重現的證據管線**——把基礎設施訊號攤平給其他人核對 |
+| 一般 WHOIS／ASN 查詢工具 | 單域單次查詢，隱私代理一遮就斷 | **跨域聚合**——多域的 pixel／憑證／參數／header 是否 cross-link |
+| Maltego、SpiderFoot 等通用 OSINT | 廣度大、需要熟手調教、無案件治理 | **單一案件治理＋證據封包匯出＋RFC 3161 時間戳**——可以直接交付 |
+
 ## 環境需求
 
 - **Python 3.10+**
@@ -108,6 +119,7 @@ claude mcp add kwara -- /abs/path/to/.venv/bin/python -m kwara.mcp_server
 | `kwara/config.py` | 集中配置與環境變數預設值 |
 | `kwara/corroboration.py` | 第三方證據服務（Wayback、urlscan、RFC 3161） |
 | `docs/agent-interface.md` | 完整 CLI 指令參考與 MCP 工具清單 |
+| `docs/analysis-design.md` | 分析層原理與設計——演算法、門檻、必須保留的契約 |
 | `docs/` | 圖解對照誌：鑑識標的 ↔ 數位廣告生態（HTML） |
 | `restore_from_export.py` | 從匯出的 ZIP 證據封包還原資料庫 |
 
@@ -116,4 +128,5 @@ claude mcp add kwara -- /abs/path/to/.venv/bin/python -m kwara.mcp_server
 ## 延伸閱讀
 
 - **操作說明** — [`kwara_說明文件.md`](kwara_說明文件.md)
+- **分析層設計** — [`docs/analysis-design.md`](docs/analysis-design.md) 說明每個聚類函式怎麼運作、為什麼這樣切：兩種「共用參數」的差異、憑證批次簽發窗口、fingerprint regex 為何必須錨定 invocation context，以及重構時不能破壞的契約。
 - **廣告生態對照誌** — 圖解 kwara 各鑑識標的如何對應數位廣告產業（SSP／DSP／DMP、IAB `ads.txt`／`sellers.json`、追蹤 pixel）。線上閱讀：[wcl-dev.github.io/kwara/kwara_adtech_crosswalk.html](https://wcl-dev.github.io/kwara/kwara_adtech_crosswalk.html)（[English](https://wcl-dev.github.io/kwara/kwara_adtech_crosswalk.en.html)），或 clone 後用瀏覽器開啟 `docs/kwara_adtech_crosswalk.html`。

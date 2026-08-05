@@ -76,7 +76,7 @@ cases（案件）
 - **行為觀察** — Cloaking（帶參數 vs 不帶參數的內容差異）＋ OPSEC（lightweight vs Playwright 成功率對比，揭露「擋爬蟲、放瀏覽器」的 WAF 部署）
 - **伺服器標頭鑑識** — 每跳 response header：per-domain 常數、跨域 server 模板、偽造版本字串、Set-Cookie origin 洩漏
 
-> **Cloaking / OPSEC / Headers 是證據力最強的訊號層**，其判定會回灌到 Insights 摘要的最上方。詳見 [kwara_分析原理.md](kwara_分析原理.md)。
+> **Cloaking / OPSEC / Headers 是證據力最強的訊號層**，其判定會回灌到 Insights 摘要的最上方。詳見 [docs/analysis-design.md](docs/analysis-design.md)。
 
 **關聯圖（Graph）** — 網域與共用識別資產的關聯圖，按操作者群組配色。無介面用法可輸出成 SVG/PNG 檔。
 
