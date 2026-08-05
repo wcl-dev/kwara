@@ -347,3 +347,28 @@ TSA_URL: str = os.environ.get(
 ADS_TXT_PLATFORM_ACCOUNTS: int = int(
     os.environ.get("KWARA_ADS_TXT_PLATFORM_ACCOUNTS", "300")
 )
+
+
+# ── Reference prevalence for ads.txt accounts (prevalence.py) ────────────
+# Rarity only means something against a population of NORMAL sites; an
+# investigation corpus is all suspects. This table records how many reference
+# publishers carry each DIRECT account, and lets tier demote an account on
+# measured commodity-ness instead of on a threshold.
+#
+# OPTIONAL. A machine may not have built one, and the analysis must run
+# without it rather than treat every account as rare — prevalence.load()
+# returns None and the tier falls back to its thresholds.
+ADS_TXT_PREVALENCE_PATH: str = os.path.expanduser(os.environ.get(
+    "KWARA_ADS_TXT_PREVALENCE_PATH",
+    os.path.join(os.path.dirname(_THIS_DIR), "discovery", "data",
+                 "reference_prevalence.json"),
+))
+# An account carried by at least this fraction of ordinary publishers cannot
+# distinguish an operator. Calibrated against the 2026-08-05 sweep of 5,232
+# reference sites: the one genuine operator account measured 0.00% (an AdSense
+# pub on three sibling domains), while every commodity account that survived
+# the other guards ran 1.7%-45%. 0.5% is 26 of those sites — far above any
+# plausible single operator's own estate, far below the noise floor.
+ADS_TXT_COMMODITY_PREVALENCE: float = float(
+    os.environ.get("KWARA_ADS_TXT_COMMODITY_PREVALENCE", "0.005")
+)

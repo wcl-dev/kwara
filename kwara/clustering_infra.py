@@ -26,7 +26,9 @@ from urllib.parse import parse_qs, urlparse
 
 import ipaddress
 
+import prevalence as _prevalence
 from config import (
+    ADS_TXT_COMMODITY_PREVALENCE,
     ADS_TXT_MANAGER_BREADTH,
     ADS_TXT_MANAGER_MIN_APEXES,
     ADS_TXT_OPERATOR_MAX_APEXES,
@@ -901,6 +903,9 @@ def shared_ad_accounts(conn: sqlite3.Connection, case_id: int) -> dict:
     # the analyst happened to load, so a case-relative measure lets corpus
     # composition decide the verdict. See config.ADS_TXT_*_APEXES.
     global_apexes = _account_apex_footprint(conn)
+    # Optional reference table — None on a machine that has not built one, in
+    # which case tier falls back to its thresholds rather than assuming.
+    ref = _prevalence.load()
 
     # Inverse index: domain → set of its DIRECT account keys (for overlap).
     domain_accounts: dict[str, set] = defaultdict(set)
@@ -959,6 +964,12 @@ def shared_ad_accounts(conn: sqlite3.Connection, case_id: int) -> dict:
         # threshold, and stated against their own interest, which is why it
         # outranks the heuristics. One self-managed carrier is enough to leave
         # the question open — the account may genuinely be that operator's.
+        # Measured commodity-ness beats every threshold that tries to infer
+        # it. None means the reference table has nothing on this account —
+        # which is NOT the same as rare, so it demotes nothing.
+        ref_ratio = ref.ratio(adsystem, seller_id) if ref else None
+        too_common = (ref_ratio is not None
+                      and ref_ratio >= ADS_TXT_COMMODITY_PREVALENCE)
         managers = sorted({declared_manager[d] for d in doms_sorted
                            if d in declared_manager})
         all_managed = bool(doms_sorted) and all(d in declared_manager
@@ -975,6 +986,7 @@ def shared_ad_accounts(conn: sqlite3.Connection, case_id: int) -> dict:
         #             evidence, so kwara reports the ambiguity instead of
         #             guessing (see contract 6 in docs/analysis-design.md).
         if (all_managed
+                or too_common
                 or adsystem in MAJOR_AD_EXCHANGES
                 or breadth_ratio >= ADS_TXT_MANAGER_BREADTH
                 or pair_ratio >= ADS_TXT_TEMPLATE_PAIR_RATIO
@@ -999,6 +1011,9 @@ def shared_ad_accounts(conn: sqlite3.Connection, case_id: int) -> dict:
             # it came from a first-party declaration or from a threshold.
             "declared_managers": managers,
             "all_carriers_managed": all_managed,
+            # None = the reference table has never seen this account.
+            "reference_prevalence": (None if ref_ratio is None
+                                     else round(ref_ratio, 5)),
             "domains":       sorted(entry["domains"]),
             "domain_count":  domain_count,
             "url_count":     len(entry["urls"]),
