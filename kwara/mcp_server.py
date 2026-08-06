@@ -18,6 +18,10 @@ Two things are intentionally NOT exposed:
   • **Unbounded snapshot capture.** Playwright captures take minutes and can
     hit dozens of live scam sites. `capture_snapshots` requires an explicit
     limit so a single tool call can't turn into an hour-long crawl.
+  • **Unbounded candidate screening.** `screen_candidates` contacts every
+    candidate directly, and a sweep list runs to five figures. Same reasoning
+    as snapshots: it is capped per call so an agent cannot start a ten-thousand
+    site sweep unattended. Larger runs belong in the CLI, with a human there.
 """
 import argparse
 import os
@@ -226,6 +230,100 @@ def list_evidence(case: int, db: str | None = None) -> dict:
 def export_case(case: int, db: str | None = None) -> dict:
     """Export the case as a ZIP evidence pack: CSVs, screenshots, HTML, HAR, audit log, SHA-256 manifest."""
     return _call(cli.cmd_export_case, case=case, db=db)
+
+
+
+# ---------------------------------------------------------------------------
+# Discovery — finding candidates rather than working a known case
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def extract_candidates(
+    sellers_json: list[str],
+    out: str | None = None,
+    exclude_scanned: bool = False,
+    db: str | None = None,
+) -> dict:
+    """Publisher domains listed in SSPs' sellers.json files — a sweep's candidates.
+
+    sellers.json is the mirror of ads.txt: it sits on the ad exchange and names
+    the publishers it works with, so one public file yields thousands of
+    candidates without crawling. Offline — it only reads files you already have.
+
+    Pick the SSPs deliberately. Large exchanges serve mainstream publishers
+    alongside the targets and dilute the pool; a small regional SSP is far
+    denser. `exclude_scanned` drops domains this case DB has already seen.
+    """
+    return _call(cli.cmd_discover_candidates, sellers_json=sellers_json,
+                 out=out, exclude_scanned=exclude_scanned, db=db)
+
+
+@mcp.tool()
+def screen_candidates(
+    domains: str,
+    limit: int = 100,
+    bank: str | None = None,
+    db: str | None = None,
+    index_db: str | None = None,
+) -> dict:
+    """Fetch each candidate's /ads.txt and match it against known templates.
+
+    OUTBOUND: contacts every candidate directly, one small request each. Capped
+    per call (default 100, max 500) — run it repeatedly to work through a list
+    rather than asking for a whole sweep in one go.
+
+    A byte-identical ads.txt means the same deployer, which is the one ads.txt
+    signal strong enough to bind an operator group. A miss is reported as
+    `no_match`, never as clean: this stage can promote a candidate, never
+    exonerate one.
+
+    Pass `bank` to keep the parsed observations — they are the input to
+    `cluster_observations` and `build_prevalence_table`, and re-fetching them
+    later means hitting every site again.
+    """
+    limit = max(1, min(int(limit), 500))
+    return _call(cli.cmd_discover_screen, domains=domains, limit=limit,
+                 bank=bank, workers=None, db=db, index_db=index_db, quiet=True)
+
+
+@mcp.tool()
+def cluster_observations(observations: str, portfolio_only: bool = False) -> dict:
+    """Group banked observations that serve a byte-identical ads.txt as each other.
+
+    Offline. Unlike screening, this needs no prior knowledge of any domain — it
+    asks which candidates share a file with one another, so it finds operators
+    the index has never seen. `portfolio_only` drops templates carrying
+    hundreds of accounts, which are a monetisation platform emitting one file
+    for its clients rather than one operator's own estate.
+
+    Clusters found here are leads, not evidence. Ingest them into a case and
+    run attribution: tracking IDs cross template clusters and templates do not,
+    so ads.txt alone understates how far an operator reaches.
+    """
+    return _call(cli.cmd_discover_cluster, observations=observations,
+                 portfolio_only=portfolio_only)
+
+
+@mcp.tool()
+def build_prevalence_table(
+    observations: str,
+    out: str,
+    source: str | None = None,
+) -> dict:
+    """Build the reference table that tells common ad accounts from rare ones.
+
+    Offline. Every domain in an investigation is a suspect, so rarity measured
+    inside a case measures nothing — accounts that read as strong evidence turn
+    out to sit on a third of all ordinary publishers. This counts how many
+    sites in an OUTSIDE population carry each account, and the tier logic reads
+    it to demote the commodity ones.
+
+    Feed it a sweep of ordinary publishers, not your own case domains: doing
+    the latter rebuilds the exact bias the table exists to remove. Record what
+    was swept in `source`.
+    """
+    return _call(cli.cmd_discover_prevalence, observations=observations,
+                 out=out, source=source)
 
 
 def _set_lang(lang: str) -> None:

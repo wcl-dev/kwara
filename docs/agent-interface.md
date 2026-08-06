@@ -268,3 +268,15 @@ quietly diverge.
 - `kwara/i18n.py` — Streamlit is now imported lazily and optionally, so a
   headless process neither pulls in the UI framework nor emits
   "missing ScriptRunContext" warnings.
+
+
+### MCP 的 discovery 工具
+
+| 工具 | 對外？ | 說明 |
+|---|---|---|
+| `extract_candidates` | 否 | 從手上的 sellers.json 取出候選發布商網域 |
+| `screen_candidates` | **是** | 抓候選的 /ads.txt 比對已知指紋。**每次上限 500、預設 100** |
+| `cluster_observations` | 否 | 讓已存的觀測彼此分群，不需事先認識任何網域 |
+| `build_prevalence_table` | 否 | 建參照母體表，tier 判定會讀它 |
+
+`screen_candidates` 設上限的理由與 `capture_snapshots` 相同：它直接造訪每一個候選，而掃描清單動輒五位數。agent 不該一次呼叫就啟動上萬網站的掃描；更大的批次走 CLI，那裡有人在場。
