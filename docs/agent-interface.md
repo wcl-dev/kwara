@@ -166,6 +166,33 @@ an audit log, a SHA-256 manifest, and a bilingual README.
 
 ---
 
+## `discover` — 候選篩選漏斗
+
+**這一組會對外連線**，直接造訪候選網站。完整原理見 [analysis-design.md](analysis-design.md) §十一。
+
+```bash
+# 1. 從 SSP 的 sellers.json 取出候選發布商網域
+python -m kwara.cli discover candidates ssp1.json ssp2.json \
+    --out candidates.txt --exclude-scanned
+
+# 2. 抓每個候選的 /ads.txt，比對索引裡的已知模板
+#    --bank 是重點：把觀測存下來，它同時是參照母體與自我分群的輸入
+python -m kwara.cli discover screen --domains candidates.txt \
+    --bank observations.jsonl
+
+# 3. 讓候選彼此分群（不需要事先認識任何網域）
+python -m kwara.cli discover cluster --observations observations.jsonl \
+    --portfolio-only
+
+# 4. 用觀測建參照母體——tier 判定會讀它
+python -m kwara.cli discover prevalence --observations observations.jsonl \
+    --out discovery/data/reference_prevalence.json
+```
+
+挑 SSP 要挑冷門的：大型交易所同時服務主流發布商，池子會被稀釋（9,501 個候選命中 1 個），小型區域 SSP 的名單密度高得多（666 個候選命中 2 個）。
+
+`screen` 只能把候選升級，不能替它開脫——未命中回報 `no_match`，不是「乾淨」。
+
 ## MCP server
 
 ### Install

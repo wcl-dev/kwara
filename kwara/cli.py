@@ -467,6 +467,101 @@ def _global_parser() -> argparse.ArgumentParser:
 _G = _global_parser()
 
 
+
+# ── discover ───────────────────────────────────────────────────────────────
+# The screening funnel. Outbound work here contacts candidate sites directly,
+# so every command that does says so on stderr before it starts.
+
+def cmd_discover_candidates(args):
+    import discovery
+    doms = discovery.candidates_from_sellers_json(args.sellers_json)
+    if args.exclude_scanned:
+        from urllib.parse import urlparse
+        from utils.domain import extract_domain_from_url
+        conn = _open_db(args)
+        seen = {extract_domain_from_url(r[0] or "") for r in conn.execute(
+            "SELECT final_url FROM scan_runs WHERE final_url IS NOT NULL")}
+        doms = [d for d in doms if d not in seen]
+    if args.out:
+        with open(args.out, "w", encoding="utf-8") as fh:
+            fh.write("\n".join(doms) + "\n")
+    return {"candidates": len(doms), "out": args.out,
+            "domains": None if args.out else doms}
+
+
+def cmd_discover_screen(args):
+    import discovery
+    from index_db import get_index_conn
+    known = discovery.known_templates(get_index_conn(_index_path(args)))
+    with open(args.domains, encoding="utf-8") as fh:
+        doms = [l.strip() for l in fh if l.strip() and not l.startswith("#")]
+    if args.limit:
+        doms = doms[:args.limit]
+    if not args.quiet:
+        _err(f"screening {len(doms)} candidates against {len(known)} known "
+             f"templates — this contacts each one directly")
+    done = [0]
+
+    def progress(_r):
+        done[0] += 1
+        if not args.quiet and done[0] % 250 == 0:
+            _err(f"  {done[0]}/{len(doms)}")
+
+    from config import DISCOVERY_WORKERS
+    obs = discovery.screen_domains(doms, known,
+                                   workers=args.workers or DISCOVERY_WORKERS,
+                                   on_result=progress)
+    # Banking is the default, not a flag to remember: the sweep pays for this
+    # data anyway and it is the reference population plus the clustering input.
+    if args.bank:
+        with open(args.bank, "w", encoding="utf-8") as fh:
+            for o in obs:
+                fh.write(json.dumps(o, ensure_ascii=False) + "\n")
+    from collections import Counter
+    hits = [o for o in obs if o["verdict"] == discovery.VERDICT_TEMPLATE_MATCH]
+    return {"screened": len(obs), "banked_to": args.bank,
+            "verdicts": dict(Counter(o["verdict"] for o in obs)),
+            "hits": [{"domain": h["domain"], "matched": h["matched_domains"]}
+                     for h in hits]}
+
+
+def cmd_discover_cluster(args):
+    import discovery
+    obs = _read_observations(args.observations)
+    clusters = discovery.cluster_by_template(obs)
+    if args.portfolio_only:
+        clusters = [c for c in clusters if c["kind"] == "portfolio"]
+    return {"observations": len(obs), "clusters": len(clusters),
+            "domains_clustered": sum(c["domain_count"] for c in clusters),
+            "results": clusters}
+
+
+def cmd_discover_prevalence(args):
+    import discovery
+    obs = _read_observations(args.observations)
+    table = discovery.build_prevalence(obs)
+    table["source"] = args.source or f"built from {args.observations}"
+    with open(args.out, "w", encoding="utf-8") as fh:
+        json.dump(table, fh, ensure_ascii=False)
+    return {"out": args.out, "site_count": table["site_count"],
+            "accounts": len(table["accounts"])}
+
+
+def _read_observations(path: str) -> list:
+    """Accept either the JSONL a sweep banks or a JSON array."""
+    with open(path, encoding="utf-8") as fh:
+        head = fh.read(1)
+        fh.seek(0)
+        if head == "[":
+            return json.load(fh)
+        return [json.loads(l) for l in fh if l.strip()]
+
+
+def _index_path(args) -> str:
+    from config import INDEX_DB_PATH
+    return getattr(args, "index_db", None) or INDEX_DB_PATH
+
+
 def _leaf(group, name: str, **kw) -> argparse.ArgumentParser:
     """A leaf subcommand that also accepts the global flags."""
     return group.add_parser(name, parents=[_G], **kw)
@@ -594,6 +689,43 @@ def build_parser() -> argparse.ArgumentParser:
     a_graph.add_argument("--include-dot", action="store_true",
                          help="include the DOT source in JSON output")
     a_graph.set_defaults(fn=cmd_analyze_graph)
+
+    # ── discover ──────────────────────────────────────────────────────────
+    dis = sub.add_parser(
+        "discover",
+        help="candidate screening funnel (OUTBOUND: contacts candidate sites)"
+    ).add_subparsers(dest="cmd", required=True)
+
+    d_cand = _leaf(dis, "candidates",
+                   help="extract publisher domains from SSPs' sellers.json")
+    d_cand.add_argument("sellers_json", nargs="+")
+    d_cand.add_argument("--out", help="write one domain per line to this file")
+    d_cand.add_argument("--exclude-scanned", action="store_true",
+                        help="drop domains this case DB has already scanned")
+    d_cand.set_defaults(fn=cmd_discover_candidates)
+
+    d_scr = _leaf(dis, "screen",
+                  help="fetch each candidate's /ads.txt and match known templates")
+    d_scr.add_argument("--domains", required=True, help="one domain per line")
+    d_scr.add_argument("--bank", help="write the observations here (JSONL) — "
+                                      "the reference population and clustering input")
+    d_scr.add_argument("--limit", type=int)
+    d_scr.add_argument("--workers", type=int, default=None)
+    d_scr.set_defaults(fn=cmd_discover_screen)
+
+    d_clu = _leaf(dis, "cluster",
+                  help="group banked observations sharing a byte-identical ads.txt")
+    d_clu.add_argument("--observations", required=True)
+    d_clu.add_argument("--portfolio-only", action="store_true",
+                       help="drop platform-generated templates")
+    d_clu.set_defaults(fn=cmd_discover_cluster)
+
+    d_prev = _leaf(dis, "prevalence",
+                   help="build the reference prevalence table from observations")
+    d_prev.add_argument("--observations", required=True)
+    d_prev.add_argument("--out", required=True)
+    d_prev.add_argument("--source", help="note describing the population")
+    d_prev.set_defaults(fn=cmd_discover_prevalence)
 
     # ── index ─────────────────────────────────────────────────────────────
     idx = sub.add_parser("index", help="cross-case signal index").add_subparsers(

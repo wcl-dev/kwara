@@ -45,6 +45,7 @@ import sqlite3
 from typing import Any, Iterable
 
 import hashlib
+import json
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
@@ -279,12 +280,26 @@ def screen_domain(domain: str, known: dict[str, list[str]], *,
     domain = (domain or "").strip().lower().rstrip("/")
     if not domain:
         return {"domain": domain, "verdict": VERDICT_UNREACHABLE,
-                "matched_sha": None, "matched_domains": [], "record_count": 0}
+                "matched_sha": None, "matched_domains": [], "record_count": 0,
+                "raw_sha256": None, "accounts": []}
     try:
         ads = fetch_for_screening(domain, timeout=timeout)
     except Exception:                       # network layer already soft-fails;
         ads = None                          # this is the belt-and-braces case
-    return {"domain": domain, **screen_ads_txt(ads, known)}
+    ads = ads or {}
+    # The parsed accounts travel with the verdict rather than being dropped.
+    # The sweep pays for this data either way — it is the reference population
+    # and the input to self-clustering — and twice during the 2026-08-05 run it
+    # was parsed and thrown away, costing a full re-sweep each time. Keeping it
+    # must not depend on the caller remembering to ask.
+    accounts = sorted({(str(r.get("adsystem") or "").lower(),
+                        str(r.get("seller_id") or "").strip())
+                       for r in (ads.get("records") or [])
+                       if (r.get("relationship") or "").upper() == "DIRECT"
+                       and r.get("adsystem") and r.get("seller_id")})
+    return {"domain": domain, **screen_ads_txt(ads or None, known),
+            "raw_sha256": ads.get("raw_sha256"),
+            "accounts": [list(a) for a in accounts]}
 
 
 def screen_domains(domains: Iterable[str], known: dict[str, list[str]], *,
@@ -332,3 +347,61 @@ def screen_domains(domains: Iterable[str], known: dict[str, list[str]], *,
              VERDICT_NO_ADS_TXT: 2, VERDICT_OFF_SITE: 3, VERDICT_UNREACHABLE: 4}
     results.sort(key=lambda r: (order.get(r["verdict"], 9), r["domain"]))
     return results
+
+
+def candidates_from_sellers_json(paths: Iterable[str]) -> list[str]:
+    """Registrable domains listed as publishers in SSPs' sellers.json files.
+
+    The candidate population for a sweep. sellers.json is the mirror image of
+    ads.txt — it sits on the SSP and names the publishers it works with, so one
+    public file yields thousands of candidates without a crawl.
+
+    Choose the SSPs deliberately: on the 2026-08-05 sweeps the large exchanges
+    served mainstream publishers alongside the targets and diluted the pool
+    (9,501 candidates, 1 find), while a small regional SSP ran 39% .tw
+    (666 candidates, 2 finds). Obscure and frequent in your known targets'
+    ads.txt beats big.
+    """
+    out: set[str] = set()
+    for path in paths:
+        try:
+            with open(path, encoding="utf-8") as fh:
+                blob = json.load(fh)
+        except (OSError, ValueError):
+            continue
+        for seller in (blob.get("sellers") or []):
+            raw = (seller.get("domain") or "").strip().lower()
+            if not raw:
+                continue                    # is_confidential entries land here
+            apex = extract_domain_from_url(raw)
+            if apex:
+                out.add(apex)
+    return sorted(out)
+
+
+def build_prevalence(observations: Iterable[dict[str, Any]]) -> dict[str, Any]:
+    """Reference table: how many sites carry each DIRECT account.
+
+    Built from a sweep's own observations, so the population is whatever was
+    swept — record that in `source` and keep it honest, because the table's
+    whole job is to be an OUTSIDE population. Feeding it an investigation's own
+    domains would rebuild the very bias it exists to remove.
+    """
+    counts: dict[str, int] = defaultdict(int)
+    sites: set[str] = set()
+    for o in observations:
+        if o.get("status") != "ok":
+            continue
+        domain = (o.get("domain") or "").strip().lower()
+        if not domain:
+            continue
+        sites.add(domain)
+        for acct in (o.get("accounts") or []):
+            if len(acct) == 2 and all(acct):
+                counts[f"{str(acct[0]).lower()}|{str(acct[1]).strip()}"] += 1
+    return {
+        "schema": "kwara-ads-prevalence/1",
+        "site_count": len(sites),
+        "note": "count = number of reference sites carrying this DIRECT account",
+        "accounts": dict(sorted(counts.items(), key=lambda kv: -kv[1])),
+    }
