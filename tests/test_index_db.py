@@ -314,3 +314,48 @@ def test_har_endpoint_drops_whitelisted_noise():
             extract_case_signals(conn, cid, source_db="/tmp/x.db")
             if s["signal_type"] == SIGNAL_HAR_ENDPOINT}
     assert vals == {"example.org"}
+
+
+def test_operator_cross_links_finds_an_endpoint_that_is_also_a_landing():
+    """The one endpoint read that needs no threshold. Found on the real index:
+    three QSH landings load from statics.privatecdn.example and s1.privatecdn2.example, the
+    01-family cluster's private CDN — a link that had sat in the HAR for three
+    months and contradicted a conclusion drawn from ads.txt alone."""
+    from index_db import operator_cross_links
+    conn = get_index_conn(os.path.join(tempfile.mkdtemp(), "i.db"))
+
+    def put(stype, value, domain, case_id=1, srid=1):
+        conn.execute(
+            """INSERT OR REPLACE INTO signals (signal_type, signal_value, platform,
+               source_db, case_id, case_title, scan_run_id, final_domain,
+               observed_at, indexed_at)
+               VALUES (?,?,NULL,'/db',?,'t',?,?,'n','n')""",
+            (stype, value, case_id, srid, domain))
+
+    put(SIGNAL_FINAL_DOMAIN, "assets.example", "assets.example", case_id=2)
+    put(SIGNAL_HAR_ENDPOINT, "assets.example", "farm-a.com", srid=1)
+    put(SIGNAL_HAR_ENDPOINT, "assets.example", "farm-b.com", srid=2)
+    put(SIGNAL_HAR_ENDPOINT, "cdn.unrelated", "farm-a.com", srid=3)
+    conn.commit()
+
+    links = operator_cross_links(conn)
+    assert [l["endpoint"] for l in links] == ["assets.example"]
+    assert links[0]["called_by"] == ["farm-a.com", "farm-b.com"]
+    assert links[0]["investigated_as_landing_in"][0]["case_id"] == 2
+
+
+def test_cross_links_ignore_a_domain_loading_its_own_assets():
+    from index_db import operator_cross_links
+    conn = get_index_conn(os.path.join(tempfile.mkdtemp(), "i.db"))
+    conn.execute(
+        """INSERT INTO signals (signal_type, signal_value, platform, source_db,
+           case_id, case_title, scan_run_id, final_domain, observed_at, indexed_at)
+           VALUES (?,?,NULL,'/db',1,'t',1,?,'n','n')""",
+        (SIGNAL_FINAL_DOMAIN, "farm.com", "farm.com"))
+    conn.execute(
+        """INSERT INTO signals (signal_type, signal_value, platform, source_db,
+           case_id, case_title, scan_run_id, final_domain, observed_at, indexed_at)
+           VALUES (?,?,NULL,'/db',1,'t',2,?,'n','n')""",
+        (SIGNAL_HAR_ENDPOINT, "farm.com", "www.farm.com"))
+    conn.commit()
+    assert operator_cross_links(conn) == []

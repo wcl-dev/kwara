@@ -411,6 +411,72 @@ def extract_case_signals(
     return out
 
 
+
+def operator_cross_links(index_conn: sqlite3.Connection) -> list[dict]:
+    """Third-party endpoints that are THEMSELVES landing domains in the index.
+
+    The sharpest read available on HAR endpoints, and the only one that needs
+    no threshold. Most of what the endpoint index records is ad-tech a page
+    happened to load, and rarity cannot separate that from operator-run
+    infrastructure — an investigation corpus is all suspects, so a DSP only one
+    landing page called looks exactly as rare as a private asset host. This cut
+    sidesteps the question: if a landing page fetches resources from a host
+    that is itself a domain under investigation, the two are wired together,
+    whatever either one's ads.txt says.
+
+    Found on the first run, from captures taken in May 2026: hubsite.example,
+    satellitesite.example and satellite2site.example (QSH) all load from statics.privatecdn.example and
+    s1.privatecdn2.example — the 01-family cluster's private CDN. That link had been in
+    the HAR for three months and contradicted a conclusion drawn from ads.txt
+    account overlap, which was correct about the account layer and wrong to be
+    read as "no link at all".
+
+    Returns one row per endpoint, with who calls it and where it appears as a
+    landing itself, so both sides of the link are visible.
+    """
+    landing_apex: dict[str, set] = defaultdict(set)
+    for r in index_conn.execute(
+        "SELECT DISTINCT signal_value, case_id, case_title FROM signals "
+        "WHERE signal_type = ?", (SIGNAL_FINAL_DOMAIN,),
+    ):
+        apex = extract_domain_from_url(r["signal_value"] or "")
+        if apex:
+            landing_apex[apex].add((r["case_id"], r["case_title"] or ""))
+
+    out: list[dict] = []
+    for r in index_conn.execute(
+        """SELECT signal_value,
+                  COUNT(DISTINCT final_domain) AS caller_count,
+                  COUNT(DISTINCT case_id) AS case_count
+             FROM signals WHERE signal_type = ?
+            GROUP BY signal_value""", (SIGNAL_HAR_ENDPOINT,),
+    ).fetchall():
+        endpoint = r["signal_value"]
+        if endpoint not in landing_apex:
+            continue
+        callers = [c["final_domain"] for c in index_conn.execute(
+            "SELECT DISTINCT final_domain FROM signals "
+            "WHERE signal_type = ? AND signal_value = ? AND final_domain IS NOT NULL "
+            "ORDER BY final_domain", (SIGNAL_HAR_ENDPOINT, endpoint))]
+        # A domain loading its own apex's assets is not a cross-link.
+        callers = [c for c in callers
+                   if extract_domain_from_url(c or "") != endpoint]
+        if not callers:
+            continue
+        out.append({
+            "endpoint":      endpoint,
+            "called_by":     callers,
+            "caller_count":  len(callers),
+            "case_count":    r["case_count"],
+            "investigated_as_landing_in": sorted(
+                [{"case_id": cid, "case_title": title}
+                 for cid, title in landing_apex[endpoint]],
+                key=lambda x: x["case_id"]),
+        })
+    out.sort(key=lambda x: (-x["caller_count"], x["endpoint"]))
+    return out
+
+
 def _issuer_text(issuer) -> str:
     """Best-effort short issuer label from a cert issuer DN dict."""
     if not isinstance(issuer, dict):

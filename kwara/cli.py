@@ -372,6 +372,11 @@ def cmd_index_build(args):
     return {"case_id": args.case, "signals_indexed": written}
 
 
+def cmd_index_crosslinks(args):
+    from index_db import get_index_conn, operator_cross_links
+    return {"cross_links": operator_cross_links(get_index_conn(_index_path(args)))}
+
+
 def cmd_index_lookup(args):
     from index_db import lookup
     hits = lookup(_open_index(args), args.value, signal_type=args.type)
@@ -741,6 +746,10 @@ def build_parser() -> argparse.ArgumentParser:
     x_look.add_argument("--type", choices=sorted(ALL_SIGNAL_TYPES),
                         help="constrain to one signal type")
     x_look.set_defaults(fn=cmd_index_lookup)
+
+    x_xl = _leaf(idx, "crosslinks",
+                 help="endpoints that are themselves investigated landing domains")
+    x_xl.set_defaults(fn=cmd_index_crosslinks)
 
     x_rec = _leaf(idx, "recurring", help="signals spanning multiple cases")
     x_rec.add_argument("--min-cases", type=int, default=2)

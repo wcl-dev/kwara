@@ -207,6 +207,21 @@ def lookup_signal(
 
 
 @mcp.tool()
+def operator_cross_links(index_db: str | None = None) -> dict:
+    """Third-party endpoints that are THEMSELVES investigated landing domains.
+
+    The sharpest read on endpoint data and the only one needing no threshold.
+    Most endpoints are ad-tech a page happened to load, and rarity cannot
+    separate that from operator infrastructure — in an all-suspect corpus a DSP
+    one page called looks as rare as a private asset host. This asks a
+    yes/no question instead: does this host also appear as a domain under
+    investigation? If a landing page fetches resources from one that does, the
+    two are wired together whatever their ads.txt says.
+    """
+    return _call(cli.cmd_index_crosslinks, index_db=index_db)
+
+
+@mcp.tool()
 def recurring_signals(min_cases: int = 2, index_db: str | None = None) -> dict:
     """Signals that resurface across separate investigations — the same operator showing up again."""
     return _call(cli.cmd_index_recurring, min_cases=min_cases, index_db=index_db)
