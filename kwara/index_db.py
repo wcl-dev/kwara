@@ -54,6 +54,8 @@ SIGNAL_ASN             = "asn"
 SIGNAL_FINAL_DOMAIN    = "final_domain"
 SIGNAL_ADS_TXT_SELLER  = "ads_txt_seller"    # DIRECT account, operator-tier only
 SIGNAL_ADS_TXT_TEMPLATE = "ads_txt_template"  # raw ads.txt sha256
+SIGNAL_ADS_TXT_OWNER   = "ads_txt_owner"     # OWNERDOMAIN — declared site owner
+SIGNAL_ADS_TXT_MANAGER = "ads_txt_manager"   # MANAGERDOMAIN — declared monetiser
 
 ALL_SIGNAL_TYPES = frozenset({
     SIGNAL_TRACKING_ID,
@@ -228,6 +230,14 @@ def extract_case_signals(
     #                      the index as "rare".
     #   ads_txt_template — the raw ads.txt sha256, one per domain. Cross-case
     #                      identical templates = operator reused the same file.
+    #   ads_txt_owner    — OWNERDOMAIN, ads.txt's own declaration of who owns
+    #   ads_txt_manager  — MANAGERDOMAIN, and of who monetises the inventory.
+    #                      Both are hubs in the same sense a tracking ID is:
+    #                      one value spanning many domains, stable across
+    #                      cases, and stated by a first party. Ungated —
+    #                      a site declares at most one of each and only ~14%
+    #                      declare any, so there is no flood to guard against,
+    #                      unlike the accounts above.
     ads_rows = conn.execute(
         f"""SELECT sr.id AS scan_run_id, sr.run_at, sr.final_url, sr.ads_txt_json
             FROM url_artifacts ua
@@ -283,6 +293,12 @@ def extract_case_signals(
         if sha and ads.get("status") == "ok" and (ads.get("records") or []):
             _emit(SIGNAL_ADS_TXT_TEMPLATE, sha, platform=None,
                   scan_run_id=srid, final_domain=domain, observed_at=run_at)
+        for stype, key in ((SIGNAL_ADS_TXT_OWNER, "owner_domain"),
+                           (SIGNAL_ADS_TXT_MANAGER, "manager_domain")):
+            declared = (ads.get(key) or "").strip().lower()
+            if declared and ads.get("status") == "ok":
+                _emit(stype, declared, platform=None, scan_run_id=srid,
+                      final_domain=domain, observed_at=run_at)
         # Floor D — carrier breadth. A domain declaring hundreds of DIRECT
         # accounts runs a full programmatic stack, so none of them singles out
         # an operator. Gates the ACCOUNT signals only (the template hash above

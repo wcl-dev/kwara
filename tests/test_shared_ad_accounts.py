@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 from clustering_infra import shared_ad_accounts
 from db import get_conn, init_db, migrate_db
 from index_db import (
+    SIGNAL_ADS_TXT_MANAGER,
+    SIGNAL_ADS_TXT_OWNER,
     SIGNAL_ADS_TXT_SELLER,
     SIGNAL_ADS_TXT_TEMPLATE,
     extract_case_signals,
@@ -499,3 +501,40 @@ def test_managers_are_reported_even_when_a_threshold_also_demotes():
                if (a["adsystem"], a["seller_id"]) == acct)
     assert row["tier"] == "manager"
     assert row["declared_managers"] == ["mgr.example"]
+
+
+def test_index_emits_declared_owner_and_manager_hubs():
+    """OWNERDOMAIN and MANAGERDOMAIN are hubs in the same sense a tracking ID
+    is — one value spanning many domains, stable across cases, stated by a
+    first party. Without them the index cannot answer "which sites does this
+    owner run" or "which sites does this manager monetise", which is the
+    question the cross-case index exists for.
+    """
+    conn = _make_db()
+    cid = _make_case(conn)
+    for d in ("a.com", "b.com"):
+        ads = _ads_json([("clickforce.com.tw", "1")], raw_text=d)
+        ads["owner_domain"] = "Network.example"      # normalised on the way in
+        ads["manager_domain"] = "mgr.example"
+        _add(conn, cid, f"https://{d}/", d, ads)
+
+    signals = extract_case_signals(conn, cid, source_db="/tmp/x.db")
+    owners = {(s["signal_value"], s["final_domain"]) for s in signals
+              if s["signal_type"] == SIGNAL_ADS_TXT_OWNER}
+    mgrs = {s["signal_value"] for s in signals
+            if s["signal_type"] == SIGNAL_ADS_TXT_MANAGER}
+    assert owners == {("network.example", "a.com"), ("network.example", "b.com")}
+    assert mgrs == {"mgr.example"}
+
+
+def test_index_skips_ownership_of_an_unreadable_ads_txt():
+    """A 403 body has no parsed variables to trust; nothing must be emitted."""
+    conn = _make_db()
+    cid = _make_case(conn)
+    ads = _ads_json([], sha="403sha", status="non_200")
+    ads["owner_domain"] = "leaked.example"
+    _add(conn, cid, "https://blocked.com/", "blocked.com", ads)
+    signals = extract_case_signals(conn, cid, source_db="/tmp/x.db")
+    assert not [s for s in signals
+                if s["signal_type"] in (SIGNAL_ADS_TXT_OWNER,
+                                        SIGNAL_ADS_TXT_MANAGER)]
