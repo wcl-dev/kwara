@@ -623,6 +623,8 @@ _EN: dict[str, str] = {
     "insights.gap_tls": "**{n}** HTTPS URLs have no TLS certificate recorded — re-scan to capture.",
     "insights.gap_corr": "**{n}** URLs have no third-party corroboration — run corroboration to archive them.",
     "insights.gap_unscanned": "**{n}** URLs not yet scanned or latest scan not marked done.",
+    "insights.gap_opsec_no_playwright": "**{n}** domains cannot yield an OPSEC verdict — no Playwright capture to compare against. Run page snapshots; UA-gating is invisible without both paths.",
+    "insights.gap_opsec_no_lightweight": "**{n}** domains cannot yield an OPSEC verdict — no lightweight fetch to compare against. Run the attribution pass; UA-gating is invisible without both paths.",
 
     # ── Risk tag labels ─────────────────────────────────────────────────────
     "risk.multi_hop": "multiple redirects",
@@ -1117,6 +1119,8 @@ _ZH: dict[str, str] = {
     "insights.gap_tls": "**{n}** 筆 HTTPS URL 尚無 TLS 憑證紀錄——重新掃描即可擷取。",
     "insights.gap_corr": "**{n}** 筆 URL 尚無第三方佐證——請執行第三方佐證存檔。",
     "insights.gap_unscanned": "**{n}** 條 URL 尚未完成掃描或最新一次掃描未標記為 done。",
+    "insights.gap_opsec_no_playwright": "**{n}** 個網域無法產生 OPSEC 判定——缺少 Playwright 擷取可供比對。請執行頁面快照；兩條路徑都要有，才看得出 UA 阻擋。",
+    "insights.gap_opsec_no_lightweight": "**{n}** 個網域無法產生 OPSEC 判定——缺少輕量擷取可供比對。請執行輕量歸因；兩條路徑都要有，才看得出 UA 阻擋。",
 
     # ── Risk tag labels ─────────────────────────────────────────────────────
     "risk.multi_hop": "多次跳轉",

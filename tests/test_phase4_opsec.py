@@ -194,3 +194,65 @@ def test_output_is_sorted_by_domain():
         _add_snapshot(conn, case_id, d, "playwright", "ok")
     out = compute_opsec_profile(conn, case_id)
     assert [r["domain"] for r in out] == ["a.com", "m.com", "z.com"]
+
+
+# ── why a verdict is missing ───────────────────────────────────────────────
+# OPSEC compares two collection paths that are filled by DIFFERENT commands:
+# `run attribute` does the lightweight fetch, `run snapshot` drives Playwright.
+# A case that ran only one can never produce a level, and measured 2026-08-06,
+# five of six cases in the QSH DB were entirely indeterminate for exactly that
+# reason with nothing anywhere saying so. A silent "indeterminate" reads as
+# "we looked and found nothing" when the truth is "we never collected half".
+
+def test_missing_playwright_is_reported_as_the_reason():
+    conn = _fresh_db(); cid = _seed_case(conn)
+    _add_snapshot(conn, cid, "a.com", "http_only", "ok")
+    row = compute_opsec_profile(conn, cid)[0]
+    assert row["level"] == "indeterminate"
+    assert row["indeterminate_reason"] == "no_playwright"
+
+
+def test_missing_lightweight_is_reported_as_the_reason():
+    conn = _fresh_db(); cid = _seed_case(conn)
+    _add_snapshot(conn, cid, "a.com", "playwright", "ok")
+    row = compute_opsec_profile(conn, cid)[0]
+    assert row["indeterminate_reason"] == "no_lightweight"
+
+
+def test_unreliable_playwright_is_a_collection_problem_not_an_observation():
+    """When the browser path itself fails there is no baseline to compare
+    against, so the verdict says nothing about the site."""
+    conn = _fresh_db(); cid = _seed_case(conn)
+    _add_snapshot(conn, cid, "a.com", "http_only", "ok")
+    for _ in range(3):
+        _add_snapshot(conn, cid, "a.com", "playwright", "error")
+    row = compute_opsec_profile(conn, cid)[0]
+    assert row["level"] == "indeterminate"
+    assert row["indeterminate_reason"] == "playwright_unreliable"
+
+
+def test_a_real_verdict_carries_no_reason():
+    conn = _fresh_db(); cid = _seed_case(conn)
+    _add_snapshot(conn, cid, "a.com", "http_only", "ok")
+    _add_snapshot(conn, cid, "a.com", "playwright", "ok")
+    row = compute_opsec_profile(conn, cid)[0]
+    assert row["level"] == "low"
+    assert row["indeterminate_reason"] is None
+
+
+def test_insights_reports_the_uncollected_path_as_a_gap():
+    """The reason has to reach the analyst, not just the OPSEC rows."""
+    from insights import case_insights
+    conn = _fresh_db(); cid = _seed_case(conn)
+    _add_snapshot(conn, cid, "a.com", "http_only", "ok")
+    _add_snapshot(conn, cid, "b.com", "http_only", "ok")
+    gaps = " ".join(case_insights(conn, cid)["gaps"])
+    assert "OPSEC" in gaps and "**2**" in gaps
+
+
+def test_no_opsec_gap_when_both_paths_ran():
+    from insights import case_insights
+    conn = _fresh_db(); cid = _seed_case(conn)
+    _add_snapshot(conn, cid, "a.com", "http_only", "ok")
+    _add_snapshot(conn, cid, "a.com", "playwright", "ok")
+    assert not [g for g in case_insights(conn, cid)["gaps"] if "OPSEC" in g]

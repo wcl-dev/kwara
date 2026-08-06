@@ -178,7 +178,13 @@ def case_insights(conn: sqlite3.Connection, case_id: int) -> dict[str, Any]:
 
     headline = _build_headline(url_count, scanned, destinations, unresolved, params, asn_data)
     bullets = _build_bullets(destinations, unresolved, wrappers, params, param_keys, asn_data, certs, tracking_ids, endpoints, phase4, scanned)
-    gaps = _build_gaps(no_intel, no_snap, no_tls, no_corr, scanned, url_count)
+    # OPSEC compares two collection paths, and each is filled by a different
+    # command. A case that ran only one can never produce a verdict, and a
+    # silent "indeterminate" reads as "we looked and found nothing" — so the
+    # missing half is reported as a gap, like any other uncollected evidence.
+    opsec_missing = _opsec_gap(conn, case_id)
+    gaps = _build_gaps(no_intel, no_snap, no_tls, no_corr, scanned, url_count,
+                       opsec_missing)
 
     return {
         "headline": headline,
@@ -340,8 +346,20 @@ def _build_bullets(
     return out[:17]
 
 
+def _opsec_gap(conn, case_id: int) -> dict[str, int]:
+    """Domains whose OPSEC verdict is blocked by an uncollected path."""
+    from opsec import compute_opsec_profile
+    out: dict[str, int] = {}
+    for row in compute_opsec_profile(conn, case_id):
+        reason = row.get("indeterminate_reason")
+        if reason in ("no_lightweight", "no_playwright"):
+            out[reason] = out.get(reason, 0) + 1
+    return out
+
+
 def _build_gaps(no_intel: int, no_snap: int, no_tls: int, no_corr: int,
-                scanned: int, url_count: int) -> list[str]:
+                scanned: int, url_count: int,
+                opsec_missing: dict[str, int] | None = None) -> list[str]:
     g: list[str] = []
     if no_intel and scanned:
         g.append(t("insights.gap_intel", n=no_intel))
@@ -353,4 +371,6 @@ def _build_gaps(no_intel: int, no_snap: int, no_tls: int, no_corr: int,
         g.append(t("insights.gap_corr", n=no_corr))
     if url_count and scanned < url_count:
         g.append(t("insights.gap_unscanned", n=url_count - scanned))
+    for reason, n in sorted((opsec_missing or {}).items()):
+        g.append(t(f"insights.gap_opsec_{reason}", n=n))
     return g

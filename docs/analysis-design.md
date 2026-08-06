@@ -235,6 +235,10 @@ OPSEC level 規則（刻意粗略，分析師最終判讀）：
 
 讀的是既有的 `snapshots.capture_method` + `capture_status`，**沒新 schema**。
 
+**判不出來是常態，不是例外。** 兩條路徑由**不同指令**填：`run attribute` 跑輕量擷取、`run snapshot` 驅動 Playwright。只跑其中一個的案件永遠產不出 level。2026-08-06 實測：六個案件裡有五個的每一個網域都是 `indeterminate`，純粹因為少跑一條路徑，而當時沒有任何地方說明原因。
+
+所以每一列都帶 `indeterminate_reason`（`no_playwright` / `no_lightweight` / `no_capture` / `playwright_unreliable`），`insights` 的 gaps 也會報出缺哪一條。**沉默的 indeterminate 會被讀成「查過了沒發現」，但真相是「另一半根本沒蒐集」**——兩者的意思完全相反。
+
 訊號意義：「擋 UA 但放 Chromium」是 WAF 的特定部署模板。同 case 裡多個域共享同一 OPSEC level，**獨立於 GA4 / TLS / 參數訊號**指向同操作者切割。QSH 100 筆裡 hubsite + satellitesite 兩條都擋、visitorlanding 兩條都放——獨立佐證 GA4 已揭露的兩個操作者線。
 
 ---

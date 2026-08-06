@@ -37,6 +37,13 @@ def _classify(lw_rate: float | None, pw_rate: float | None) -> str:
       medium         playwright fine; lightweight partial (LOW..HIGH)
       strong         playwright fine; lightweight nearly blocked (< OPSEC_LW_LOW)
       indeterminate  one path has no data, or playwright itself fails
+
+    An indeterminate verdict is the common case, not the exception: the two
+    paths are filled by different commands (`run attribute` does the
+    lightweight fetch, `run snapshot` drives Playwright), so a case that ran
+    only one of them can never produce a level. Callers must say WHY — see
+    `_reason` — because a silent "indeterminate" reads as "we looked and found
+    nothing" when the truth is "we never collected the other half".
     """
     if lw_rate is None or pw_rate is None:
         return "indeterminate"
@@ -47,6 +54,27 @@ def _classify(lw_rate: float | None, pw_rate: float | None) -> str:
     if lw_rate >= OPSEC_LW_LOW:
         return "medium"
     return "strong"
+
+
+def _reason(lw_total: int, pw_total: int, pw_rate: float | None) -> str | None:
+    """Why a row could not be classified. None when the level is real.
+
+    Without this the analysis is silently empty on any case that ran one
+    collection path: measured 2026-08-06, five of six cases in the QSH DB had
+    every domain indeterminate purely because Playwright or the lightweight
+    fetch had never been run, and nothing anywhere said so.
+    """
+    if not lw_total and not pw_total:
+        return "no_capture"
+    if not lw_total:
+        return "no_lightweight"      # run attribute
+    if not pw_total:
+        return "no_playwright"       # run snapshot
+    if pw_rate is not None and pw_rate < OPSEC_PW_MIN:
+        # The browser path itself failed, so the comparison has no baseline —
+        # this is a collection problem, not an observation about the site.
+        return "playwright_unreliable"
+    return None
 
 
 def compute_opsec_profile(
@@ -95,6 +123,7 @@ def compute_opsec_profile(
         lw_rate = c["lw_ok"] / c["lw_total"] if c["lw_total"] else None
         pw_rate = c["pw_ok"] / c["pw_total"] if c["pw_total"] else None
         level = _classify(lw_rate, pw_rate)
+        reason = _reason(c["lw_total"], c["pw_total"], pw_rate)
         diff_above_50 = (
             lw_rate is not None
             and pw_rate is not None
@@ -108,6 +137,7 @@ def compute_opsec_profile(
             "pw_ok":          c["pw_ok"],
             "pw_total":       c["pw_total"],
             "pw_rate":        pw_rate,
+            "indeterminate_reason": reason,
             "level":          level,
             "diff_above_50":  diff_above_50,
         })
