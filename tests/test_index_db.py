@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 
 from db import get_conn, init_db, migrate_db
 from index_db import (
+    SIGNAL_HAR_ENDPOINT,
     SIGNAL_ASN,
     SIGNAL_CERT_SERIAL,
     SIGNAL_FINAL_DOMAIN,
@@ -248,3 +249,68 @@ def test_recurring_signals_separates_real_recurrence_from_overlapping_cases():
     # and can be isolated outright
     strict = [r["signal_value"] for r in recurring_signals(conn, min_domains=2)]
     assert strict == ["pub-REAL"]
+
+
+def _seed_snapshot_with_hosts(conn, case_id, landing, hosts):
+    now = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    pid = conn.execute(
+        """INSERT INTO message_evidence (case_id, platform, permalink, actor_label,
+           posted_at, message_text, screenshot_path, ingested_at)
+           VALUES (?,'','','','','','',?)""", (case_id, now)).lastrowid
+    ua = conn.execute(
+        "INSERT INTO url_artifacts (message_id, case_id, original_url, domain, "
+        "url_order, created_at) VALUES (?,?,?,'',0,?)",
+        (pid, case_id, f"https://{landing}/", now)).lastrowid
+    sr = conn.execute(
+        "INSERT INTO scan_runs (url_artifact_id, run_at, final_url, hop_count, status) "
+        "VALUES (?,?,?,0,'done')", (ua, now, f"https://{landing}/")).lastrowid
+    conn.execute(
+        """INSERT INTO snapshots (scan_run_id, final_url, final_domain, captured_at,
+           capture_method, capture_status, request_domains_json)
+           VALUES (?,?,?,?,'playwright','ok',?)""",
+        (sr, f"https://{landing}/", landing, now, json.dumps(hosts)))
+    conn.commit()
+
+
+def test_har_endpoints_are_indexed_as_apexes_not_hostnames():
+    """SSPs and CDNs hand out per-request subdomains — UUID-prefixed
+    `t.ssp.*`, `rr2---sn-*.googlevideo.com`. Those are rare by construction and
+    meaningless, and on the 2026-08-06 corpus they dominated everything that
+    looked rare. Normalising to the registrable domain collapsed 402 hostnames
+    to 180 and removed the whole noise class."""
+    conn, _ = _fresh_case_db()
+    cid = _seed_case(conn)
+    _seed_snapshot_with_hosts(conn, cid, "farm.com", [
+        "aaaa-1111.t.ssp.example.com",
+        "bbbb-2222.t.ssp.example.com",
+        "cdn.operator-backend.net",
+    ])
+    vals = {s["signal_value"] for s in
+            extract_case_signals(conn, cid, source_db="/tmp/x.db")
+            if s["signal_type"] == SIGNAL_HAR_ENDPOINT}
+    # both UUID hosts collapse to ONE value — that is the whole point
+    assert vals == {"example.com", "operator-backend.net"}
+
+
+def test_har_endpoint_skips_the_landing_domain_itself():
+    """Self-reference by APEX: the hostname test elsewhere misses
+    statics.hubsite.example when the landing is www.hubsite.example."""
+    conn, _ = _fresh_case_db()
+    cid = _seed_case(conn)
+    _seed_snapshot_with_hosts(conn, cid, "www.farm.com",
+                              ["statics.farm.com", "farm.com", "third.party.net"])
+    vals = {s["signal_value"] for s in
+            extract_case_signals(conn, cid, source_db="/tmp/x.db")
+            if s["signal_type"] == SIGNAL_HAR_ENDPOINT}
+    assert vals == {"party.net"}
+
+
+def test_har_endpoint_drops_whitelisted_noise():
+    conn, _ = _fresh_case_db()
+    cid = _seed_case(conn)
+    _seed_snapshot_with_hosts(conn, cid, "farm.com",
+                              ["fonts.googleapis.com", "real.example.org"])
+    vals = {s["signal_value"] for s in
+            extract_case_signals(conn, cid, source_db="/tmp/x.db")
+            if s["signal_type"] == SIGNAL_HAR_ENDPOINT}
+    assert vals == {"example.org"}

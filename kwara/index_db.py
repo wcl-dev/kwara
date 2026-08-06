@@ -61,7 +61,9 @@ from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 from config import ADS_TXT_INDEX_MAX_CARRIER_ACCOUNTS, ADS_TXT_MANAGER_BREADTH
-from clustering_infra import MAJOR_AD_EXCHANGES, shared_ad_accounts
+from clustering_infra import (MAJOR_AD_EXCHANGES, _is_noise_endpoint,
+                              shared_ad_accounts)
+from utils.domain import extract_domain_from_url
 from sql import LATEST_DONE_SCAN_RUN, latest_usable_snapshot
 
 # Signal type tags. Stable strings — stored in the DB and matched on lookup.
@@ -74,7 +76,12 @@ SIGNAL_ADS_TXT_SELLER  = "ads_txt_seller"    # DIRECT account, operator-tier onl
 SIGNAL_ADS_TXT_TEMPLATE = "ads_txt_template"  # raw ads.txt sha256
 SIGNAL_ADS_TXT_OWNER   = "ads_txt_owner"     # OWNERDOMAIN — declared site owner
 SIGNAL_ADS_TXT_MANAGER = "ads_txt_manager"   # MANAGERDOMAIN — declared monetiser
+SIGNAL_HAR_ENDPOINT    = "har_endpoint"      # third party a landing page called
 
+# Every type this module emits. Kept complete because `index lookup --type`
+# validates against it — a typo there used to return an empty result set that
+# was indistinguishable from "never seen", which is the wrong answer to a
+# question about whether evidence exists.
 ALL_SIGNAL_TYPES = frozenset({
     SIGNAL_TRACKING_ID,
     SIGNAL_CERT_SERIAL,
@@ -83,6 +90,9 @@ ALL_SIGNAL_TYPES = frozenset({
     SIGNAL_FINAL_DOMAIN,
     SIGNAL_ADS_TXT_SELLER,
     SIGNAL_ADS_TXT_TEMPLATE,
+    SIGNAL_ADS_TXT_OWNER,
+    SIGNAL_ADS_TXT_MANAGER,
+    SIGNAL_HAR_ENDPOINT,
 })
 
 
@@ -256,6 +266,54 @@ def extract_case_signals(
     #                      a site declares at most one of each and only ~14%
     #                      declare any, so there is no flood to guard against,
     #                      unlike the accounts above.
+    # ── snapshot-level signals: third-party endpoints from HAR ─────────────
+    # A hostname a landing page called is an IDENTIFIER, so unlike a cloaking
+    # verdict or an OPSEC level it can match across cases at all. Stored as the
+    # REGISTRABLE domain, not the hostname: SSPs and CDNs hand out per-request
+    # subdomains (UUID-prefixed `t.ssp.*`, `rr2---sn-*.googlevideo.com`), which
+    # are rare by construction and meaningless. Normalising collapsed 402
+    # hostnames to 180 apexes on the 2026-08-06 corpus and removed that noise
+    # class entirely.
+    #
+    # HONEST LIMIT: most of what this records is ad-tech a page happened to
+    # load, not operator-run infrastructure. Rarity does not separate the two —
+    # an investigation corpus is all suspects, and the endpoints that look rare
+    # here are simply DSPs only one landing page happened to call. The index
+    # remembers; judging is the analyst's, at query time, with domain_count.
+    for r in conn.execute(
+        f"""SELECT s.final_domain, s.request_domains_json, sr.id AS scan_run_id,
+                   sr.run_at
+              FROM url_artifacts ua
+              JOIN scan_runs sr ON sr.id = {LATEST_DONE_SCAN_RUN}
+              JOIN snapshots s ON s.scan_run_id = sr.id
+             WHERE ua.case_id = ?
+               AND s.request_domains_json IS NOT NULL
+               AND TRIM(s.request_domains_json) != ''""",
+        (case_id,),
+    ).fetchall():
+        landing = (r["final_domain"] or "").lower()
+        landing_apex = extract_domain_from_url(landing)
+        if not landing_apex:
+            continue
+        try:
+            hosts = json.loads(r["request_domains_json"])
+        except (ValueError, TypeError):
+            continue
+        if not isinstance(hosts, list):
+            continue
+        for raw in hosts:
+            host = (raw or "").strip().lower()
+            if not host or _is_noise_endpoint(host):
+                continue
+            ep = extract_domain_from_url(host)
+            # Self-reference by APEX — the hostname test in shared_endpoints
+            # misses statics.hubsite.example when the landing is www.hubsite.example.
+            if not ep or ep == landing_apex:
+                continue
+            _emit(SIGNAL_HAR_ENDPOINT, ep, platform=None,
+                  scan_run_id=r["scan_run_id"], final_domain=landing,
+                  observed_at=r["run_at"])
+
     ads_rows = conn.execute(
         f"""SELECT sr.id AS scan_run_id, sr.run_at, sr.final_url, sr.ads_txt_json
             FROM url_artifacts ua

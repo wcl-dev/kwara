@@ -737,7 +737,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     x_look = _leaf(idx, "lookup", help="every case a signal value appears in")
     x_look.add_argument("value")
-    x_look.add_argument("--type", help="constrain to one signal type")
+    from index_db import ALL_SIGNAL_TYPES
+    x_look.add_argument("--type", choices=sorted(ALL_SIGNAL_TYPES),
+                        help="constrain to one signal type")
     x_look.set_defaults(fn=cmd_index_lookup)
 
     x_rec = _leaf(idx, "recurring", help="signals spanning multiple cases")
