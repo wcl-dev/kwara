@@ -372,3 +372,30 @@ ADS_TXT_PREVALENCE_PATH: str = os.path.expanduser(os.environ.get(
 ADS_TXT_COMMODITY_PREVALENCE: float = float(
     os.environ.get("KWARA_ADS_TXT_COMMODITY_PREVALENCE", "0.005")
 )
+
+
+# ── Header signals worth remembering across cases (index_db) ─────────────
+# A response header is indexable when its VALUE could identify a deployment.
+# Two kinds are excluded, both because their values come from a fixed
+# vocabulary and say nothing about who runs the server:
+#   protocol furniture — content-type, transfer-encoding, connection, …
+#   standard security headers — nosniff, SAMEORIGIN, "1; mode=block", …
+# Everything else under `x-*` plus `server` is kept: x-server-hosted leaks the
+# origin behind a CDN, x-powered-by carries fabricated versions, x-drupal-cache
+# and x-aspnet-version pin a stack. Universal tokens like bare "cloudflare"
+# are filtered separately by value, via clusters._is_generic_weak.
+# Minimum distinctiveness for an indexed header value. A cross-case match on
+# "MISS" (x-drupal-cache) or "0" (x-age) links any two Drupal sites and any two
+# cached responses — the header NAME reveals the stack there, the value does
+# not, and only the value is what gets matched. Structured values pass:
+# anything containing "/" (Apache/2.5.1, PHP/7.4.21) or long enough to be a
+# real version or vendor string. "ASP.NET" and "5.2" are correctly dropped —
+# they are shared by millions of unrelated hosts.
+HEADER_VALUE_MIN_LENGTH: int = int(
+    os.environ.get("KWARA_HEADER_VALUE_MIN_LENGTH", "8")
+)
+HEADER_VALUE_STANDARD_NOISE: frozenset[str] = frozenset({
+    "x-xss-protection", "x-frame-options", "x-content-type-options",
+    "x-ua-compatible", "x-dns-prefetch-control", "x-download-options",
+    "x-permitted-cross-domain-policies", "x-robots-tag",
+})

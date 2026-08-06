@@ -60,7 +60,8 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
-from config import ADS_TXT_INDEX_MAX_CARRIER_ACCOUNTS, ADS_TXT_MANAGER_BREADTH
+from config import (ADS_TXT_INDEX_MAX_CARRIER_ACCOUNTS, ADS_TXT_MANAGER_BREADTH,
+                    HEADER_VALUE_MIN_LENGTH, HEADER_VALUE_STANDARD_NOISE)
 from clustering_infra import (MAJOR_AD_EXCHANGES, _is_noise_endpoint,
                               shared_ad_accounts)
 from utils.domain import extract_domain_from_url
@@ -77,6 +78,7 @@ SIGNAL_ADS_TXT_TEMPLATE = "ads_txt_template"  # raw ads.txt sha256
 SIGNAL_ADS_TXT_OWNER   = "ads_txt_owner"     # OWNERDOMAIN — declared site owner
 SIGNAL_ADS_TXT_MANAGER = "ads_txt_manager"   # MANAGERDOMAIN — declared monetiser
 SIGNAL_HAR_ENDPOINT    = "har_endpoint"      # third party a landing page called
+SIGNAL_HEADER_VALUE    = "header_value"      # a response header that identifies a deployment
 
 # Every type this module emits. Kept complete because `index lookup --type`
 # validates against it — a typo there used to return an empty result set that
@@ -93,6 +95,7 @@ ALL_SIGNAL_TYPES = frozenset({
     SIGNAL_ADS_TXT_OWNER,
     SIGNAL_ADS_TXT_MANAGER,
     SIGNAL_HAR_ENDPOINT,
+    SIGNAL_HEADER_VALUE,
 })
 
 
@@ -266,6 +269,53 @@ def extract_case_signals(
     #                      a site declares at most one of each and only ~14%
     #                      declare any, so there is no flood to guard against,
     #                      unlike the accounts above.
+    # ── response headers that identify a deployment ────────────────────────
+    # The design doc rates a shared server template alongside a shared GA4 ID,
+    # yet until 2026-08-06 the GA4 ID was indexed and the header was not, so
+    # `x-server-hosted: Malaysia Cloud Pte Ltd` — an origin leaking out from
+    # behind Cloudflare — vanished the moment a case was closed.
+    #
+    # ONE signal type, not three. per_domain_constants is the raw observation
+    # ("this domain always sends this"); cross_domain_shared_template is a
+    # within-case derivation over it, and cross-case sharing is what
+    # recurring_signals already answers — the index does not pre-cluster.
+    # detect_fake_versions judges a value it does not produce, and that value
+    # is indexed here regardless, so a fabricated Apache 2.5.1 is remembered
+    # whether or not the fake-version rule fired in that case.
+    from header_analysis import per_domain_constants
+    from clusters import _is_generic_weak
+    domain_scan: dict[str, tuple] = {}
+    for r in conn.execute(
+        f"""SELECT sr.id AS scan_run_id, sr.run_at, sr.final_url
+              FROM url_artifacts ua
+              JOIN scan_runs sr ON sr.id = {LATEST_DONE_SCAN_RUN}
+             WHERE ua.case_id = ?""", (case_id,),
+    ).fetchall():
+        host = (urlparse(r["final_url"] or "").hostname or "").lower()
+        if host:
+            domain_scan.setdefault(host, (r["scan_run_id"], r["run_at"]))
+    for domain, headers in per_domain_constants(conn, case_id).items():
+        srid_at = domain_scan.get((domain or "").lower())
+        if not srid_at:
+            continue
+        for header, value in (headers or {}).items():
+            h = (header or "").strip().lower()
+            if not (h.startswith("x-") or h == "server"):
+                continue                       # protocol furniture
+            if h in HEADER_VALUE_STANDARD_NOISE:
+                continue                       # fixed-vocabulary security headers
+            v = (value or "").strip()
+            # breadth 0.0 — the universal-token floor is what applies here;
+            # per-domain constants carry no within-case breadth of their own.
+            if not v or _is_generic_weak(v, 0.0):
+                continue
+            # Distinctiveness: "MISS" or "0" would link any two Drupal sites.
+            if "/" not in v and len(v) < HEADER_VALUE_MIN_LENGTH:
+                continue
+            _emit(SIGNAL_HEADER_VALUE, v, platform=h,
+                  scan_run_id=srid_at[0], final_domain=domain,
+                  observed_at=srid_at[1])
+
     # ── snapshot-level signals: third-party endpoints from HAR ─────────────
     # A hostname a landing page called is an IDENTIFIER, so unlike a cloaking
     # verdict or an OPSEC level it can match across cases at all. Stored as the

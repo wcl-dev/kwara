@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from db import get_conn, init_db, migrate_db
 from index_db import (
     SIGNAL_HAR_ENDPOINT,
+    SIGNAL_HEADER_VALUE,
     SIGNAL_ASN,
     SIGNAL_CERT_SERIAL,
     SIGNAL_FINAL_DOMAIN,
@@ -359,3 +360,65 @@ def test_cross_links_ignore_a_domain_loading_its_own_assets():
         (SIGNAL_HAR_ENDPOINT, "farm.com", "www.farm.com"))
     conn.commit()
     assert operator_cross_links(conn) == []
+
+
+# ── response headers that identify a deployment ────────────────────────────
+
+def _seed_header_scan(conn, case_id, landing, headers):
+    """`headers` given as a dict for readability; redirect_hops stores the
+    wire order as [[key, value], ...], which is what the analysis reads."""
+    now = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    pid = conn.execute(
+        """INSERT INTO message_evidence (case_id, platform, permalink, actor_label,
+           posted_at, message_text, screenshot_path, ingested_at)
+           VALUES (?,'','','','','','',?)""", (case_id, now)).lastrowid
+    ua = conn.execute(
+        "INSERT INTO url_artifacts (message_id, case_id, original_url, domain, "
+        "url_order, created_at) VALUES (?,?,?,'',0,?)",
+        (pid, case_id, f"https://{landing}/", now)).lastrowid
+    sr = conn.execute(
+        "INSERT INTO scan_runs (url_artifact_id, run_at, final_url, hop_count, status) "
+        "VALUES (?,?,?,1,'done')", (ua, now, f"https://{landing}/")).lastrowid
+    # Two hops: per_domain_constants requires min_observations=2 before it
+    # will call a header constant — one sighting is not evidence of stability.
+    for hop in (0, 1):
+        conn.execute(
+            """INSERT INTO redirect_hops (scan_run_id, hop_order, url, status_code,
+               resolved_url, fetched_at, response_headers_json)
+               VALUES (?,?,?,200,?,?,?)""",
+            (sr, hop, f"https://{landing}/", f"https://{landing}/", now,
+             json.dumps([[k, v] for k, v in headers.items()])))
+    conn.commit()
+
+
+def test_origin_leaking_header_is_remembered_across_cases():
+    """The design doc rates a shared server template alongside a shared GA4 ID,
+    but until 2026-08-06 only the GA4 ID was indexed — so an origin leaking out
+    from behind Cloudflare vanished when the case closed."""
+    conn, _ = _fresh_case_db()
+    cid = _seed_case(conn)
+    _seed_header_scan(conn, cid, "farm.com", {
+        "x-server-hosted": "Malaysia Cloud Pte Ltd",
+        "x-powered-by": "Apache/2.5.1 (Win64) OpenSSL/1.1.2e",
+    })
+    vals = {(s["platform"], s["signal_value"]) for s in
+            extract_case_signals(conn, cid, source_db="/tmp/x.db")
+            if s["signal_type"] == SIGNAL_HEADER_VALUE}
+    assert ("x-server-hosted", "Malaysia Cloud Pte Ltd") in vals
+    assert ("x-powered-by", "Apache/2.5.1 (Win64) OpenSSL/1.1.2e") in vals
+
+
+def test_protocol_furniture_and_fixed_vocabulary_headers_are_skipped():
+    """Values from a fixed vocabulary match any two unrelated hosts."""
+    conn, _ = _fresh_case_db()
+    cid = _seed_case(conn)
+    _seed_header_scan(conn, cid, "farm.com", {
+        "content-type": "text/html; charset=UTF-8",   # protocol furniture
+        "x-frame-options": "SAMEORIGIN",              # fixed vocabulary
+        "x-content-type-options": "nosniff",
+        "server": "cloudflare",                       # universal infra token
+        "x-drupal-cache": "MISS",                     # value carries nothing
+        "x-age": "0",
+    })
+    assert not [s for s in extract_case_signals(conn, cid, source_db="/tmp/x.db")
+                if s["signal_type"] == SIGNAL_HEADER_VALUE]
