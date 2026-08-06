@@ -22,6 +22,24 @@ Design notes
   idempotent and drops signals that no longer appear.
 * Read-only on the case DB; only the index DB is written.
 
+Known limitation — surveys indexed as investigations
+----------------------------------------------------
+The index assumes every case is an investigation: a set of URLs with a
+provenance chain back to where a victim would have met them. It has no notion
+of a SURVEY — a domain list swept for characterisation, with no source post
+and no deep link. Case 5 in the QSH DB is one (45 bare homepages, zero
+permalinks), and because its domains overlap the investigations it was built
+from, the same observation lands under two case_ids and `recurring_signals`
+reports it as a cross-case recurrence. Measured 2026-08-05: 99 of 119
+recurring ads.txt accounts sat on a single domain that way, and cert_serial
+showed 12 where only 2 were real.
+
+Read `domain_count` to tell them apart — a signal on 2+ distinct domains has
+genuinely resurfaced. Adding a case type would fix it properly, but this is a
+stock problem rather than a flow one: since 2026-08-06 that kind of sweep runs
+through `kwara discover`, which characterises a domain list without writing
+into the case DB or this index at all.
+
 Public surface:
   get_index_conn(path)                 connect + init the central index DB
   extract_case_signals(conn, case_id, source_db, case_title)
