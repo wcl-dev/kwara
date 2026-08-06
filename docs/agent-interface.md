@@ -280,3 +280,15 @@ quietly diverge.
 | `build_prevalence_table` | 否 | 建參照母體表，tier 判定會讀它 |
 
 `screen_candidates` 設上限的理由與 `capture_snapshots` 相同：它直接造訪每一個候選，而掃描清單動輒五位數。agent 不該一次呼叫就啟動上萬網站的掃描；更大的批次走 CLI，那裡有人在場。
+
+### `index crosslinks` — 第三方 endpoint 同時也是被調查的落地網域
+
+```bash
+python -m kwara.cli index crosslinks
+```
+
+endpoint 索引裡多數是網頁碰巧載入的廣告科技，而「稀有」分不出它與操作者自架設施——調查語料全是嫌疑者，只有一個頁面呼叫過的 DSP 看起來跟私有資產主機一樣罕見。這個查詢改問是非題：**這個第三方主機，本身是不是我們調查過的網域？** 是的話，兩邊就是接在一起的，不管各自的 ads.txt 怎麼說。
+
+不需要任何門檻。MCP 對應工具 `operator_cross_links`。
+
+實際產出（2026-08-06）：QSH 的 `hubsite.example`／`satellitesite.example`／`satellite2site.example` 都從 `statics.privatecdn.example` 與 `s1.privatecdn2.example` 載入靜態資源——那是 01 家族叢集的私有 CDN。這條連結在 HAR 裡躺了三個月，而且推翻了先前依 ads.txt 帳號得出的「兩案無關聯」判斷。
