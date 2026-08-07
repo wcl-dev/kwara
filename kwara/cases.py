@@ -18,9 +18,16 @@ from .audit import write_audit
 
 # Snapshot files live under kwara/data/snapshots/. Deletion may only ever
 # touch directories at or below this root.
-_SNAP_ROOT = os.path.realpath(
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "snapshots")
-)
+def _snap_root() -> str:
+    """The capture store, resolved at CALL time.
+
+    Invariant 10 confines deletion to this tree. Reading it per call rather
+    than freezing it at import keeps the guard pointed at whatever root is
+    actually configured — a stale constant would confine deletion to a
+    directory the captures are no longer in.
+    """
+    from . import config as _cfg
+    return os.path.realpath(_cfg.SNAPSHOT_ROOT)
 
 # Victim-locale presets. Screenshots are captured with the victim's locale so
 # geo-cloaked pages render what they actually saw, not what the analyst sees.
@@ -138,7 +145,7 @@ def set_case_locale(
 
 
 def _snapshot_dirs_for_case(conn: sqlite3.Connection, case_id: int) -> set[str]:
-    """Snapshot directories belonging to a case, confined to _SNAP_ROOT.
+    """Snapshot directories belonging to a case, confined to _snap_root().
 
     Any path that resolves outside the snapshot root is dropped rather than
     deleted — see the module docstring.
@@ -158,7 +165,7 @@ def _snapshot_dirs_for_case(conn: sqlite3.Connection, case_id: int) -> set[str]:
             if not path or not os.path.exists(path):
                 continue
             real = os.path.realpath(os.path.dirname(path))
-            if real == _SNAP_ROOT or real.startswith(_SNAP_ROOT + os.sep):
+            if real == _snap_root() or real.startswith(_snap_root() + os.sep):
                 dirs.add(real)
     return dirs
 

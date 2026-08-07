@@ -106,6 +106,7 @@ command reference, the tool list, and the reasoning.
 | `KWARA_HTTP_TIMEOUT` | `10` | Scanner per-request timeout (seconds) |
 | `KWARA_MAX_HOPS` | `20` | Redirect chain hop limit |
 | `KWARA_NEW_DOMAIN_DAYS` | `180` | "New domain" risk flag threshold (days) |
+| `KWARA_DATA_DIR` | *(beside the package)* | Case database, capture store and export packs. Move all three together — after `pip install` the package directory is often root-owned and wiped on upgrade |
 | `KWARA_INDEX_DB_PATH` | `~/.kwara/index.db` | Central cross-case signal index (spans multiple DB files) |
 
 ## Project structure

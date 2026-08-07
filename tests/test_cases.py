@@ -143,7 +143,10 @@ def test_delete_removes_paths_inside_snapshot_root(conn, monkeypatch, tmp_path):
     target_dir.mkdir(parents=True)
     shot = target_dir / "screenshot.png"
     shot.write_bytes(b"x")
-    monkeypatch.setattr(cases, "_SNAP_ROOT", os.path.realpath(str(snap_root)))
+    # The guard resolves the root through config at call time, so redirect
+    # there rather than pinning a stale constant on the module.
+    from kwara import config
+    monkeypatch.setattr(config, "SNAPSHOT_ROOT", os.path.realpath(str(snap_root)))
 
     cid = cases.create_case(conn, "cleanup")
     _add_snapshot(conn, cid, str(shot))

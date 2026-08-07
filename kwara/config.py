@@ -40,10 +40,26 @@ import os
 # ── Paths ────────────────────────────────────────────────────────────────
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 
-DB_PATH: str = os.environ.get(
-    "KWARA_DB_PATH",
-    os.path.join(_THIS_DIR, "data", "kwara.db"),
-)
+# Where a case's data lives: the SQLite file, the capture store, the export
+# packs. Defaults beside the package for a clone-and-run checkout, but it must
+# be relocatable — after `pip install kwara` the package directory is often
+# root-owned, is wiped on upgrade, and is not backed up. Evidence does not
+# belong there.
+#
+# One knob moves all three so a case cannot end up split across two locations,
+# which is what happened when only KWARA_DB_PATH existed: --db pointed the
+# database elsewhere while captures and exports stayed in the package.
+DATA_DIR: str = os.path.abspath(os.path.expanduser(
+    os.environ.get("KWARA_DATA_DIR", os.path.join(_THIS_DIR, "data"))))
+
+# The capture store. Read through `config.SNAPSHOT_ROOT` at CALL time, never
+# copied into a module-level constant elsewhere — tests redirect it, and a
+# snapshot of it taken at import would defeat that and write fabricated
+# captures into the operator's real evidence.
+SNAPSHOT_ROOT: str = os.path.join(DATA_DIR, "snapshots")
+EXPORTS_DIR: str = os.path.join(DATA_DIR, "exports")
+
+DB_PATH: str = os.environ.get("KWARA_DB_PATH", os.path.join(DATA_DIR, "kwara.db"))
 
 # Cross-case signal index (Phase 5.1). A single central DB that accumulates
 # strong attribution signals across every case the analyst indexes — even

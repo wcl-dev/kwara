@@ -34,7 +34,7 @@ def kwara_env(monkeypatch):
 
     # Patch EXPORTS_DIR to the temp path so we don't pollute the repo
     from kwara import exporter as _exporter
-    monkeypatch.setattr(_exporter, "EXPORTS_DIR", exports_dir)
+    # exports go to a temp dir via the autouse _isolate_evidence_store fixture
 
     from kwara.db import get_conn, init_db, migrate_db
     conn = get_conn(db_path)

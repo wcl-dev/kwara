@@ -20,6 +20,29 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
+def _isolate_evidence_store(monkeypatch, tmp_path):
+    """No test may write into the operator's real capture store.
+
+    Before this, tests that exercised _per_capture_dir() wrote straight into
+    kwara/data/snapshots/ — the live evidence tree. Measured 2026-08-07:
+    13,785 capture directories on disk against 983 with a database row, and
+    snapshots/99 alone held 9,807 from roughly 98 accumulated runs of a
+    100-iteration loop. Their contents are fixture data — capture.json naming
+    https://target.com/, HTML carrying a made-up Meta Pixel ID — sitting in
+    buckets numbered like real scan_run_ids and indistinguishable on disk from
+    genuine captures. delete_case only removes directories the DB lists, so
+    nothing ever cleaned them up.
+
+    Fabricated evidence in an evidence store is the one failure this tool
+    cannot tolerate, so the isolation is autouse: opt-out, never opt-in.
+    """
+    from kwara import config
+    monkeypatch.setattr(config, "DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setattr(config, "SNAPSHOT_ROOT", str(tmp_path / "data" / "snapshots"))
+    monkeypatch.setattr(config, "EXPORTS_DIR", str(tmp_path / "data" / "exports"))
+
+
+@pytest.fixture(autouse=True)
 def _isolate_reference_prevalence(monkeypatch):
     """Keep the machine's reference-prevalence table out of the test run.
 

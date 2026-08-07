@@ -104,6 +104,7 @@ claude mcp add kwara -- /abs/path/to/.venv/bin/python -m kwara.mcp_server
 | `KWARA_HTTP_TIMEOUT` | `10` | 掃描逾時秒數 |
 | `KWARA_MAX_HOPS` | `20` | Redirect chain 跳轉上限 |
 | `KWARA_NEW_DOMAIN_DAYS` | `180` | 「新網域」風險旗標門檻天數 |
+| `KWARA_DATA_DIR` | *（套件目錄旁）* | 案件資料庫、擷取庫、匯出封包。一個旋鈕移動三者——`pip install` 之後套件目錄常是 root 所有、升級時會被清掉 |
 | `KWARA_INDEX_DB_PATH` | `~/.kwara/index.db` | 跨案件訊號中央索引（橫跨多個 DB 檔） |
 
 ## 專案結構

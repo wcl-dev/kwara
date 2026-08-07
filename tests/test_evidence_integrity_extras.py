@@ -28,7 +28,7 @@ def kwara_env(monkeypatch):
     exports_dir = os.path.join(td, "exports")
     os.makedirs(exports_dir, exist_ok=True)
     from kwara import exporter as _exporter
-    monkeypatch.setattr(_exporter, "EXPORTS_DIR", exports_dir)
+    # exports go to a temp dir via the autouse _isolate_evidence_store fixture
     from kwara.db import get_conn, init_db, migrate_db
     conn = get_conn(db_path)
     init_db(conn)

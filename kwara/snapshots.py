@@ -75,8 +75,8 @@ def _per_capture_dir(scan_run_id: int, *, final_url: str | None = None,
     Layout:
       data/snapshots/{scan_run_id}/{YYYYMMDDTHHMMSSffffff}_{rand4}/
     """
-    parent = os.path.join(os.path.dirname(__file__), "data", "snapshots",
-                          str(scan_run_id))
+    from . import config as _cfg          # call-time so tests can redirect it
+    parent = os.path.join(_cfg.SNAPSHOT_ROOT, str(scan_run_id))
     os.makedirs(parent, exist_ok=True)
     # EXCLUSIVE creation, retried. exist_ok=True silently accepted a collision
     # between two captures that landed in the same microsecond with the same

@@ -13,13 +13,16 @@ import shutil
 import sqlite3
 import sys
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-KWARA_DIR = os.path.join(SCRIPT_DIR, "kwara")
-DB_PATH = os.path.join(KWARA_DIR, "data", "kwara.db")
-SNAP_DST = os.path.join(KWARA_DIR, "data", "snapshots")
+# Imported as a package, and pointed at the configured data root. This used to
+# insert kwara/ into sys.path and import `db` flatly, which survived the
+# package refactor only because db.py happens to have no relative imports of
+# its own — it would have broken silently the moment it gained one. The paths
+# were also pinned beside the package, so a restore ignored KWARA_DATA_DIR and
+# rebuilt the case somewhere the rest of the tool was not looking.
+from kwara.config import DB_PATH, SNAPSHOT_ROOT
+from kwara.db import init_db, migrate_db, get_conn
 
-sys.path.insert(0, KWARA_DIR)
-from db import init_db, migrate_db, get_conn
+SNAP_DST = SNAPSHOT_ROOT
 
 
 def read_csv(path):

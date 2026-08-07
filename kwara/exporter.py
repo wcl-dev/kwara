@@ -19,7 +19,10 @@ from datetime import datetime, timezone
 from .audit import write_audit
 from .config import HMAC_KEY
 
-EXPORTS_DIR = os.path.join(os.path.dirname(__file__), "data", "exports")
+def _exports_dir() -> str:
+    """Resolved at call time — see config.DATA_DIR."""
+    from . import config as _cfg
+    return _cfg.EXPORTS_DIR
 
 
 def _now() -> str:
@@ -40,10 +43,10 @@ def _csv_bytes(rows: list[dict], fieldnames: list[str]) -> bytes:
 
 
 def export_case(conn: sqlite3.Connection, case_id: int) -> str:
-    os.makedirs(EXPORTS_DIR, exist_ok=True)
+    os.makedirs(_exports_dir(), exist_ok=True)
     ts       = datetime.now(tz=timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     zip_name = f"case_{case_id}_{ts}.zip"
-    zip_path = os.path.join(EXPORTS_DIR, zip_name)
+    zip_path = os.path.join(_exports_dir(), zip_name)
 
     manifest = {}   # arcname -> sha256
 
