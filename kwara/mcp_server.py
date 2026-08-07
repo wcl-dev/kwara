@@ -36,7 +36,7 @@ try:
 except ImportError:  # pragma: no cover - dependency guidance
     raise SystemExit(
         "The MCP SDK is not installed. Run:\n"
-        "    python -m pip install -r kwara/requirements-agent.txt"
+        "    python -m pip install -r requirements-agent.txt"
     )
 
 mcp = FastMCP("kwara")

@@ -1,4 +1,4 @@
-**[English](kwara_guide.md)**
+**[English](guide.md)**
 
 # kwara — 操作者歸因與數位證據工具
 

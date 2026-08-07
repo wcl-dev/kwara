@@ -1,4 +1,4 @@
-**[正體中文](kwara_說明文件.md)**
+**[正體中文](guide.zh-TW.md)**
 
 # kwara — Operator Attribution & Digital Evidence Toolkit
 

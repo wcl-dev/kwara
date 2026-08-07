@@ -56,7 +56,7 @@ git clone https://github.com/wcl-dev/kwara && cd kwara
 python -m venv .venv
 source .venv/bin/activate           # macOS / Linux
 # .venv\Scripts\activate            # Windows
-python -m pip install -r kwara/requirements.txt
+python -m pip install -r requirements.txt
 python -m playwright install chromium
 streamlit run kwara/app.py
 ```
@@ -87,7 +87,7 @@ into `jq` is always safe. Add `--text` for human-readable output.
 To drive kwara from an agent:
 
 ```bash
-python -m pip install -r kwara/requirements-agent.txt
+python -m pip install -r requirements-agent.txt
 claude mcp add kwara -- /abs/path/to/.venv/bin/python -m kwara.mcp_server
 ```
 
@@ -122,13 +122,15 @@ command reference, the tool list, and the reasoning.
 | `kwara/corroboration.py` | Third-party evidence services (Wayback, urlscan, RFC 3161) |
 | `docs/agent-interface.md` | Full CLI command reference and MCP tool list |
 | `docs/analysis-design.md` | How the analysis layer works and why — algorithms, thresholds, invariants |
-| `docs/` | Illustrated crosswalk: forensic targets ↔ the digital-advertising ecosystem (HTML) |
+| `docs/guide.md` · `docs/guide.zh-TW.md` | Usage guide, English and Traditional Chinese |
+| `docs/kwara_adtech_crosswalk*.html` | Illustrated crosswalk: forensic targets ↔ the digital-advertising ecosystem |
+| `requirements.txt` · `requirements-agent.txt` · `requirements-dev.txt` | Base install, MCP extras, test tooling |
 | `restore_from_export.py` | Restore database from an exported evidence pack ZIP |
 
 > Do **not** commit `.venv`, `kwara/data/`, or snapshot directories — `.gitignore` already covers them.
 
 ## Learn more
 
-- **Usage guide** — [`kwara_guide.md`](kwara_guide.md)
+- **Usage guide** — [`docs/guide.md`](docs/guide.md)
 - **Analysis design** — [`docs/analysis-design.md`](docs/analysis-design.md) explains how each clustering function works and why it is cut that way: the two kinds of "shared parameter", certificate batch-issuance windows, why fingerprint regexes must be invocation-anchored, and the invariants a refactor must not break. Written in Traditional Chinese.
 - **Ad-tech crosswalk** — a visual, encyclopedia-style explainer mapping kwara's forensic targets to the digital-advertising ecosystem (SSP/DSP/DMP, IAB `ads.txt`/`sellers.json`, tracking pixels). Read it online at [wcl-dev.github.io/kwara/kwara_adtech_crosswalk.en.html](https://wcl-dev.github.io/kwara/kwara_adtech_crosswalk.en.html) ([中文版](https://wcl-dev.github.io/kwara/kwara_adtech_crosswalk.html)), or open `docs/kwara_adtech_crosswalk.en.html` in a browser after cloning.

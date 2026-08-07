@@ -24,7 +24,7 @@ source .venv/bin/activate
 python -m kwara.cli --help
 ```
 
-Nothing beyond `kwara/requirements.txt` is needed.
+Nothing beyond `requirements.txt` is needed.
 
 ### Output contract
 
@@ -198,7 +198,7 @@ python -m kwara.cli discover prevalence --observations observations.jsonl \
 ### Install
 
 ```bash
-python -m pip install -r kwara/requirements-agent.txt
+python -m pip install -r requirements-agent.txt
 ```
 
 ### Register with Claude Code

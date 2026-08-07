@@ -56,7 +56,7 @@ git clone https://github.com/wcl-dev/kwara && cd kwara
 python -m venv .venv
 source .venv/bin/activate           # macOS / Linux
 # .venv\Scripts\activate            # Windows
-python -m pip install -r kwara/requirements.txt
+python -m pip install -r requirements.txt
 python -m playwright install chromium
 streamlit run kwara/app.py
 ```
@@ -86,7 +86,7 @@ stdout 只會有 JSON——進度與錯誤都走 stderr，所以接 `jq` 永遠�
 要讓 agent 直接操作 kwara：
 
 ```bash
-python -m pip install -r kwara/requirements-agent.txt
+python -m pip install -r requirements-agent.txt
 claude mcp add kwara -- /abs/path/to/.venv/bin/python -m kwara.mcp_server
 ```
 
@@ -120,13 +120,15 @@ claude mcp add kwara -- /abs/path/to/.venv/bin/python -m kwara.mcp_server
 | `kwara/corroboration.py` | 第三方證據服務（Wayback、urlscan、RFC 3161） |
 | `docs/agent-interface.md` | 完整 CLI 指令參考與 MCP 工具清單 |
 | `docs/analysis-design.md` | 分析層原理與設計——演算法、門檻、必須保留的契約 |
-| `docs/` | 圖解對照誌：鑑識標的 ↔ 數位廣告生態（HTML） |
+| `docs/guide.md` · `docs/guide.zh-TW.md` | 操作說明，中英各一 |
+| `docs/kwara_adtech_crosswalk*.html` | 圖解對照誌：鑑識標的 ↔ 數位廣告生態 |
+| `requirements.txt` · `requirements-agent.txt` · `requirements-dev.txt` | 基本安裝、MCP 額外依賴、測試工具 |
 | `restore_from_export.py` | 從匯出的 ZIP 證據封包還原資料庫 |
 
 > **不要**提交 `.venv`、`kwara/data/`、快照目錄——`.gitignore` 已涵蓋。
 
 ## 延伸閱讀
 
-- **操作說明** — [`kwara_說明文件.md`](kwara_說明文件.md)
+- **操作說明** — [`docs/guide.zh-TW.md`](docs/guide.zh-TW.md)
 - **分析層設計** — [`docs/analysis-design.md`](docs/analysis-design.md) 說明每個聚類函式怎麼運作、為什麼這樣切：兩種「共用參數」的差異、憑證批次簽發窗口、fingerprint regex 為何必須錨定 invocation context，以及重構時不能破壞的契約。
 - **廣告生態對照誌** — 圖解 kwara 各鑑識標的如何對應數位廣告產業（SSP／DSP／DMP、IAB `ads.txt`／`sellers.json`、追蹤 pixel）。線上閱讀：[wcl-dev.github.io/kwara/kwara_adtech_crosswalk.html](https://wcl-dev.github.io/kwara/kwara_adtech_crosswalk.html)（[English](https://wcl-dev.github.io/kwara/kwara_adtech_crosswalk.en.html)），或 clone 後用瀏覽器開啟 `docs/kwara_adtech_crosswalk.html`。
