@@ -204,7 +204,9 @@ def _save_cloaking_alt_snapshot(
     if existing and not force:
         return existing["id"]
 
-    base_dir = _per_capture_dir(scan_run_id)
+    base_dir = _per_capture_dir(
+        scan_run_id, final_url=without_summary.get("final_url"),
+        capture_method=CAPTURE_METHOD_CLOAKING_ALT)
     html_path = os.path.join(base_dir, "page_cloaking_alt.html")
     with open(html_path, "wb") as f:
         f.write(body)

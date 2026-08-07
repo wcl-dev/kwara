@@ -47,7 +47,7 @@ def test_per_capture_dir_lives_under_kwara_data_snapshots():
     p = _per_capture_dir(7)
     assert "/data/snapshots/" in p.replace(os.sep, "/")
     # cleanup
-    os.rmdir(p)
+    import shutil; shutil.rmtree(p)
 
 
 def test_two_scan_runs_have_separate_parent_directories():

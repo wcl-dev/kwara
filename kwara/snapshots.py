@@ -26,7 +26,41 @@ CAPTURE_ERROR = "error"
 CAPTURE_MANUAL = "manual"
 
 
-def _per_capture_dir(scan_run_id: int) -> str:
+CAPTURE_MANIFEST = "capture.json"
+
+
+def _write_capture_manifest(base_dir: str, **meta) -> None:
+    """Drop a small sidecar naming what this capture directory holds.
+
+    The store is keyed by scan_run_id, so `data/snapshots/7/2026…_9fd1/` says
+    nothing on its own about which site it captured — a 6.6 GB tree of integer
+    directories readable only by querying the DB that sits beside it. That is
+    the wrong shape for evidence whose stated promise is that a third party can
+    reproduce what we saw WITHOUT trusting us: hand someone the folder and they
+    should be able to tell what it is.
+
+    Best-effort. A capture must never fail because its label could not be
+    written — the artifacts are the evidence, this is only the caption.
+    """
+    payload = {k: v for k, v in meta.items() if v is not None}
+    # captured_at is when the EVIDENCE was taken; described_at is when this
+    # caption was written. They coincide on a live capture and must not on a
+    # backfill — conflating them would put today's date on May's evidence.
+    payload.setdefault("captured_at", _now())
+    payload["described_at"] = _now()
+    payload["_note"] = ("Describes the capture in this directory. Written by "
+                        "kwara; the artifacts beside it are the evidence.")
+    try:
+        with open(os.path.join(base_dir, CAPTURE_MANIFEST), "w",
+                  encoding="utf-8") as fh:
+            json.dump(payload, fh, ensure_ascii=False, indent=2)
+    except OSError:
+        pass
+
+
+def _per_capture_dir(scan_run_id: int, *, final_url: str | None = None,
+                     capture_method: str | None = None,
+                     case_id: int | None = None) -> str:
     """Per-capture subdirectory under the scan_run's snapshot tree.
 
     Each capture call writes to a fresh timestamped+random directory so
@@ -47,6 +81,10 @@ def _per_capture_dir(scan_run_id: int) -> str:
         f"{ts}_{suffix}",
     )
     os.makedirs(base_dir, exist_ok=True)
+    _write_capture_manifest(
+        base_dir, scan_run_id=scan_run_id, case_id=case_id,
+        final_url=final_url, capture_method=capture_method,
+        final_domain=(urlparse(final_url).hostname or "") if final_url else None)
     return base_dir
 
 
@@ -349,7 +387,8 @@ def snapshot_url(conn: sqlite3.Connection, scan_run_id: int, timeout: int = 30,
     case_id = row['case_id']
     final_domain = urlparse(final_url).hostname or ''
 
-    base_dir = _per_capture_dir(scan_run_id)
+    base_dir = _per_capture_dir(scan_run_id, final_url=final_url,
+                                capture_method="playwright", case_id=case_id)
     screenshot_path = os.path.join(base_dir, 'screenshot.png')
     html_path = os.path.join(base_dir, 'page.html')
 
@@ -422,7 +461,9 @@ def snapshot_batch(conn: sqlite3.Connection, scan_run_ids: list[int],
         if row is None:
             continue
 
-        base_dir = _per_capture_dir(sr_id)
+        base_dir = _per_capture_dir(sr_id, final_url=row["final_url"],
+                                    capture_method="playwright",
+                                    case_id=row["case_id"])
 
         jobs.append({
             "scan_run_id": sr_id,

@@ -83,7 +83,8 @@ def fetch_html_only(
     # don't overwrite earlier artifacts (codex review: silent evidence
     # corruption — snapshots.py uses the same _per_capture_dir helper).
     from snapshots import _per_capture_dir
-    base_dir = _per_capture_dir(scan_run_id)
+    base_dir = _per_capture_dir(scan_run_id, final_url=final_url,
+                                capture_method='http_only', case_id=case_id)
     html_path = os.path.join(base_dir, "page_http_only.html")
 
     capture_status: str = "ok"

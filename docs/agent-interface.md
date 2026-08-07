@@ -317,3 +317,28 @@ python -m kwara.cli evidence list --case 3
 輸出的 `by_domain` 摘要給每個網域的擷取次數、用過哪些方式、範例路徑；`items` 給逐筆細節。每個檔案都做**磁碟實存檢查**：資料庫聲稱存在但檔案已消失的，計入 `missing_screenshot_files`——那正是值得舉報的保管鏈缺口。
 
 MCP 對應工具 `list_evidence(case=..., domain=...)`。
+
+### 證據區：`evidence describe` 與 `evidence browse`
+
+擷取庫的佈局是為了**寫入安全**設計的——每個 scan_run 一個目錄、每次擷取一個子目錄、永不覆蓋。那對保管鏈是對的形狀，對人是錯的形狀。兩個指令補上人這一側，都不搬動任何位元組。
+
+**`evidence describe`** 在每個擷取目錄放一個 `capture.json`（網域、URL、擷取時間、方式、案件）：
+
+```bash
+python -m kwara.cli evidence describe            # 全部回填
+python -m kwara.cli evidence describe --dry-run  # 先看會動幾個
+```
+
+意義在於：把資料夾交給別人、或資料庫壞掉時，**目錄本身仍然說得出自己是什麼**。這才符合「第三方不需要信任我們」那個設計主張。`captured_at` 是證據擷取時間、`described_at` 是說明寫入時間——回填不會把今天的日期蓋在五月的證據上。
+
+**`evidence browse`** 用網域當目錄名，投影出第二個檢視：
+
+```bash
+python -m kwara.cli evidence browse --out ~/evidence-area --case 3
+```
+
+```
+~/evidence-area/visitorlanding.example/2026-05-05T0817_playwright -> 真正的擷取目錄
+```
+
+符號連結，證據不複製也不會分岔；隨時可重建，庫才是真相。**它會拒絕寫入不是自己建立的目錄**——重建前會清空樹，指錯路徑會毀掉別人的東西。

@@ -271,3 +271,56 @@ def test_evidence_list_reports_files_the_db_claims_but_disk_lacks():
     out = args.fn(args)
     assert out["missing_screenshot_files"] == 1
     assert out["items"][0]["screenshot_exists"] is False
+
+
+# ── the evidence area: a second view over the same bytes ───────────────────
+
+def test_capture_manifest_labels_a_directory_the_store_cannot_name():
+    """`data/snapshots/7/2026…_9fd1/` says nothing about which site it holds.
+    Hand someone the folder and they should be able to tell — that is the
+    difference between artifacts and evidence a third party can read."""
+    import json as _json
+    from snapshots import CAPTURE_MANIFEST, _write_capture_manifest
+    import tempfile
+    d = tempfile.mkdtemp()
+    _write_capture_manifest(d, scan_run_id=7, final_url="https://farm.com/",
+                            final_domain="farm.com", capture_method="playwright",
+                            captured_at="2026-05-05 08:00:00 UTC")
+    blob = _json.load(open(os.path.join(d, CAPTURE_MANIFEST)))
+    assert blob["final_domain"] == "farm.com"
+    # captured_at is when the evidence was taken; described_at when the caption
+    # was written. A backfill must not stamp today's date on May's evidence.
+    assert blob["captured_at"] == "2026-05-05 08:00:00 UTC"
+    assert blob["described_at"] != blob["captured_at"]
+
+
+def test_evidence_browse_builds_a_domain_keyed_tree_without_copying():
+    from cli import build_parser
+    import tempfile
+    real = tempfile.mkdtemp()
+    open(os.path.join(real, "screenshot.png"), "w").close()
+    conn, path = _tmp_db_with_snapshot(
+        [(1, "farm.com", os.path.join(real, "screenshot.png"))])
+    out = os.path.join(tempfile.mkdtemp(), "area")
+    args = build_parser().parse_args(
+        ["evidence", "browse", "--out", out, "--db", path])
+    res = args.fn(args)
+    assert res["domains"] == 1 and res["captures_linked"] == 1
+    link = os.path.join(out, "farm.com", os.listdir(os.path.join(out, "farm.com"))[0])
+    assert os.path.islink(link)                    # projected, never copied
+    assert os.path.realpath(link) == os.path.realpath(real)
+
+
+def test_evidence_browse_refuses_a_directory_it_did_not_create():
+    """It clears the tree before rebuilding, so pointing it at the wrong path
+    would destroy work."""
+    from cli import build_parser
+    import tempfile
+    conn, path = _tmp_db_with_snapshot([(1, "farm.com", "/nonexistent/a.png")])
+    theirs = tempfile.mkdtemp()
+    open(os.path.join(theirs, "important.txt"), "w").close()
+    args = build_parser().parse_args(
+        ["evidence", "browse", "--out", theirs, "--db", path])
+    with pytest.raises(SystemExit):
+        args.fn(args)
+    assert os.path.isfile(os.path.join(theirs, "important.txt"))
