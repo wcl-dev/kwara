@@ -232,13 +232,20 @@ def recurring_signals(min_cases: int = 2, index_db: str | None = None) -> dict:
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
-def list_evidence(case: int, db: str | None = None) -> dict:
-    """Captured evidence files for a case, with an on-disk existence check per file.
+def list_evidence(case: int | None = None, domain: str | None = None,
+                  db: str | None = None) -> dict:
+    """Where a domain's captured evidence sits on disk, with existence checks.
+
+    The capture store is keyed by scan_run_id — `data/snapshots/7/2026…_9fd1/`
+    — so the filesystem alone cannot say which domain a directory holds. Pass
+    `domain` to find every capture for a site across all cases, or `case` for
+    one investigation; at least one is required, because without a filter the
+    answer is the whole store.
 
     `missing_screenshot_files` counts rows whose file the database references
     but which are no longer on disk — a chain-of-custody gap worth raising.
     """
-    return _call(cli.cmd_evidence_list, case=case, db=db)
+    return _call(cli.cmd_evidence_list, case=case, domain=domain, db=db)
 
 
 @mcp.tool()

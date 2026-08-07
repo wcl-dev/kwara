@@ -292,3 +292,28 @@ endpoint 索引裡多數是網頁碰巧載入的廣告科技，而「稀有」�
 不需要任何門檻。MCP 對應工具 `operator_cross_links`。
 
 實際產出（2026-08-06）：QSH 的 `hubsite.example`／`satellitesite.example`／`satellite2site.example` 都從 `statics.privatecdn.example` 與 `s1.privatecdn2.example` 載入靜態資源——那是 01 家族叢集的私有 CDN。這條連結在 HAR 裡躺了三個月，而且推翻了先前依 ads.txt 帳號得出的「兩案無關聯」判斷。
+
+### `evidence list` — 證據在哪
+
+擷取庫是用 `scan_run_id` 當門牌：
+
+```
+kwara/data/snapshots/7/20260505T081730971984_9fd1/screenshot.png
+                     ↑ scan_run_id
+```
+
+**6.6 GB 的證據，目錄名全是數字**，檔案系統本身看不出哪個目錄屬於哪個網域。把它翻譯回來是 Streamlit UI 唯一不可替代的功能。
+
+```bash
+# 這個網域的證據在哪（跨所有案件）
+python -m kwara.cli evidence list --domain visitorlanding.example
+
+# 這個案件有哪些證據
+python -m kwara.cli evidence list --case 3
+```
+
+`--case` 與 `--domain` 至少要給一個——都不給的話答案是整個庫，那不算答案。
+
+輸出的 `by_domain` 摘要給每個網域的擷取次數、用過哪些方式、範例路徑；`items` 給逐筆細節。每個檔案都做**磁碟實存檢查**：資料庫聲稱存在但檔案已消失的，計入 `missing_screenshot_files`——那正是值得舉報的保管鏈缺口。
+
+MCP 對應工具 `list_evidence(case=..., domain=...)`。

@@ -394,33 +394,86 @@ def cmd_index_recurring(args):
 # ---------------------------------------------------------------------------
 
 def cmd_evidence_list(args):
+    """Where the evidence for a domain actually sits on disk.
+
+    The capture store is keyed by scan_run_id — `data/snapshots/7/2026…_9fd1/`
+    — so the filesystem alone cannot say which domain a 6.6 GB tree belongs to.
+    Translating that back is what the Streamlit UI was uniquely doing, and it
+    is why removing the UI without this leaves an analyst unable to find a
+    screenshot they know exists.
+
+    Either `--case` or `--domain` is required; without one the answer is the
+    whole store, which is not an answer.
+    """
     from cases import require_case
     conn = _open_db(args)
-    require_case(conn, args.case)
+    where, params = [], []
+    if args.case:
+        require_case(conn, args.case)
+        where.append("ua.case_id = ?")
+        params.append(args.case)
+    if args.domain:
+        # Substring so a bare apex finds its subdomains and www. variants.
+        where.append("LOWER(COALESCE(s.final_domain, sr.final_url)) LIKE ?")
+        params.append(f"%{args.domain.strip().lower()}%")
+    if not where:
+        raise SystemExit("evidence list: pass --case and/or --domain")
+
     rows = conn.execute(
-        """SELECT s.id AS snapshot_id, s.scan_run_id, sr.final_url,
-                  s.screenshot_path, s.html_path, s.har_path, s.capture_status
-           FROM snapshots s
-           JOIN scan_runs sr ON sr.id = s.scan_run_id
-           JOIN url_artifacts ua ON ua.id = sr.url_artifact_id
-           WHERE ua.case_id = ?
-           ORDER BY s.id""",
-        (args.case,),
+        f"""SELECT s.id AS snapshot_id, s.scan_run_id, ua.case_id,
+                   COALESCE(s.final_domain, '') AS final_domain,
+                   sr.final_url, s.captured_at, s.capture_method,
+                   s.capture_status, s.screenshot_path, s.html_path, s.har_path
+              FROM snapshots s
+              JOIN scan_runs sr ON sr.id = s.scan_run_id
+              JOIN url_artifacts ua ON ua.id = sr.url_artifact_id
+             WHERE {' AND '.join(where)}
+             ORDER BY final_domain, s.captured_at, s.id""",
+        params,
     ).fetchall()
 
-    out = []
+    out, by_domain = [], {}
     for r in rows:
         item = dict(r)
-        # Report on-disk truth, not just what the DB claims. A row pointing at
-        # a deleted file is exactly the chain-of-custody gap worth surfacing.
+        # On-disk truth, not what the DB claims. A row pointing at a deleted
+        # file is exactly the chain-of-custody gap worth surfacing.
         for col in ("screenshot_path", "html_path", "har_path"):
             item[col.replace("_path", "_exists")] = bool(
                 item[col] and os.path.isfile(item[col]))
+        domain = item["final_domain"] or "(unknown)"
+        d = by_domain.setdefault(domain, {
+            "domain": domain, "captures": 0, "screenshots": 0,
+            "missing_files": 0, "methods": set(), "capture_dirs": set()})
+        d["captures"] += 1
+        d["screenshots"] += int(item["screenshot_exists"])
+        d["missing_files"] += sum(
+            1 for c in ("screenshot_path", "html_path", "har_path")
+            if item[c] and not item[c.replace("_path", "_exists")])
+        if item["capture_method"]:
+            d["methods"].add(item["capture_method"])
+        for c in ("screenshot_path", "html_path", "har_path"):
+            if item[c]:
+                d["capture_dirs"].add(os.path.dirname(item[c]))
         out.append(item)
-    missing = sum(1 for i in out
-                  if i["screenshot_path"] and not i["screenshot_exists"])
-    return {"case_id": args.case, "snapshots": len(out),
-            "missing_screenshot_files": missing, "items": out}
+
+    # The summary answers "where do I look", so it carries a few example
+    # paths and a count — not 276 directories, which is the store again.
+    summary = sorted(
+        ({k: v for k, v in d.items() if k != "capture_dirs"}
+         | {"methods": sorted(d["methods"]),
+            "capture_dir_count": len(d["capture_dirs"]),
+            "capture_dirs_sample": sorted(d["capture_dirs"])[:3]}
+         for d in by_domain.values()),
+        key=lambda x: x["domain"])
+    return {
+        "case_id": args.case,
+        "domain_filter": args.domain,
+        "snapshots": len(out),
+        "missing_screenshot_files": sum(
+            1 for i in out if i["screenshot_path"] and not i["screenshot_exists"]),
+        "by_domain": summary,
+        "items": out,
+    }
 
 
 def cmd_export_case(args):
@@ -759,7 +812,10 @@ def build_parser() -> argparse.ArgumentParser:
     ev = sub.add_parser("evidence", help="captured evidence files").add_subparsers(
         dest="cmd", required=True)
     e_list = _leaf(ev, "list", help="snapshot files on disk, with existence checks")
-    e_list.add_argument("--case", type=int, required=True)
+    e_list.add_argument("--case", type=int,
+                        help="limit to one case (or use --domain)")
+    e_list.add_argument("--domain",
+                        help="find every capture for a domain, across cases")
     e_list.set_defaults(fn=cmd_evidence_list)
 
     exp = sub.add_parser("export", help="evidence pack").add_subparsers(

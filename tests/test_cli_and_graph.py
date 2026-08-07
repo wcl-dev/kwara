@@ -199,3 +199,75 @@ def test_core_modules_import_without_streamlit():
         mod = importlib.import_module(name)
         src = open(mod.__file__, encoding="utf-8").read()
         assert "import streamlit" not in src, f"{name} imports streamlit"
+
+
+def _tmp_db_with_snapshot(rows):
+    """rows: [(scan_run_id_seed, final_domain, screenshot_path), ...]"""
+    import tempfile, os as _os
+    from datetime import datetime, timezone
+    from db import get_conn, init_db, migrate_db
+    now = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    path = _os.path.join(tempfile.mkdtemp(), "case.db")
+    conn = get_conn(path); init_db(conn); migrate_db(conn)
+    cid = conn.execute(
+        "INSERT INTO cases (title, description, created_at, updated_at) "
+        "VALUES ('t','',?,?)", (now, now)).lastrowid
+    for _seed, domain, shot in rows:
+        pid = conn.execute(
+            """INSERT INTO message_evidence (case_id, platform, permalink,
+               actor_label, posted_at, message_text, screenshot_path, ingested_at)
+               VALUES (?,'','','','','','',?)""", (cid, now)).lastrowid
+        ua = conn.execute(
+            "INSERT INTO url_artifacts (message_id, case_id, original_url, domain, "
+            "url_order, created_at) VALUES (?,?,?,'',0,?)",
+            (pid, cid, f"https://{domain}/", now)).lastrowid
+        sr = conn.execute(
+            "INSERT INTO scan_runs (url_artifact_id, run_at, final_url, hop_count, "
+            "status) VALUES (?,?,?,0,'done')",
+            (ua, now, f"https://{domain}/")).lastrowid
+        conn.execute(
+            """INSERT INTO snapshots (scan_run_id, final_url, final_domain,
+               captured_at, capture_method, capture_status, screenshot_path)
+               VALUES (?,?,?,?,'playwright','ok',?)""",
+            (sr, f"https://{domain}/", domain, now, shot))
+    conn.commit()
+    return conn, path
+
+
+# ── evidence lookup: translating scan_run_id back to a domain ──────────────
+
+def test_evidence_list_finds_captures_by_domain_across_cases():
+    """The capture store is keyed by scan_run_id, so the filesystem cannot say
+    which domain `data/snapshots/7/2026…_9fd1/` belongs to. Translating that
+    back is what the Streamlit UI was uniquely doing; an analyst who cannot do
+    it cannot find a screenshot they know exists."""
+    from cli import build_parser
+    conn, path = _tmp_db_with_snapshot(
+        [(1, "farm.com", "/nonexistent/a.png"),
+         (2, "farm.com", "/nonexistent/b.png"),
+         (3, "other.com", "/nonexistent/c.png")])
+    args = build_parser().parse_args(
+        ["evidence", "list", "--domain", "farm.com", "--db", path])
+    out = args.fn(args)
+    assert out["snapshots"] == 2
+    assert [d["domain"] for d in out["by_domain"]] == ["farm.com"]
+    assert out["by_domain"][0]["captures"] == 2
+
+
+def test_evidence_list_requires_a_filter():
+    """Without one the answer is the whole store, which is not an answer."""
+    from cli import build_parser
+    conn, path = _tmp_db_with_snapshot([(1, "farm.com", "/nonexistent/a.png")])
+    args = build_parser().parse_args(["evidence", "list", "--db", path])
+    with pytest.raises(SystemExit):
+        args.fn(args)
+
+
+def test_evidence_list_reports_files_the_db_claims_but_disk_lacks():
+    from cli import build_parser
+    conn, path = _tmp_db_with_snapshot([(1, "farm.com", "/nonexistent/gone.png")])
+    args = build_parser().parse_args(
+        ["evidence", "list", "--domain", "farm.com", "--db", path])
+    out = args.fn(args)
+    assert out["missing_screenshot_files"] == 1
+    assert out["items"][0]["screenshot_exists"] is False
