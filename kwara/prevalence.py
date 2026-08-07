@@ -69,12 +69,15 @@ def load(path: str | None = None) -> Prevalence | None:
     analysis layer calls this per aggregation, but a rebuilt table must still
     be picked up without restarting.
     """
-    p = os.path.expanduser(path or ADS_TXT_PREVALENCE_PATH)
+    # realpath: a relative path resolved from a different cwd, or a symlink
+    # swapped between deployments, would otherwise hit a cache entry keyed on
+    # a string that no longer means the same file.
+    p = os.path.realpath(os.path.expanduser(path or ADS_TXT_PREVALENCE_PATH))
     if not p or not os.path.isfile(p):
         return None
     try:
         st = os.stat(p)
-        key = (p, st.st_mtime_ns, st.st_size)
+        key = (p, st.st_mtime_ns, st.st_size, st.st_ino)
     except OSError:
         return None
     if key in _cache:
@@ -95,6 +98,17 @@ def _read(p: str) -> Prevalence | None:
         site_count = int(blob.get("site_count") or 0)
         if not isinstance(accounts, dict) or site_count <= 0:
             return None
-        return Prevalence(accounts, site_count, blob.get("source") or "")
+        # Validate the values, not just the container. A schema-valid file
+        # holding {"x.com|1": "10"} used to load fine and then raise TypeError
+        # deep inside tier analysis — the opposite of the promise that a
+        # missing or corrupt table degrades to thresholds.
+        clean: dict[str, int] = {}
+        for key, hits in accounts.items():
+            if not isinstance(key, str) or isinstance(hits, bool):
+                return None
+            if not isinstance(hits, int) or hits < 0 or hits > site_count:
+                return None
+            clean[key] = hits
+        return Prevalence(clean, site_count, blob.get("source") or "")
     except (OSError, ValueError, TypeError):
         return None

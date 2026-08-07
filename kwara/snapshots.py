@@ -43,10 +43,13 @@ def _write_capture_manifest(base_dir: str, **meta) -> None:
     written — the artifacts are the evidence, this is only the caption.
     """
     payload = {k: v for k, v in meta.items() if v is not None}
-    # captured_at is when the EVIDENCE was taken; described_at is when this
-    # caption was written. They coincide on a live capture and must not on a
-    # backfill — conflating them would put today's date on May's evidence.
-    payload.setdefault("captured_at", _now())
+    # This runs when the directory is ALLOCATED, before the capture starts —
+    # a headed retry or a timeout can put minutes between the two. So the
+    # sidecar records directory_created_at here and carries captured_at only
+    # when a caller actually knows it (the backfill reads it from the DB).
+    # Claiming allocation time as capture time would hand a third party two
+    # different capture timestamps for the same artifact.
+    payload["directory_created_at"] = _now()
     payload["described_at"] = _now()
     payload["_note"] = ("Describes the capture in this directory. Written by "
                         "kwara; the artifacts beside it are the evidence.")
@@ -72,15 +75,28 @@ def _per_capture_dir(scan_run_id: int, *, final_url: str | None = None,
     Layout:
       data/snapshots/{scan_run_id}/{YYYYMMDDTHHMMSSffffff}_{rand4}/
     """
-    ts = datetime.now(tz=timezone.utc).strftime("%Y%m%dT%H%M%S%f")
-    suffix = secrets.token_hex(2)  # 4 hex chars; defends against same-microsecond collisions
-    base_dir = os.path.join(
-        os.path.dirname(__file__),
-        "data", "snapshots",
-        str(scan_run_id),
-        f"{ts}_{suffix}",
-    )
-    os.makedirs(base_dir, exist_ok=True)
+    parent = os.path.join(os.path.dirname(__file__), "data", "snapshots",
+                          str(scan_run_id))
+    os.makedirs(parent, exist_ok=True)
+    # EXCLUSIVE creation, retried. exist_ok=True silently accepted a collision
+    # between two captures that landed in the same microsecond with the same
+    # 16-bit suffix, and both then wrote the same fixed filenames — an older
+    # snapshot row would point at overwritten bytes, which invariant 7 exists
+    # to prevent. Concurrency here is real: snapshot_batch runs captures in
+    # parallel over one scan_run's URLs.
+    base_dir = ""
+    for _ in range(8):
+        ts = datetime.now(tz=timezone.utc).strftime("%Y%m%dT%H%M%S%f")
+        candidate = os.path.join(parent, f"{ts}_{secrets.token_hex(2)}")
+        try:
+            os.mkdir(candidate)
+            base_dir = candidate
+            break
+        except FileExistsError:
+            continue
+    if not base_dir:
+        raise RuntimeError(
+            f"could not allocate a fresh capture directory under {parent}")
     _write_capture_manifest(
         base_dir, scan_run_id=scan_run_id, case_id=case_id,
         final_url=final_url, capture_method=capture_method,

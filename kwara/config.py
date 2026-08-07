@@ -384,13 +384,17 @@ ADS_TXT_COMMODITY_PREVALENCE: float = float(
 # origin behind a CDN, x-powered-by carries fabricated versions, x-drupal-cache
 # and x-aspnet-version pin a stack. Universal tokens like bare "cloudflare"
 # are filtered separately by value, via clusters._is_generic_weak.
-# Minimum distinctiveness for an indexed header value. A cross-case match on
-# "MISS" (x-drupal-cache) or "0" (x-age) links any two Drupal sites and any two
-# cached responses — the header NAME reveals the stack there, the value does
-# not, and only the value is what gets matched. Structured values pass:
-# anything containing "/" (Apache/2.5.1, PHP/7.4.21) or long enough to be a
-# real version or vendor string. "ASP.NET" and "5.2" are correctly dropped —
-# they are shared by millions of unrelated hosts.
+# Minimum length for an indexed header value. This filters SHAPE, not
+# uniqueness, and the distinction matters: an earlier version of this comment
+# claimed structured values are distinctive, which conflates syntax with
+# deployment identity. "nginx/1.24.0" and "PHP/7.4.21" are structured AND
+# shared by millions of hosts; nothing local can tell them from a version only
+# one operator runs. What the filter does achieve is removing values that
+# carry nothing at all — "MISS" (x-drupal-cache), "0" (x-age) — where the
+# header NAME reveals the stack and only the VALUE is ever matched.
+#
+# So a header_value recurrence is a LEAD, not a link. recurring_signals
+# reports domain_count; weigh it there.
 HEADER_VALUE_MIN_LENGTH: int = int(
     os.environ.get("KWARA_HEADER_VALUE_MIN_LENGTH", "8")
 )

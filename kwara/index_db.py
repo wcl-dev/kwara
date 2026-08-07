@@ -60,10 +60,13 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
-from config import (ADS_TXT_INDEX_MAX_CARRIER_ACCOUNTS, ADS_TXT_MANAGER_BREADTH,
-                    HEADER_VALUE_MIN_LENGTH, HEADER_VALUE_STANDARD_NOISE)
-from clustering_infra import (MAJOR_AD_EXCHANGES, _is_noise_endpoint,
-                              shared_ad_accounts)
+from config import (ADS_TXT_COMMODITY_PREVALENCE,
+                    ADS_TXT_INDEX_MAX_CARRIER_ACCOUNTS, ADS_TXT_MANAGER_BREADTH,
+                    ADS_TXT_MANAGER_MIN_APEXES, HEADER_VALUE_MIN_LENGTH,
+                    HEADER_VALUE_STANDARD_NOISE)
+import prevalence as _prevalence
+from clustering_infra import (MAJOR_AD_EXCHANGES, _account_apex_footprint,
+                              _is_noise_endpoint, shared_ad_accounts)
 from utils.domain import extract_domain_from_url
 from sql import LATEST_DONE_SCAN_RUN, latest_usable_snapshot
 
@@ -330,15 +333,18 @@ def extract_case_signals(
     # an investigation corpus is all suspects, and the endpoints that look rare
     # here are simply DSPs only one landing page happened to call. The index
     # remembers; judging is the analyst's, at query time, with domain_count.
+    # Invariant 6: take the latest USABLE snapshot, not every snapshot ever
+    # taken. Joining them all preserved endpoints from failed or superseded
+    # captures, so a re-scan that no longer contacts a host could not remove
+    # it — and a full refresh could not either, because extraction reread the
+    # whole history every time.
     for r in conn.execute(
         f"""SELECT s.final_domain, s.request_domains_json, sr.id AS scan_run_id,
                    sr.run_at
               FROM url_artifacts ua
               JOIN scan_runs sr ON sr.id = {LATEST_DONE_SCAN_RUN}
-              JOIN snapshots s ON s.scan_run_id = sr.id
-             WHERE ua.case_id = ?
-               AND s.request_domains_json IS NOT NULL
-               AND TRIM(s.request_domains_json) != ''""",
+              JOIN snapshots s ON s.id = {latest_usable_snapshot("request_domains_json")}
+             WHERE ua.case_id = ?""",
         (case_id,),
     ).fetchall():
         landing = (r["final_domain"] or "").lower()
@@ -412,6 +418,14 @@ def extract_case_signals(
     _demoted_multi = {(a["adsystem"], a["seller_id"])
                       for a in _ads_clusters["by_account"]
                       if a["tier"] != "operator"}
+    # shared_ad_accounts only ever sees accounts carried by 2+ domains in THIS
+    # case, so a singleton reached the index having faced none of the measures
+    # that decide the tier. An account on 30% of ordinary publishers, appearing
+    # once in case A and once in case B, was indexed twice and then reported by
+    # recurring_signals as a cross-case operator recurrence. The two objective
+    # tests are cheap and case-independent, so apply them here directly.
+    _ref = _prevalence.load()
+    _global_apexes = _account_apex_footprint(conn)
 
     # Second pass: emit, applying the operator-tier filter to accounts.
     for srid, run_at, domain, ads in parsed_ads:
@@ -452,6 +466,11 @@ def extract_case_signals(
                 continue
             if key in _demoted_multi:
                 continue
+            if len(_global_apexes.get(key, ())) >= ADS_TXT_MANAGER_MIN_APEXES:
+                continue          # broad DB-wide footprint, however this case looks
+            _ratio = _ref.ratio(adsystem, seller_id) if _ref else None
+            if _ratio is not None and _ratio >= ADS_TXT_COMMODITY_PREVALENCE:
+                continue          # measured commodity among ordinary publishers
             breadth = len(account_domains[key]) / denom
             if breadth >= ADS_TXT_MANAGER_BREADTH:
                 continue  # manager-wide account — don't pollute the index

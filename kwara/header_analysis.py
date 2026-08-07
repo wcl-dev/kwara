@@ -34,13 +34,20 @@ from urllib.parse import urlparse
 
 def _iter_hops_with_headers(conn: sqlite3.Connection, case_id: int):
     """Yield (hop_url_domain, [[k, v], ...]) for every redirect_hop in
-    `case_id` that has response_headers_json populated."""
+    `case_id` that has response_headers_json populated.
+
+    Restricted to scans that COMPLETED. A failed or aborted scan's hops are
+    not evidence of what a site constantly serves, and counting them let a
+    header seen only in an old failed attempt qualify as a per-domain constant
+    while the index attributed it to the latest successful scan — provenance
+    pointing at a run that never observed it."""
     rows = conn.execute(
         """SELECT rh.url, rh.response_headers_json
            FROM redirect_hops rh
            JOIN scan_runs sr ON sr.id = rh.scan_run_id
            JOIN url_artifacts ua ON ua.id = sr.url_artifact_id
            WHERE ua.case_id = ?
+             AND sr.status = 'done'
              AND rh.response_headers_json IS NOT NULL
              AND TRIM(rh.response_headers_json) != ''""",
         (case_id,),

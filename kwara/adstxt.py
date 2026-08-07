@@ -129,12 +129,16 @@ def _fetch_ads_txt(final_url: str, timeout: int) -> dict[str, Any]:
             stream=True,
         )
         body = bytearray()
+        truncated = False
         for chunk in resp.iter_content(chunk_size=8192):
             if not chunk:
                 continue
             remaining = ADS_TXT_MAX_BYTES - len(body)
             if remaining <= 0:
+                truncated = True
                 break
+            if len(chunk) > remaining:
+                truncated = True
             body.extend(chunk[:remaining])
     except requests.exceptions.RequestException as exc:
         return {"status": "error", "error": str(exc)[:300],
@@ -145,7 +149,11 @@ def _fetch_ads_txt(final_url: str, timeout: int) -> dict[str, Any]:
         "url":         url,
         "status_code": resp.status_code,
         "fetched_at":  now,
-        "raw_sha256":  hashlib.sha256(body_bytes).hexdigest(),
+        # None when the read hit ADS_TXT_MAX_BYTES: a prefix hash would be
+        # matched as byte-identity by the template clustering downstream.
+        "truncated":   truncated,
+        "raw_sha256":  (None if truncated
+                        else hashlib.sha256(body_bytes).hexdigest()),
     }
     if resp.status_code != 200:
         # 403 / 3xx / 404 etc. — record status, no records to parse.

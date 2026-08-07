@@ -234,5 +234,17 @@ def init_db(conn: sqlite3.Connection) -> None:
         at        TEXT NOT NULL,
         meta_json TEXT
     );
+
+    -- Every analysis aggregation pins "the latest done scan_run for this
+    -- url_artifact" via a correlated subquery (sql.LATEST_DONE_SCAN_RUN).
+    -- Without this index SQLite scans scan_runs once per url_artifact, which
+    -- is O(artifacts x scan_runs) — fine at a hundred URLs, pathological at
+    -- the scale a cross-case index is built for.
+    CREATE INDEX IF NOT EXISTS idx_scan_runs_artifact_status
+        ON scan_runs(url_artifact_id, status, id);
+    CREATE INDEX IF NOT EXISTS idx_snapshots_scan_run
+        ON snapshots(scan_run_id, capture_status, id);
+    CREATE INDEX IF NOT EXISTS idx_redirect_hops_scan_run
+        ON redirect_hops(scan_run_id);
     """)
     conn.commit()

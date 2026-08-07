@@ -230,12 +230,16 @@ def fetch_for_screening(domain: str, *,
                            headers={"User-Agent": SCANNER_USER_AGENT},
                            stream=True)
         body = bytearray()
+        truncated = False
         for chunk in resp.iter_content(chunk_size=8192):
             if not chunk:
                 continue
             remaining = ADS_TXT_MAX_BYTES - len(body)
             if remaining <= 0:
+                truncated = True
                 break
+            if len(chunk) > remaining:
+                truncated = True
             body.extend(chunk[:remaining])
     except requests.exceptions.RequestException as exc:
         return {"status": "error", "error": str(exc)[:200], "url": url,
@@ -250,9 +254,15 @@ def fetch_for_screening(domain: str, *,
                 "fetched_at": now}
 
     body_bytes = bytes(body)
+    # A hash over a TRUNCATED body is not the file's hash. Template matching
+    # treats an equal sha256 as byte-identity, the strongest claim this tool
+    # makes about shared operation — two files sharing a 256 KB prefix and
+    # differing after it would be reported as the same deployment. So a
+    # truncated read reports no hash at all rather than a misleading one.
     out: dict[str, Any] = {"url": url, "status_code": resp.status_code,
-                           "fetched_at": now,
-                           "raw_sha256": hashlib.sha256(body_bytes).hexdigest()}
+                           "fetched_at": now, "truncated": truncated,
+                           "raw_sha256": (None if truncated
+                                          else hashlib.sha256(body_bytes).hexdigest())}
     if resp.status_code != 200:
         out.update({"status": "non_200", "records": [], "record_count": 0})
         return out
@@ -387,6 +397,11 @@ def build_prevalence(observations: Iterable[dict[str, Any]]) -> dict[str, Any]:
     whole job is to be an OUTSIDE population. Feeding it an investigation's own
     domains would rebuild the very bias it exists to remove.
     """
+    # Count DISTINCT (site, account) pairs. Counting observations meant a
+    # domain banked twice — a resumed sweep, two concatenated runs — inflated
+    # its accounts while `site_count` deduplicated, producing ratios above 1.0
+    # and silently demoting genuinely rare accounts to manager.
+    seen: set[tuple[str, str]] = set()
     counts: dict[str, int] = defaultdict(int)
     sites: set[str] = set()
     for o in observations:
@@ -398,7 +413,11 @@ def build_prevalence(observations: Iterable[dict[str, Any]]) -> dict[str, Any]:
         sites.add(domain)
         for acct in (o.get("accounts") or []):
             if len(acct) == 2 and all(acct):
-                counts[f"{str(acct[0]).lower()}|{str(acct[1]).strip()}"] += 1
+                key = f"{str(acct[0]).lower()}|{str(acct[1]).strip()}"
+                if (domain, key) in seen:
+                    continue
+                seen.add((domain, key))
+                counts[key] += 1
     return {
         "schema": "kwara-ads-prevalence/1",
         "site_count": len(sites),
