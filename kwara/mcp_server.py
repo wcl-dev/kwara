@@ -27,9 +27,8 @@ import argparse
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import cli  # noqa: E402  — needs the sys.path line above
+from . import cli
 
 try:
     from mcp.server.fastmcp import FastMCP
@@ -349,7 +348,7 @@ def build_prevalence_table(
 
 
 def _set_lang(lang: str) -> None:
-    from i18n import set_lang
+    from .i18n import set_lang
     if lang in ("en", "zh-TW"):
         set_lang(lang)
 

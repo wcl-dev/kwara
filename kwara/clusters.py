@@ -28,16 +28,16 @@ import os
 import sqlite3
 from collections import defaultdict
 
-from palette import GROUP_PALETTE
+from .palette import GROUP_PALETTE
 
-from clustering_infra import (
+from .clustering_infra import (
     shared_ad_accounts,
     shared_certificates,
     shared_tracking_ids,
 )
-from header_analysis import cross_domain_shared_template, detect_fake_versions
-from insights import _count_cloaking_suspects
-from opsec import compute_opsec_profile
+from .header_analysis import cross_domain_shared_template, detect_fake_versions
+from .insights import _count_cloaking_suspects
+from .opsec import compute_opsec_profile
 
 # ── Confidence tiers (neutral; from the report) ───────────────────────────
 TIER_CONFIRMED = "確證同群"      # bound by a shared hard identifier

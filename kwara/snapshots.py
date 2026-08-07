@@ -7,15 +7,15 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
-from audit import write_audit
-from config import (
+from .audit import write_audit
+from .config import (
     HIGH_TRACKER_THRESHOLD,
     KNOWN_SHORTLINK_DOMAINS,
     SUSPICIOUS_EXTS,
     TRACKER_DOMAINS,
 )
-from fingerprints import extract_tracking_ids_from_file
-from lightweight_fetch import CAPTURE_METHOD_PLAYWRIGHT
+from .fingerprints import extract_tracking_ids_from_file
+from .lightweight_fetch import CAPTURE_METHOD_PLAYWRIGHT
 
 CAPTURE_OK = "ok"
 CAPTURE_CF = "cf_challenge"
@@ -291,7 +291,7 @@ def _apply_wayback_if_needed(
     html_path: str | None,
 ) -> tuple[str | None, str | None, str | None, bool]:
     """Returns (screenshot_path, html_path, error_note, used_wayback)."""
-    from wayback_fallback import try_wayback_evidence
+    from .wayback_fallback import try_wayback_evidence
 
     ss_ok, html_ok = _validate_files(screenshot_path, html_path)
     if ss_ok and html_ok and not error_note:

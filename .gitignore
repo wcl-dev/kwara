@@ -68,3 +68,8 @@ reports/
 /PRESENTATION_SOURCE.md
 /shortlink_abuse_evidence_kit_mvp_8290f6f4.plan.md
 /backfill_tracking_ids.py
+
+# 可編輯安裝的產物
+*.egg-info/
+/build/
+/dist/

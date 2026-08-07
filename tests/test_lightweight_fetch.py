@@ -12,8 +12,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
-from db import get_conn, init_db, migrate_db
-from lightweight_fetch import (
+from kwara.db import get_conn, init_db, migrate_db
+from kwara.lightweight_fetch import (
     CAPTURE_METHOD_HTTP_ONLY,
     MAX_HTML_BYTES,
     fetch_html_only,
@@ -83,7 +83,7 @@ def _fake_response(body: bytes, status_code: int = 200):
 # Happy path
 # ---------------------------------------------------------------------------
 
-@patch("lightweight_fetch.requests.get")
+@patch("kwara.lightweight_fetch.requests.get")
 def test_successful_fetch_writes_html_and_extracts_pixel(mock_get):
     conn = _make_db()
     case_id = _make_case(conn)
@@ -110,7 +110,7 @@ def test_successful_fetch_writes_html_and_extracts_pixel(mock_get):
     assert ids == {"Meta Pixel": ["1234567890123456"]}
 
 
-@patch("lightweight_fetch.requests.get")
+@patch("kwara.lightweight_fetch.requests.get")
 def test_no_pixel_in_html_writes_null_tracking_ids(mock_get):
     conn = _make_db()
     case_id = _make_case(conn)
@@ -130,7 +130,7 @@ def test_no_pixel_in_html_writes_null_tracking_ids(mock_get):
 # Failure paths — each should still create a snapshot row recording the failure
 # ---------------------------------------------------------------------------
 
-@patch("lightweight_fetch.requests.get")
+@patch("kwara.lightweight_fetch.requests.get")
 def test_timeout_records_timeout_status(mock_get):
     conn = _make_db()
     case_id = _make_case(conn)
@@ -148,7 +148,7 @@ def test_timeout_records_timeout_status(mock_get):
     assert row["tracking_ids_json"] is None
 
 
-@patch("lightweight_fetch.requests.get")
+@patch("kwara.lightweight_fetch.requests.get")
 def test_http_error_records_error_status(mock_get):
     conn = _make_db()
     case_id = _make_case(conn)
@@ -164,7 +164,7 @@ def test_http_error_records_error_status(mock_get):
     assert "403" in (row["capture_detail"] or "")
 
 
-@patch("lightweight_fetch.requests.get")
+@patch("kwara.lightweight_fetch.requests.get")
 def test_connection_error_records_error_status(mock_get):
     conn = _make_db()
     case_id = _make_case(conn)
@@ -180,7 +180,7 @@ def test_connection_error_records_error_status(mock_get):
     assert "DNS" in (row["capture_detail"] or "")
 
 
-@patch("lightweight_fetch.requests.get")
+@patch("kwara.lightweight_fetch.requests.get")
 def test_redirect_response_does_not_capture_html(mock_get):
     """Codex review #5: allow_redirects=False so we don't silently capture
     HTML from a different host than what's recorded. A 3xx response
@@ -210,7 +210,7 @@ def test_redirect_response_does_not_capture_html(mock_get):
 # Body cap
 # ---------------------------------------------------------------------------
 
-@patch("lightweight_fetch.requests.get")
+@patch("kwara.lightweight_fetch.requests.get")
 def test_response_capped_at_max_bytes(mock_get):
     conn = _make_db()
     case_id = _make_case(conn)
@@ -276,7 +276,7 @@ def test_scan_run_with_null_final_url_raises():
 # Batch
 # ---------------------------------------------------------------------------
 
-@patch("lightweight_fetch.requests.get")
+@patch("kwara.lightweight_fetch.requests.get")
 def test_batch_continues_after_per_url_failure(mock_get):
     """One URL fails (timeout), others succeed — batch returns all snapshot
     ids and doesn't abort."""

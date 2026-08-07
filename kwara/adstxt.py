@@ -34,8 +34,8 @@ from urllib.parse import urlparse, urlunparse
 
 import requests
 
-from audit import write_audit
-from config import ADS_TXT_MAX_BYTES, ADS_TXT_TIMEOUT, SCANNER_USER_AGENT
+from .audit import write_audit
+from .config import ADS_TXT_MAX_BYTES, ADS_TXT_TIMEOUT, SCANNER_USER_AGENT
 
 # Relationship tokens defined by the ads.txt spec. Anything else in the
 # 3rd field is normalised to the upper-cased raw token (kept, not dropped,

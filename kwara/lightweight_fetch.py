@@ -24,9 +24,9 @@ from urllib.parse import urlparse
 
 import requests
 
-from audit import write_audit
-from config import HTTP_TIMEOUT, SCANNER_USER_AGENT
-from fingerprints import extract_tracking_ids_from_file
+from .audit import write_audit
+from .config import HTTP_TIMEOUT, SCANNER_USER_AGENT
+from .fingerprints import extract_tracking_ids_from_file
 
 
 CAPTURE_METHOD_PLAYWRIGHT   = "playwright"
@@ -82,7 +82,7 @@ def fetch_html_only(
     # Per-capture subdir so repeated lightweight fetches on the same scan
     # don't overwrite earlier artifacts (codex review: silent evidence
     # corruption — snapshots.py uses the same _per_capture_dir helper).
-    from snapshots import _per_capture_dir
+    from .snapshots import _per_capture_dir
     base_dir = _per_capture_dir(scan_run_id, final_url=final_url,
                                 capture_method='http_only', case_id=case_id)
     html_path = os.path.join(base_dir, "page_http_only.html")

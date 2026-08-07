@@ -21,7 +21,7 @@ import sqlite3
 from collections import defaultdict
 from typing import Any
 
-from config import OPSEC_LW_HIGH, OPSEC_LW_LOW, OPSEC_PW_MIN
+from .config import OPSEC_LW_HIGH, OPSEC_LW_LOW, OPSEC_PW_MIN
 
 
 # capture_status values that count as 'analyst got usable evidence'

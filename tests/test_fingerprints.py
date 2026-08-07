@@ -8,7 +8,7 @@ because the same IDs are later used as cross-domain operator attribution.
 import os
 import tempfile
 
-from fingerprints import (
+from kwara.fingerprints import (
     _looks_like_placeholder,
     extract_tracking_ids,
     extract_tracking_ids_from_file,

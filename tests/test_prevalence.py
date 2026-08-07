@@ -10,8 +10,8 @@ import os
 import sqlite3
 import tempfile
 
-import prevalence
-from clustering_infra import shared_ad_accounts
+from kwara import prevalence
+from kwara.clustering_infra import shared_ad_accounts
 from test_shared_ad_accounts import _add, _ads_json, _filler, _make_case, _make_db
 
 

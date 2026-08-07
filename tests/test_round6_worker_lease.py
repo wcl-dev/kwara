@@ -9,8 +9,8 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from db import get_conn, init_db, migrate_db
-from scanner import reclaim_stuck_scans
+from kwara.db import get_conn, init_db, migrate_db
+from kwara.scanner import reclaim_stuck_scans
 
 
 def _now():
@@ -113,7 +113,7 @@ def test_grab_tls_info_dict_shape_includes_transport_keys():
     (full SSL handshake is exercised in QSH end-to-end testing)."""
     import inspect
 
-    import scanner
+    from kwara import scanner
     src = inspect.getsource(scanner._grab_tls_info)
     # The structure of the return dict — pin the new keys so a future
     # rewrite cannot silently drop transport metadata again.

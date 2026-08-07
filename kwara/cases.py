@@ -14,7 +14,7 @@ import shutil
 import sqlite3
 from datetime import datetime, timezone
 
-from audit import write_audit
+from .audit import write_audit
 
 # Snapshot files live under kwara/data/snapshots/. Deletion may only ever
 # touch directories at or below this root.

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from sql import LATEST_DONE_SCAN_RUN, latest_usable_snapshot
+from kwara.sql import LATEST_DONE_SCAN_RUN, latest_usable_snapshot
 
 
 def test_latest_done_scan_run_shape():

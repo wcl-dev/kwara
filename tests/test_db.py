@@ -1,7 +1,7 @@
 import os
 import tempfile
 
-from db import get_conn, init_db, migrate_db
+from kwara.db import get_conn, init_db, migrate_db
 
 
 def test_init_and_migrate_on_temp_db():

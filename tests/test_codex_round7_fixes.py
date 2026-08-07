@@ -10,9 +10,9 @@ import tempfile
 
 import pytest
 
-import prevalence
-from discovery import VERDICT_TEMPLATE_MATCH, build_prevalence, screen_ads_txt
-from utils.domain import extract_domain_from_url
+from kwara import prevalence
+from kwara.discovery import VERDICT_TEMPLATE_MATCH, build_prevalence, screen_ads_txt
+from kwara.utils.domain import extract_domain_from_url
 
 
 # ── #2 registrable domain ──────────────────────────────────────────────────
@@ -100,7 +100,7 @@ def test_capture_dirs_are_never_reused():
     """exist_ok=True silently accepted a collision between two captures in the
     same microsecond with the same 16-bit suffix; both then wrote the same
     fixed filenames and an older snapshot row pointed at overwritten bytes."""
-    from snapshots import _per_capture_dir
+    from kwara.snapshots import _per_capture_dir
     import shutil
     dirs = {_per_capture_dir(999999) for _ in range(25)}
     assert len(dirs) == 25

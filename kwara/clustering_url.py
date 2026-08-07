@@ -19,19 +19,19 @@ import sqlite3
 from collections import defaultdict
 from urllib.parse import parse_qs, urlparse
 
-from config import (
+from .config import (
     KNOWN_SHORTLINK_DOMAINS,
     PARAM_KEY_MAX_DOMAINS,
     PARAM_KEY_MIN_POSTS,
     PARAM_KEY_MIN_VALUES,
     PARAM_VALUE_HASH_THRESHOLD,
 )
-from param_attribution import (
+from .param_attribution import (
     classify_owner,
     identify_param,
     merge_risk_tags,
 )
-from sql import LATEST_DONE_SCAN_RUN
+from .sql import LATEST_DONE_SCAN_RUN
 
 
 def shared_destinations(conn: sqlite3.Connection, case_id: int) -> tuple:

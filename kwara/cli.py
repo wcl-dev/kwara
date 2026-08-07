@@ -24,9 +24,6 @@ import sqlite3
 import stat
 import sys
 
-# The kwara modules import each other flatly (`from clusters import ...`),
-# matching how app.py and tests/conftest.py set things up.
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 
 def _err(msg: str) -> None:
@@ -69,8 +66,8 @@ def _emit_text(data, depth: int = 0) -> None:
 # ---------------------------------------------------------------------------
 
 def _open_db(args) -> sqlite3.Connection:
-    from db import get_conn, init_db, migrate_db
-    import config
+    from .db import get_conn, init_db, migrate_db
+    from . import config
 
     db_path = args.db or config.DB_PATH
     parent = os.path.dirname(os.path.abspath(db_path))
@@ -83,8 +80,8 @@ def _open_db(args) -> sqlite3.Connection:
 
 
 def _open_index(args) -> sqlite3.Connection:
-    from index_db import get_index_conn
-    import config
+    from .index_db import get_index_conn
+    from . import config
 
     return get_index_conn(args.index_db or config.INDEX_DB_PATH)
 
@@ -97,7 +94,7 @@ def _case_env(conn, case_id: int) -> dict[str, str] | None:
     content and the evidence is misleading. The UI does this on every
     capture; the CLI has to as well.
     """
-    from cases import get_case
+    from .cases import get_case
 
     case = get_case(conn, case_id) or {}
     env: dict[str, str] = {}
@@ -113,13 +110,13 @@ def _case_env(conn, case_id: int) -> dict[str, str] | None:
 # ---------------------------------------------------------------------------
 
 def cmd_case_list(args):
-    import cases
+    from . import cases
     conn = _open_db(args)
     return cases.list_cases(conn)
 
 
 def cmd_case_new(args):
-    import cases
+    from . import cases
     conn = _open_db(args)
     locale, tz = cases.resolve_locale(args.locale_preset, args.locale, args.timezone)
     case_id = cases.create_case(
@@ -131,8 +128,8 @@ def cmd_case_new(args):
 
 
 def cmd_case_show(args):
-    import cases
-    from clusters import case_counts
+    from . import cases
+    from .clusters import case_counts
     conn = _open_db(args)
     case = cases.require_case(conn, args.case)
     n_urls, scanned = case_counts(conn, args.case)
@@ -153,7 +150,7 @@ def cmd_case_show(args):
 
 
 def cmd_case_locale(args):
-    import cases
+    from . import cases
     conn = _open_db(args)
     locale, tz = cases.resolve_locale(args.locale_preset, args.locale, args.timezone)
     cases.set_case_locale(conn, args.case, locale, tz)
@@ -161,7 +158,7 @@ def cmd_case_locale(args):
 
 
 def cmd_case_delete(args):
-    import cases
+    from . import cases
     conn = _open_db(args)
     return cases.delete_case(conn, args.case, confirm=args.confirm)
 
@@ -171,8 +168,8 @@ def cmd_case_delete(args):
 # ---------------------------------------------------------------------------
 
 def cmd_ingest_url(args):
-    from cases import require_case
-    from ingestion import ingest_message
+    from .cases import require_case
+    from .ingestion import ingest_message
     conn = _open_db(args)
     require_case(conn, args.case)
 
@@ -191,8 +188,8 @@ def cmd_ingest_url(args):
 
 
 def cmd_ingest_csv(args):
-    from cases import require_case
-    from ingestion import ingest_csv
+    from .cases import require_case
+    from .ingestion import ingest_csv
     conn = _open_db(args)
     require_case(conn, args.case)
     if not os.path.isfile(args.file):
@@ -207,8 +204,8 @@ def cmd_ingest_csv(args):
 # ---------------------------------------------------------------------------
 
 def cmd_run_attribute(args):
-    import pipeline
-    from cases import require_case
+    from . import pipeline
+    from .cases import require_case
     conn = _open_db(args)
     require_case(conn, args.case)
     return pipeline.run_fast_attribution(
@@ -218,8 +215,8 @@ def cmd_run_attribute(args):
 
 
 def cmd_run_scan(args):
-    import pipeline
-    from cases import require_case
+    from . import pipeline
+    from .cases import require_case
     conn = _open_db(args)
     require_case(conn, args.case)
 
@@ -235,8 +232,8 @@ def cmd_run_scan(args):
 
 
 def cmd_run_intel(args):
-    import pipeline
-    from cases import require_case
+    from . import pipeline
+    from .cases import require_case
     conn = _open_db(args)
     require_case(conn, args.case)
     targets = args.scan_run or pipeline._scan_runs_needing(
@@ -246,8 +243,8 @@ def cmd_run_intel(args):
 
 
 def cmd_run_snapshot(args):
-    import pipeline
-    from cases import require_case
+    from . import pipeline
+    from .cases import require_case
     conn = _open_db(args)
     require_case(conn, args.case)
 
@@ -279,21 +276,21 @@ def cmd_run_snapshot(args):
 
 
 def cmd_run_corroborate(args):
-    import pipeline
+    from . import pipeline
     conn = _open_db(args)
     results = {sid: pipeline.run_corroborate(conn, sid) for sid in args.scan_run}
     return {"corroborated": results}
 
 
 def cmd_run_cloaking(args):
-    import pipeline
+    from . import pipeline
     conn = _open_db(args)
     return {"cloaking": {sid: pipeline.run_cloaking(conn, sid, force=args.force)
                          for sid in args.scan_run}}
 
 
 def cmd_run_adstxt(args):
-    import pipeline
+    from . import pipeline
     conn = _open_db(args)
     return {"ads_txt": {sid: pipeline.run_ads_txt(conn, sid, force=args.force)
                         for sid in args.scan_run}}
@@ -304,32 +301,32 @@ def cmd_run_adstxt(args):
 # ---------------------------------------------------------------------------
 
 def cmd_analyze_insights(args):
-    from cases import require_case
-    from insights import case_insights
+    from .cases import require_case
+    from .insights import case_insights
     conn = _open_db(args)
     require_case(conn, args.case)
     return case_insights(conn, args.case)
 
 
 def cmd_analyze_clusters(args):
-    from cases import require_case
-    from clusters import case_clusters
+    from .cases import require_case
+    from .clusters import case_clusters
     conn = _open_db(args)
     require_case(conn, args.case)
     return case_clusters(conn, args.case)
 
 
 def cmd_analyze_narrative(args):
-    from cases import require_case
-    from narrative import case_narrative
+    from .cases import require_case
+    from .narrative import case_narrative
     conn = _open_db(args)
     require_case(conn, args.case)
     return case_narrative(conn, args.case)
 
 
 def cmd_analyze_graph(args):
-    from cases import require_case
-    import graph as graph_mod
+    from .cases import require_case
+    from . import graph as graph_mod
     conn = _open_db(args)
     require_case(conn, args.case)
 
@@ -359,9 +356,9 @@ def cmd_analyze_graph(args):
 # ---------------------------------------------------------------------------
 
 def cmd_index_build(args):
-    import config
-    from cases import require_case
-    from index_db import index_case
+    from . import config
+    from .cases import require_case
+    from .index_db import index_case
     conn = _open_db(args)
     case = require_case(conn, args.case)
     index_conn = _open_index(args)
@@ -374,18 +371,18 @@ def cmd_index_build(args):
 
 
 def cmd_index_crosslinks(args):
-    from index_db import get_index_conn, operator_cross_links
+    from .index_db import get_index_conn, operator_cross_links
     return {"cross_links": operator_cross_links(get_index_conn(_index_path(args)))}
 
 
 def cmd_index_lookup(args):
-    from index_db import lookup
+    from .index_db import lookup
     hits = lookup(_open_index(args), args.value, signal_type=args.type)
     return {"value": args.value, "type": args.type, "hits": len(hits), "rows": hits}
 
 
 def cmd_index_recurring(args):
-    from index_db import recurring_signals
+    from .index_db import recurring_signals
     rows = recurring_signals(_open_index(args), min_cases=args.min_cases)
     return {"min_cases": args.min_cases, "count": len(rows), "signals": rows}
 
@@ -518,7 +515,7 @@ def cmd_evidence_describe(args):
     of integer-named folders whose meaning lives only in the DB beside them —
     the opposite of evidence a third party can read without trusting us.
     """
-    from snapshots import CAPTURE_MANIFEST, _write_capture_manifest
+    from .snapshots import CAPTURE_MANIFEST, _write_capture_manifest
     conn = _open_db(args)
     where, params = [], []
     if args.case:
@@ -575,7 +572,7 @@ def cmd_evidence_list(args):
     Either `--case` or `--domain` is required; without one the answer is the
     whole store, which is not an answer.
     """
-    from cases import require_case
+    from .cases import require_case
     conn = _open_db(args)
     where, params = [], []
     if args.case:
@@ -647,8 +644,8 @@ def cmd_evidence_list(args):
 
 
 def cmd_export_case(args):
-    from cases import require_case
-    from exporter import export_case
+    from .cases import require_case
+    from .exporter import export_case
     conn = _open_db(args)
     require_case(conn, args.case)
     path = export_case(conn, args.case)
@@ -701,11 +698,11 @@ _G = _global_parser()
 # so every command that does says so on stderr before it starts.
 
 def cmd_discover_candidates(args):
-    import discovery
+    from . import discovery
     doms = discovery.candidates_from_sellers_json(args.sellers_json)
     if args.exclude_scanned:
         from urllib.parse import urlparse
-        from utils.domain import extract_domain_from_url
+        from .utils.domain import extract_domain_from_url
         conn = _open_db(args)
         seen = {extract_domain_from_url(r[0] or "") for r in conn.execute(
             "SELECT final_url FROM scan_runs WHERE final_url IS NOT NULL")}
@@ -718,8 +715,8 @@ def cmd_discover_candidates(args):
 
 
 def cmd_discover_screen(args):
-    import discovery
-    from index_db import get_index_conn
+    from . import discovery
+    from .index_db import get_index_conn
     known = discovery.known_templates(get_index_conn(_index_path(args)))
     with open(args.domains, encoding="utf-8") as fh:
         doms = [l.strip() for l in fh if l.strip() and not l.startswith("#")]
@@ -735,7 +732,7 @@ def cmd_discover_screen(args):
         if not args.quiet and done[0] % 250 == 0:
             _err(f"  {done[0]}/{len(doms)}")
 
-    from config import DISCOVERY_WORKERS
+    from .config import DISCOVERY_WORKERS
     obs = discovery.screen_domains(doms, known,
                                    workers=args.workers or DISCOVERY_WORKERS,
                                    on_result=progress)
@@ -754,7 +751,7 @@ def cmd_discover_screen(args):
 
 
 def cmd_discover_cluster(args):
-    import discovery
+    from . import discovery
     obs = _read_observations(args.observations)
     clusters = discovery.cluster_by_template(obs)
     if args.portfolio_only:
@@ -765,7 +762,7 @@ def cmd_discover_cluster(args):
 
 
 def cmd_discover_prevalence(args):
-    import discovery
+    from . import discovery
     obs = _read_observations(args.observations)
     table = discovery.build_prevalence(obs)
     table["source"] = args.source or f"built from {args.observations}"
@@ -786,7 +783,7 @@ def _read_observations(path: str) -> list:
 
 
 def _index_path(args) -> str:
-    from config import INDEX_DB_PATH
+    from .config import INDEX_DB_PATH
     return getattr(args, "index_db", None) or INDEX_DB_PATH
 
 
@@ -965,7 +962,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     x_look = _leaf(idx, "lookup", help="every case a signal value appears in")
     x_look.add_argument("value")
-    from index_db import ALL_SIGNAL_TYPES
+    from .index_db import ALL_SIGNAL_TYPES
     x_look.add_argument("--type", choices=sorted(ALL_SIGNAL_TYPES),
                         help="constrain to one signal type")
     x_look.set_defaults(fn=cmd_index_lookup)
@@ -1018,7 +1015,7 @@ def main(argv: list[str] | None = None) -> int:
         if not hasattr(args, key):
             setattr(args, key, default)
     if args.lang:
-        from i18n import set_lang
+        from .i18n import set_lang
         set_lang(args.lang)
     try:
         _emit(args.fn(args), args)

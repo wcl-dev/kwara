@@ -4,9 +4,9 @@ import os
 import tempfile
 from datetime import datetime, timezone
 
-import adstxt
-from adstxt import _ads_txt_url, fetch_and_store_ads_txt, parse_ads_txt
-from db import get_conn, init_db, migrate_db
+from kwara import adstxt
+from kwara.adstxt import _ads_txt_url, fetch_and_store_ads_txt, parse_ads_txt
+from kwara.db import get_conn, init_db, migrate_db
 
 
 def _now():

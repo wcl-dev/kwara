@@ -8,30 +8,30 @@ import sqlite3
 from collections import Counter
 from typing import Any
 
-from clustering_infra import (
+from .clustering_infra import (
     asn_clusters,
     shared_certificates,
     shared_endpoints,
     shared_tracking_ids,
 )
-from clustering_url import (
+from .clustering_url import (
     shared_destinations,
     shared_param_keys,
     shared_params,
     wrapper_relationships,
 )
-from header_analysis import (
+from .header_analysis import (
     cross_domain_shared_template,
     detect_fake_versions,
 )
-from i18n import t
-from opsec import compute_opsec_profile
-from param_attribution import (
+from .i18n import t
+from .opsec import compute_opsec_profile
+from .param_attribution import (
     OWNER_KIND_GENERIC,
     OWNER_KIND_PLATFORM,
     PLATFORM_DISPLAY_NAMES,
 )
-from sql import LATEST_DONE_SCAN_RUN
+from .sql import LATEST_DONE_SCAN_RUN
 
 
 def _bullet_owner_note(row: dict) -> str:
@@ -348,7 +348,7 @@ def _build_bullets(
 
 def _opsec_gap(conn, case_id: int) -> dict[str, int]:
     """Domains whose OPSEC verdict is blocked by an uncollected path."""
-    from opsec import compute_opsec_profile
+    from .opsec import compute_opsec_profile
     out: dict[str, int] = {}
     for row in compute_opsec_profile(conn, case_id):
         reason = row.get("indeterminate_reason")

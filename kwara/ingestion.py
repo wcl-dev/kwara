@@ -3,8 +3,8 @@ import re
 import sqlite3
 from datetime import datetime, timezone
 
-from audit import write_audit
-from utils.domain import extract_domain_from_url
+from .audit import write_audit
+from .utils.domain import extract_domain_from_url
 
 URL_RE = re.compile(r'https?://[^\s\'"<>\]\)]+')
 

@@ -4,8 +4,8 @@ import os
 import tempfile
 from datetime import datetime, timezone
 
-from clustering_infra import shared_certificates
-from db import get_conn, init_db, migrate_db
+from kwara.clustering_infra import shared_certificates
+from kwara.db import get_conn, init_db, migrate_db
 
 
 def _now_iso():

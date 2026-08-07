@@ -14,8 +14,8 @@ from datetime import datetime, timezone
 
 import pytest
 
-from db import get_conn, init_db, migrate_db
-from opsec import compute_opsec_profile
+from kwara.db import get_conn, init_db, migrate_db
+from kwara.opsec import compute_opsec_profile
 
 
 def _now():
@@ -242,7 +242,7 @@ def test_a_real_verdict_carries_no_reason():
 
 def test_insights_reports_the_uncollected_path_as_a_gap():
     """The reason has to reach the analyst, not just the OPSEC rows."""
-    from insights import case_insights
+    from kwara.insights import case_insights
     conn = _fresh_db(); cid = _seed_case(conn)
     _add_snapshot(conn, cid, "a.com", "http_only", "ok")
     _add_snapshot(conn, cid, "b.com", "http_only", "ok")
@@ -251,7 +251,7 @@ def test_insights_reports_the_uncollected_path_as_a_gap():
 
 
 def test_no_opsec_gap_when_both_paths_ran():
-    from insights import case_insights
+    from kwara.insights import case_insights
     conn = _fresh_db(); cid = _seed_case(conn)
     _add_snapshot(conn, cid, "a.com", "http_only", "ok")
     _add_snapshot(conn, cid, "a.com", "playwright", "ok")

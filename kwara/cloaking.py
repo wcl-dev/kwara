@@ -36,10 +36,10 @@ from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import requests
 
-from audit import write_audit
-from config import CLOAKING_BODY_SIZE_DIFF, HTTP_TIMEOUT, SCANNER_USER_AGENT
-from lightweight_fetch import CAPTURE_METHOD_CLOAKING_ALT
-from param_attribution import identify_param
+from .audit import write_audit
+from .config import CLOAKING_BODY_SIZE_DIFF, HTTP_TIMEOUT, SCANNER_USER_AGENT
+from .lightweight_fetch import CAPTURE_METHOD_CLOAKING_ALT
+from .param_attribution import identify_param
 
 # Body sizes within this fraction are treated as the same — accommodates
 # ad-script variability without firing on minor template diffs. Sourced from
@@ -193,8 +193,8 @@ def _save_cloaking_alt_snapshot(
     # Late imports avoid a circular dep:
     #   snapshots imports cloaking nothing → safe
     #   fingerprints imports nothing app-level → safe
-    from fingerprints import extract_tracking_ids_from_file
-    from snapshots import _per_capture_dir
+    from .fingerprints import extract_tracking_ids_from_file
+    from .snapshots import _per_capture_dir
 
     existing = conn.execute(
         """SELECT id FROM snapshots

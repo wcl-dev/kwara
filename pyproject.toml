@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kwara"
+version = "0.9.0"
+description = "Operator attribution and digital evidence, specialised in the digital-advertising ecosystem"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [{ name = "wcl-dev" }]
+keywords = ["osint", "forensics", "adtech", "attribution", "evidence"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Topic :: Security",
+    "Environment :: Console",
+]
+
+# Kept in lockstep with requirements.txt. That file stays because the README
+# and the docs install from it, and because it is the one a reader looks for.
+dependencies = [
+    "tldextract>=5.0.0",
+    "requests>=2.31.0",
+    "playwright>=1.40.0",
+    "python-whois>=0.9.0",
+    "ipwhois>=1.2.0",
+]
+
+[project.optional-dependencies]
+# The MCP SDK is not part of the base install: someone running kwara by hand
+# has no use for it, and it pulls a dependency tree of its own.
+agent = ["mcp>=1.0.0"]
+dev = ["pytest>=8.0.0"]
+
+[project.scripts]
+kwara = "kwara.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/wcl-dev/kwara"
+
+[tool.setuptools]
+packages = ["kwara", "kwara.utils"]
+
+[tool.setuptools.package-data]
+# _snapshot_worker.py is launched by path as a subprocess, not imported, so it
+# has to ship as data even though it is Python.
+kwara = ["_snapshot_worker.py"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

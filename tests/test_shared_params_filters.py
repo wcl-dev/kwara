@@ -7,8 +7,8 @@ import os
 import tempfile
 from datetime import datetime, timezone
 
-from clustering_url import _normalize_param_value, shared_params
-from db import get_conn, init_db, migrate_db
+from kwara.clustering_url import _normalize_param_value, shared_params
+from kwara.db import get_conn, init_db, migrate_db
 
 
 def _now():

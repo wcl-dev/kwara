@@ -42,9 +42,9 @@ def kwara_env(monkeypatch):
     db_path = os.path.join(td, "kwara.db")
     exports_dir = os.path.join(td, "exports")
     os.makedirs(exports_dir, exist_ok=True)
-    import exporter as _exporter
+    from kwara import exporter as _exporter
     monkeypatch.setattr(_exporter, "EXPORTS_DIR", exports_dir)
-    from db import get_conn, init_db, migrate_db
+    from kwara.db import get_conn, init_db, migrate_db
     conn = get_conn(db_path)
     init_db(conn)
     migrate_db(conn)
@@ -131,7 +131,7 @@ def _seed_rescan(conn, td):
 # ---------------------------------------------------------------------------
 
 def test_export_writes_scan_runs_csv_with_full_history(kwara_env):
-    from exporter import export_case
+    from kwara.exporter import export_case
     conn, _exports, td = kwara_env
     case_id, sr_ids, _snaps = _seed_rescan(conn, td)
     zip_path = export_case(conn, case_id)
@@ -147,7 +147,7 @@ def test_export_writes_scan_runs_csv_with_full_history(kwara_env):
 
 
 def test_export_writes_per_scan_run_redirect_chains(kwara_env):
-    from exporter import export_case
+    from kwara.exporter import export_case
     conn, _exports, td = kwara_env
     _case, sr_ids, _snaps = _seed_rescan(conn, td)
     zip_path = export_case(conn, _case)
@@ -160,7 +160,7 @@ def test_export_writes_per_scan_run_redirect_chains(kwara_env):
 
 
 def test_snapshots_csv_includes_tracking_capture_method_har(kwara_env):
-    from exporter import export_case
+    from kwara.exporter import export_case
     conn, _exports, td = kwara_env
     _case, _sr, snap_ids = _seed_rescan(conn, td)
     zip_path = export_case(conn, _case)
@@ -179,7 +179,7 @@ def test_snapshots_csv_includes_tracking_capture_method_har(kwara_env):
 
 
 def test_har_file_packed_under_snapshot_id_dir(kwara_env):
-    from exporter import export_case
+    from kwara.exporter import export_case
     conn, _exports, td = kwara_env
     _case, _sr, snap_ids = _seed_rescan(conn, td)
     zip_path = export_case(conn, _case)
@@ -223,7 +223,7 @@ def test_round_trip_rescan_history_survives(kwara_env):
     """A URL with two scan_runs survives export→restore: both scan_runs,
     both redirect chains, both snapshots all reachable; FK constraint
     holds (no orphan snapshot.scan_run_id)."""
-    from exporter import export_case
+    from kwara.exporter import export_case
     conn, _exports, td = kwara_env
     case_id, sr_ids, snap_ids = _seed_rescan(conn, td)
     zip_path = export_case(conn, case_id)

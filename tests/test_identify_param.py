@@ -7,7 +7,7 @@ applied at the view layer. These tests pin the canonical IDs so a
 table edit can't silently drift out of sync with the cross-source
 aggregation in clustering_infra.
 """
-from param_attribution import (
+from kwara.param_attribution import (
     PARAM_EXACT as _PARAM_EXACT,
     PARAM_PREFIX as _PARAM_PREFIX,
     PLATFORM_APPSFLYER,

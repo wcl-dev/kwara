@@ -1,4 +1,4 @@
-from utils.domain import extract_domain_from_url
+from kwara.utils.domain import extract_domain_from_url
 
 
 def test_extract_registrable_domain_from_https_url():

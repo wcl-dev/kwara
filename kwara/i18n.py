@@ -2,7 +2,7 @@
 Lightweight i18n for kwara.
 
 Usage:
-    from i18n import t, set_lang, get_lang, LANGUAGES
+    from .i18n import t, set_lang, get_lang, LANGUAGES
     set_lang("zh-TW")
     st.write(t("sidebar.title"))
     st.write(t("scan.progress_text", done=5, total=10))
@@ -18,7 +18,7 @@ an agent process, and calling t() outside Streamlit must not warn.
 """
 from __future__ import annotations
 
-from config import LANG as _CONFIG_LANG
+from .config import LANG as _CONFIG_LANG
 
 LANGUAGES = {"en": "English", "zh-TW": "正體中文"}
 # Map config.LANG ("zh"/"en") to an i18n key ("zh-TW"/"en").

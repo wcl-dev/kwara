@@ -29,10 +29,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
-from db import get_conn, init_db, migrate_db
-from lightweight_fetch import fetch_html_only
-from pipeline import _try_corroborate
-from scanner import _headers_to_json
+from kwara.db import get_conn, init_db, migrate_db
+from kwara.lightweight_fetch import fetch_html_only
+from kwara.pipeline import _try_corroborate
+from kwara.scanner import _headers_to_json
 
 
 def _now() -> str:
@@ -132,7 +132,7 @@ def _fake_response(body: bytes, status_code: int = 200):
     return resp
 
 
-@patch("lightweight_fetch.requests.get")
+@patch("kwara.lightweight_fetch.requests.get")
 def test_500_error_page_body_is_saved_as_evidence(mock_get):
     """PHP 500 with branded debug template — body must survive even though
     capture_status='error'."""
@@ -154,7 +154,7 @@ def test_500_error_page_body_is_saved_as_evidence(mock_get):
     assert saved == body, "error-page body must be saved verbatim"
 
 
-@patch("lightweight_fetch.requests.get")
+@patch("kwara.lightweight_fetch.requests.get")
 def test_403_error_body_extracts_tracking_ids(mock_get):
     """Some operators leave GA loaded on the WAF block page — that's still
     a tracking-ID hit linking the block page to the same operator."""
@@ -178,7 +178,7 @@ def test_403_error_body_extracts_tracking_ids(mock_get):
 # Fix 3: corroboration pipeline failure leaves an audit trail
 # ---------------------------------------------------------------------------
 
-@patch("pipeline.corroborate_url")
+@patch("kwara.pipeline.corroborate_url")
 def test_corroborate_pipeline_crash_writes_failure_stub(mock_corr):
     """When corroborate_url() itself raises (e.g. import-time crash),
     the previous code silently swallowed the exception and left
@@ -201,7 +201,7 @@ def test_corroborate_pipeline_crash_writes_failure_stub(mock_corr):
     assert payload["_attempted_at"]
 
 
-@patch("pipeline.corroborate_url")
+@patch("kwara.pipeline.corroborate_url")
 def test_corroborate_success_path_unchanged(mock_corr):
     """Sanity: success path still writes the unmodified corroborate_url() return."""
     mock_corr.return_value = {
@@ -232,6 +232,6 @@ def test_corroborate_skips_if_already_corroborated():
     )
     conn.commit()
 
-    with patch("pipeline.corroborate_url") as mock_corr:
+    with patch("kwara.pipeline.corroborate_url") as mock_corr:
         _try_corroborate(conn, sr_id)
         mock_corr.assert_not_called()

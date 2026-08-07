@@ -15,9 +15,12 @@ kwara 沒有圖形介面，全部透過 CLI 或 MCP 操作。
 ```bash
 python -m venv .venv
 source .venv/bin/activate            # Windows: .venv\Scripts\activate
-python -m pip install -r requirements.txt
+python -m pip install -e .          # 或：-r requirements.txt
 python -m playwright install chromium
 ```
+
+`pip install -e .` 會把 `kwara` 指令裝到 PATH；沒安裝的話，下面每個指令都可以
+在 repo 根目錄用 `python -m kwara.cli ...` 執行。
 
 沒裝 Playwright／Chromium 也能用——掃描、WHOIS、ads.txt、歸因分析都不需要瀏覽器，只有截圖需要。
 

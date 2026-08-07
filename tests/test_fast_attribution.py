@@ -10,8 +10,8 @@ import os
 import tempfile
 from datetime import datetime, timezone
 
-from db import get_conn, init_db, migrate_db
-from pipeline import _artifacts_needing_scan, _scan_runs_needing
+from kwara.db import get_conn, init_db, migrate_db
+from kwara.pipeline import _artifacts_needing_scan, _scan_runs_needing
 
 
 def _now():

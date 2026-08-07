@@ -24,13 +24,12 @@ fail end-to-end.
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(__file__))
 
-from config import DB_PATH as DB
-from db import get_conn, migrate_db
-from pipeline import run_snapshot_batch
-from scanner import reclaim_stuck_scans
-from snapshots import (
+from .config import DB_PATH as DB
+from .db import get_conn, migrate_db
+from .pipeline import run_snapshot_batch
+from .scanner import reclaim_stuck_scans
+from .snapshots import (
     CAPTURE_OK, CAPTURE_MANUAL, CAPTURE_WAYBACK,
     CAPTURE_CF, CAPTURE_ERROR, CAPTURE_TIMEOUT, CAPTURE_FILE_MISSING,
 )

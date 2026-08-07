@@ -23,16 +23,16 @@ from __future__ import annotations
 
 import sqlite3
 
-from config import COVERAGE_CLASS_CAP, COVERAGE_WEIGHTS
+from .config import COVERAGE_CLASS_CAP, COVERAGE_WEIGHTS
 
-from clustering_infra import (
+from .clustering_infra import (
     shared_ad_accounts,
     shared_certificates,
     shared_tracking_ids,
 )
-from header_analysis import cross_domain_shared_template, detect_fake_versions
-from insights import _count_cloaking_suspects
-from opsec import compute_opsec_profile
+from .header_analysis import cross_domain_shared_template, detect_fake_versions
+from .insights import _count_cloaking_suspects
+from .opsec import compute_opsec_profile
 
 # Standing limitation — shown with every verdict; mirrors the report's
 # 「重要限制／範圍聲明」.

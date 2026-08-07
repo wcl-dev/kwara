@@ -3,9 +3,9 @@ import os
 import tempfile
 from datetime import datetime, timezone
 
-from clustering_infra import ad_tracking_platforms
-from db import get_conn, init_db, migrate_db
-from param_attribution import (
+from kwara.clustering_infra import ad_tracking_platforms
+from kwara.db import get_conn, init_db, migrate_db
+from kwara.param_attribution import (
     OWNER_KIND_GENERIC,
     PLATFORM_GOOGLE_ADS,
     PLATFORM_GOOGLE_ANALYTICS,

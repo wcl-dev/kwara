@@ -8,8 +8,8 @@ from urllib.parse import urljoin, urlparse
 import requests
 import requests.exceptions
 
-from audit import write_audit
-from config import HTTP_TIMEOUT as TIMEOUT, MAX_HOPS, SCANNER_USER_AGENT as USER_AGENT
+from .audit import write_audit
+from .config import HTTP_TIMEOUT as TIMEOUT, MAX_HOPS, SCANNER_USER_AGENT as USER_AGENT
 
 
 # A scan_run that's been 'running' beyond this window has lost its worker

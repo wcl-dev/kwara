@@ -16,8 +16,8 @@ import os
 import shutil
 import subprocess
 
-from clusters import case_clusters, group_color, node_id
-from palette import GRAPH_EDGE, NEUTRAL_FILL
+from .clusters import case_clusters, group_color, node_id
+from .palette import GRAPH_EDGE, NEUTRAL_FILL
 
 _SIG_SHAPE = {
     "tracking":     "box",

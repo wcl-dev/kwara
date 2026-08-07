@@ -25,7 +25,7 @@ import json
 import os
 from typing import Any
 
-from config import ADS_TXT_PREVALENCE_PATH
+from .config import ADS_TXT_PREVALENCE_PATH
 
 SCHEMA = "kwara-ads-prevalence/1"
 

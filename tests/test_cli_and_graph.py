@@ -11,8 +11,8 @@ import tempfile
 
 import pytest
 
-import cli
-import graph
+from kwara import cli
+from kwara import graph
 
 
 @pytest.fixture
@@ -163,7 +163,7 @@ def test_render_dot_explains_missing_graphviz(tmp_path, monkeypatch):
         graph.render_dot("digraph x {}", str(tmp_path / "g.svg"), "svg")
 
 def test_i18n_is_a_process_wide_setting():
-    import i18n
+    from kwara import i18n
     original = i18n.get_lang()
     try:
         i18n.set_lang("zh-TW")
@@ -184,7 +184,7 @@ def test_no_module_imports_streamlit():
     import importlib
     for name in ("cases", "graph", "cli", "insights", "clusters", "narrative",
                  "i18n", "discovery", "index_db", "palette", "mcp_server"):
-        mod = importlib.import_module(name)
+        mod = importlib.import_module(f"kwara.{name}")
         src = open(mod.__file__, encoding="utf-8").read()
         assert "import streamlit" not in src, f"{name} imports streamlit"
 
@@ -193,7 +193,7 @@ def _tmp_db_with_snapshot(rows):
     """rows: [(scan_run_id_seed, final_domain, screenshot_path), ...]"""
     import tempfile, os as _os
     from datetime import datetime, timezone
-    from db import get_conn, init_db, migrate_db
+    from kwara.db import get_conn, init_db, migrate_db
     now = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     path = _os.path.join(tempfile.mkdtemp(), "case.db")
     conn = get_conn(path); init_db(conn); migrate_db(conn)
@@ -229,7 +229,7 @@ def test_evidence_list_finds_captures_by_domain_across_cases():
     which domain `data/snapshots/7/2026…_9fd1/` belongs to. Translating that
     back is what the Streamlit UI was uniquely doing; an analyst who cannot do
     it cannot find a screenshot they know exists."""
-    from cli import build_parser
+    from kwara.cli import build_parser
     conn, path = _tmp_db_with_snapshot(
         [(1, "farm.com", "/nonexistent/a.png"),
          (2, "farm.com", "/nonexistent/b.png"),
@@ -244,7 +244,7 @@ def test_evidence_list_finds_captures_by_domain_across_cases():
 
 def test_evidence_list_requires_a_filter():
     """Without one the answer is the whole store, which is not an answer."""
-    from cli import build_parser
+    from kwara.cli import build_parser
     conn, path = _tmp_db_with_snapshot([(1, "farm.com", "/nonexistent/a.png")])
     args = build_parser().parse_args(["evidence", "list", "--db", path])
     with pytest.raises(SystemExit):
@@ -252,7 +252,7 @@ def test_evidence_list_requires_a_filter():
 
 
 def test_evidence_list_reports_files_the_db_claims_but_disk_lacks():
-    from cli import build_parser
+    from kwara.cli import build_parser
     conn, path = _tmp_db_with_snapshot([(1, "farm.com", "/nonexistent/gone.png")])
     args = build_parser().parse_args(
         ["evidence", "list", "--domain", "farm.com", "--db", path])
@@ -268,7 +268,7 @@ def test_capture_manifest_labels_a_directory_the_store_cannot_name():
     Hand someone the folder and they should be able to tell — that is the
     difference between artifacts and evidence a third party can read."""
     import json as _json
-    from snapshots import CAPTURE_MANIFEST, _write_capture_manifest
+    from kwara.snapshots import CAPTURE_MANIFEST, _write_capture_manifest
     import tempfile
     d = tempfile.mkdtemp()
     _write_capture_manifest(d, scan_run_id=7, final_url="https://farm.com/",
@@ -283,7 +283,7 @@ def test_capture_manifest_labels_a_directory_the_store_cannot_name():
 
 
 def test_evidence_browse_builds_a_domain_keyed_tree_without_copying():
-    from cli import build_parser
+    from kwara.cli import build_parser
     import tempfile
     real = tempfile.mkdtemp()
     open(os.path.join(real, "screenshot.png"), "w").close()
@@ -302,7 +302,7 @@ def test_evidence_browse_builds_a_domain_keyed_tree_without_copying():
 def test_evidence_browse_refuses_a_directory_it_did_not_create():
     """It clears the tree before rebuilding, so pointing it at the wrong path
     would destroy work."""
-    from cli import build_parser
+    from kwara.cli import build_parser
     import tempfile
     conn, path = _tmp_db_with_snapshot([(1, "farm.com", "/nonexistent/a.png")])
     theirs = tempfile.mkdtemp()

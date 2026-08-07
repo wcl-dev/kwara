@@ -56,9 +56,9 @@ git clone https://github.com/wcl-dev/kwara && cd kwara
 python -m venv .venv
 source .venv/bin/activate           # macOS / Linux
 # .venv\Scripts\activate            # Windows
-python -m pip install -r requirements.txt
+python -m pip install -e .          # 或：-r requirements.txt
 python -m playwright install chromium
-python -m kwara.cli case new --title "夜鶯專案"
+kwara case new --title "夜鶯專案"
 ```
 
 > Playwright 是選用的。掃描、WHOIS、ads.txt 與歸因分析都不需要瀏覽器，只有截圖需要。
@@ -84,7 +84,7 @@ stdout 只會有 JSON——進度與錯誤都走 stderr，所以接 `jq` 永遠�
 要讓 agent 直接操作 kwara：
 
 ```bash
-python -m pip install -r requirements-agent.txt
+python -m pip install -e '.[agent]'   # 或：-r requirements-agent.txt
 claude mcp add kwara -- /abs/path/to/.venv/bin/python -m kwara.mcp_server
 ```
 
@@ -110,7 +110,8 @@ claude mcp add kwara -- /abs/path/to/.venv/bin/python -m kwara.mcp_server
 
 | 目錄 | 說明 |
 |---|---|
-| `kwara/` | 主應用程式（核心分析、SQLite、掃描、匯出） |
+| `kwara/` | 套件本體——核心分析、SQLite、掃描、匯出 |
+| `pyproject.toml` | 套件描述；`pip install -e .` 會把 `kwara` 指令裝到 PATH |
 | `kwara/cli.py` | 無介面 CLI——自動化的唯一真相來源 |
 | `kwara/mcp_server.py` | MCP server；薄薄包一層 CLI 的函式 |
 | `kwara/config.py` | 集中配置與環境變數預設值 |

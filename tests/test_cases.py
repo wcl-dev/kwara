@@ -10,13 +10,13 @@ import tempfile
 
 import pytest
 
-import cases
+from kwara import cases
 
 
 @pytest.fixture
 def conn():
     td = tempfile.mkdtemp()
-    from db import get_conn, init_db, migrate_db
+    from kwara.db import get_conn, init_db, migrate_db
     c = get_conn(os.path.join(td, "kwara.db"))
     init_db(c)
     migrate_db(c)

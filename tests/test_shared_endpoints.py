@@ -4,8 +4,8 @@ import os
 import tempfile
 from datetime import datetime, timezone
 
-from clustering_infra import _is_direct_ip, _is_noise_endpoint, shared_endpoints
-from db import get_conn, init_db, migrate_db
+from kwara.clustering_infra import _is_direct_ip, _is_noise_endpoint, shared_endpoints
+from kwara.db import get_conn, init_db, migrate_db
 
 
 def _now():

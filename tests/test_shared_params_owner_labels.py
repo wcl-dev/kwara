@@ -12,13 +12,13 @@ import os
 import tempfile
 from datetime import datetime, timezone
 
-from clustering_url import shared_params
-from param_attribution import (
+from kwara.clustering_url import shared_params
+from kwara.param_attribution import (
     OWNER_KIND_GENERIC,
     OWNER_KIND_PLATFORM,
     OWNER_KIND_UNKNOWN,
 )
-from db import get_conn, init_db, migrate_db
+from kwara.db import get_conn, init_db, migrate_db
 
 
 def _now():
@@ -90,7 +90,7 @@ def test_unknown_key_marked_unknown_kind():
 
 def test_known_platform_marked_platform_kind_with_canonical_id():
     """utm_source → OWNER_KIND_PLATFORM, canonical platform_id."""
-    from param_attribution import PLATFORM_GOOGLE_ANALYTICS
+    from kwara.param_attribution import PLATFORM_GOOGLE_ANALYTICS
     conn = _make_db()
     case_id = _make_case(conn)
     _add_post(conn, case_id, "https://example.com/?utm_source=newsletter")
@@ -103,7 +103,7 @@ def test_known_platform_marked_platform_kind_with_canonical_id():
 
 
 def test_three_kinds_coexist_in_same_case():
-    from param_attribution import PLATFORM_GOOGLE_ANALYTICS
+    from kwara.param_attribution import PLATFORM_GOOGLE_ANALYTICS
     conn = _make_db()
     case_id = _make_case(conn)
     _add_post(conn, case_id,
@@ -120,7 +120,7 @@ def test_three_kinds_coexist_in_same_case():
 def test_clustering_output_does_not_depend_on_active_language():
     """Regression: previously the result strings depended on i18n.set_lang().
     Now they should be deterministic regardless of UI language."""
-    from i18n import set_lang
+    from kwara.i18n import set_lang
     conn = _make_db()
     case_id = _make_case(conn)
     _add_post(conn, case_id, "https://x.com/?uid=638")

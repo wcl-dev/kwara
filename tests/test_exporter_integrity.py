@@ -33,10 +33,10 @@ def kwara_env(monkeypatch):
     os.makedirs(exports_dir, exist_ok=True)
 
     # Patch EXPORTS_DIR to the temp path so we don't pollute the repo
-    import exporter as _exporter
+    from kwara import exporter as _exporter
     monkeypatch.setattr(_exporter, "EXPORTS_DIR", exports_dir)
 
-    from db import get_conn, init_db, migrate_db
+    from kwara.db import get_conn, init_db, migrate_db
     conn = get_conn(db_path)
     init_db(conn)
     migrate_db(conn)
@@ -117,7 +117,7 @@ def _make_case_with_snapshot(conn, td, *, snapshot_count: int = 1):
 def test_export_archive_keys_snapshots_by_snapshot_id_not_scan_run(kwara_env):
     """Two snapshots on the same scan_run must each get their own archive
     directory keyed by snapshot.id — older content cannot be overwritten."""
-    from exporter import export_case
+    from kwara.exporter import export_case
     conn, exports_dir, td = kwara_env
     case_id, sr_id, snap_ids, expected = _make_case_with_snapshot(
         conn, td, snapshot_count=2,
@@ -141,7 +141,7 @@ def test_export_archive_keys_snapshots_by_snapshot_id_not_scan_run(kwara_env):
 def test_export_csv_includes_snapshot_id_column(kwara_env):
     """snapshots.csv must expose snapshot_id so CSV rows can be cross-
     referenced to the per-snapshot archive directory."""
-    from exporter import export_case
+    from kwara.exporter import export_case
     conn, exports_dir, td = kwara_env
     case_id, _sr, snap_ids, _ = _make_case_with_snapshot(
         conn, td, snapshot_count=2,
@@ -164,7 +164,7 @@ def test_export_csv_includes_snapshot_id_column(kwara_env):
 def test_manifest_sha256_companion_file_present_and_correct(kwara_env):
     """Every export ZIP must include manifest.sha256 with the correct hash
     of manifest.json so reviewers can verify the manifest out-of-band."""
-    from exporter import export_case
+    from kwara.exporter import export_case
     conn, exports_dir, td = kwara_env
     case_id, _sr, _snaps, _ = _make_case_with_snapshot(conn, td)
     zip_path = export_case(conn, case_id)
@@ -178,9 +178,9 @@ def test_manifest_sha256_companion_file_present_and_correct(kwara_env):
 
 def test_manifest_includes_integrity_warning_when_no_hmac_key(kwara_env, monkeypatch):
     """When KWARA_HMAC_KEY is unset, the manifest must say so explicitly."""
-    import exporter
+    from kwara import exporter
     monkeypatch.setattr(exporter, "HMAC_KEY", None)
-    from exporter import export_case
+    from kwara.exporter import export_case
     conn, exports_dir, td = kwara_env
     case_id, _sr, _snaps, _ = _make_case_with_snapshot(conn, td)
     zip_path = export_case(conn, case_id)
@@ -194,9 +194,9 @@ def test_manifest_includes_integrity_warning_when_no_hmac_key(kwara_env, monkeyp
 
 
 def test_manifest_sig_present_and_no_warning_when_hmac_key_set(kwara_env, monkeypatch):
-    import exporter
+    from kwara import exporter
     monkeypatch.setattr(exporter, "HMAC_KEY", "secret-test-key")
-    from exporter import export_case
+    from kwara.exporter import export_case
     conn, exports_dir, td = kwara_env
     case_id, _sr, _snaps, _ = _make_case_with_snapshot(conn, td)
     zip_path = export_case(conn, case_id)

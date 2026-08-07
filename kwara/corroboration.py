@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 
 import requests
 
-from config import URLSCAN_API_KEY, TSA_URL
+from .config import URLSCAN_API_KEY, TSA_URL
 
 
 def _now() -> str:

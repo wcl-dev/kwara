@@ -60,15 +60,15 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
-from config import (ADS_TXT_COMMODITY_PREVALENCE,
+from .config import (ADS_TXT_COMMODITY_PREVALENCE,
                     ADS_TXT_INDEX_MAX_CARRIER_ACCOUNTS, ADS_TXT_MANAGER_BREADTH,
                     ADS_TXT_MANAGER_MIN_APEXES, HEADER_VALUE_MIN_LENGTH,
                     HEADER_VALUE_STANDARD_NOISE)
-import prevalence as _prevalence
-from clustering_infra import (MAJOR_AD_EXCHANGES, _account_apex_footprint,
+from . import prevalence as _prevalence
+from .clustering_infra import (MAJOR_AD_EXCHANGES, _account_apex_footprint,
                               _is_noise_endpoint, shared_ad_accounts)
-from utils.domain import extract_domain_from_url
-from sql import LATEST_DONE_SCAN_RUN, latest_usable_snapshot
+from .utils.domain import extract_domain_from_url
+from .sql import LATEST_DONE_SCAN_RUN, latest_usable_snapshot
 
 # Signal type tags. Stable strings — stored in the DB and matched on lookup.
 SIGNAL_TRACKING_ID     = "tracking_id"
@@ -285,8 +285,8 @@ def extract_case_signals(
     # detect_fake_versions judges a value it does not produce, and that value
     # is indexed here regardless, so a fabricated Apache 2.5.1 is remembered
     # whether or not the fake-version rule fired in that case.
-    from header_analysis import per_domain_constants
-    from clusters import _is_generic_weak
+    from .header_analysis import per_domain_constants
+    from .clusters import _is_generic_weak
     domain_scan: dict[str, tuple] = {}
     for r in conn.execute(
         f"""SELECT sr.id AS scan_run_id, sr.run_at, sr.final_url

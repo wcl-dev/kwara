@@ -8,8 +8,8 @@ import os
 import tempfile
 from datetime import datetime, timezone
 
-import clusters
-from clusters import (
+from kwara import clusters
+from kwara.clusters import (
     TIER_CONFIRMED,
     _channel,
     _components,
@@ -18,7 +18,7 @@ from clusters import (
     group_color,
     node_id,
 )
-from db import get_conn, init_db, migrate_db
+from kwara.db import get_conn, init_db, migrate_db
 
 
 # ── Pure graph logic ──────────────────────────────────────────────────────

@@ -13,8 +13,8 @@ import sqlite3
 import tempfile
 from datetime import datetime, timezone
 
-from db import get_conn, init_db, migrate_db
-from insights import case_insights
+from kwara.db import get_conn, init_db, migrate_db
+from kwara.insights import case_insights
 
 
 def _now():

@@ -53,8 +53,8 @@ from urllib.parse import urlparse
 
 import requests
 
-from adstxt import parse_ads_txt
-from config import (
+from .adstxt import parse_ads_txt
+from .config import (
     ADS_TXT_MAX_BYTES,
     ADS_TXT_PLATFORM_ACCOUNTS,
     ADS_TXT_TIMEOUT,
@@ -62,8 +62,8 @@ from config import (
     DISCOVERY_WORKERS,
     SCANNER_USER_AGENT,
 )
-from index_db import SIGNAL_ADS_TXT_TEMPLATE
-from utils.domain import extract_domain_from_url
+from .index_db import SIGNAL_ADS_TXT_TEMPLATE
+from .utils.domain import extract_domain_from_url
 
 # Screening outcomes. `no_match` means "this stage found nothing", never
 # "this domain is clean" — see the module docstring.

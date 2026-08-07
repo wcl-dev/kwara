@@ -15,8 +15,8 @@ from unittest.mock import patch
 
 import pytest
 
-import _run_pending as rp
-from db import get_conn, init_db, migrate_db
+from kwara import _run_pending as rp
+from kwara.db import get_conn, init_db, migrate_db
 
 
 def _now():
@@ -120,7 +120,7 @@ def test_chunk_failure_rate_empty_list():
 # _drain_case abort behaviour
 # ---------------------------------------------------------------------------
 
-@patch("_run_pending.run_snapshot_batch")
+@patch("kwara._run_pending.run_snapshot_batch")
 def test_drain_case_aborts_after_n_consecutive_bad_chunks(mock_batch, monkeypatch):
     """Two chunks of 5 URLs each, both fail at 100% → SystemExit(3)."""
     monkeypatch.setattr(rp, "FAILURE_THRESHOLD", 0.5)
@@ -141,7 +141,7 @@ def test_drain_case_aborts_after_n_consecutive_bad_chunks(mock_batch, monkeypatc
     assert exc.value.code == rp.ENV_ABORTED_EXIT_CODE
 
 
-@patch("_run_pending.run_snapshot_batch")
+@patch("kwara._run_pending.run_snapshot_batch")
 def test_drain_case_does_not_abort_when_one_bad_followed_by_ok(mock_batch, monkeypatch):
     """Single bad chunk then a recovery chunk → must NOT abort
     (consecutive_bad resets to 0)."""
@@ -168,7 +168,7 @@ def test_drain_case_does_not_abort_when_one_bad_followed_by_ok(mock_batch, monke
     assert consecutive_bad == 0  # second chunk was clean → reset
 
 
-@patch("_run_pending.run_snapshot_batch")
+@patch("kwara._run_pending.run_snapshot_batch")
 def test_drain_case_ignores_small_chunks_for_threshold(mock_batch, monkeypatch):
     """A small tail batch (< MIN_CHUNK_SIZE) failing must NOT count
     toward consecutive_bad — covers the 'leftover 2 URLs' tail case."""

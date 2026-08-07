@@ -16,8 +16,8 @@ import sqlite3
 import zipfile
 from datetime import datetime, timezone
 
-from audit import write_audit
-from config import HMAC_KEY
+from .audit import write_audit
+from .config import HMAC_KEY
 
 EXPORTS_DIR = os.path.join(os.path.dirname(__file__), "data", "exports")
 

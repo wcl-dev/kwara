@@ -27,9 +27,9 @@ def kwara_env(monkeypatch):
     db_path = os.path.join(td, "kwara.db")
     exports_dir = os.path.join(td, "exports")
     os.makedirs(exports_dir, exist_ok=True)
-    import exporter as _exporter
+    from kwara import exporter as _exporter
     monkeypatch.setattr(_exporter, "EXPORTS_DIR", exports_dir)
-    from db import get_conn, init_db, migrate_db
+    from kwara.db import get_conn, init_db, migrate_db
     conn = get_conn(db_path)
     init_db(conn)
     migrate_db(conn)
@@ -76,7 +76,7 @@ def test_per_capture_dir_used_consistently_by_all_capture_paths():
     """All capture entry points (Playwright/lightweight/manual) must route
     artifacts through _per_capture_dir so older snapshot rows can't be
     silently overwritten."""
-    from snapshots import _per_capture_dir
+    from kwara.snapshots import _per_capture_dir
     a = _per_capture_dir(7)
     b = _per_capture_dir(7)
     assert a != b
@@ -91,8 +91,8 @@ def test_manual_upload_inserts_row_does_not_mutate_existing(kwara_env):
     preserved. We verify by simulating the new flow directly: insert two
     rows for the same scan_run, both should remain queryable.
     """
-    from lightweight_fetch import CAPTURE_METHOD_MANUAL, CAPTURE_METHOD_PLAYWRIGHT
-    from snapshots import _per_capture_dir
+    from kwara.lightweight_fetch import CAPTURE_METHOD_MANUAL, CAPTURE_METHOD_PLAYWRIGHT
+    from kwara.snapshots import _per_capture_dir
     conn, _, _ = kwara_env
     _, _, sr_id = _seed(conn)
 
@@ -144,7 +144,7 @@ def test_uploaded_post_screenshot_uses_message_id_prefix(kwara_env, tmp_path):
     """Two posts uploading 'image.png' must NOT overwrite each other.
     Verify by simulating the post-fix flow: read bytes, ingest message,
     write file with message_id prefix, update row."""
-    from ingestion import ingest_message
+    from kwara.ingestion import ingest_message
     conn, _, _ = kwara_env
     case_id = conn.execute(
         "INSERT INTO cases (title, description, created_at, updated_at) "
@@ -187,7 +187,7 @@ def test_uploaded_post_screenshot_uses_message_id_prefix(kwara_env, tmp_path):
 def test_export_then_restore_snapshot_files_reachable(kwara_env, tmp_path):
     """After export → restore, every restored snapshot row's
     screenshot_path/html_path must point at a file that actually exists."""
-    from exporter import export_case
+    from kwara.exporter import export_case
     conn, exports_dir, td = kwara_env
     case_id, _, sr_id = _seed(conn)
 

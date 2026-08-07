@@ -17,8 +17,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
-from db import get_conn, init_db, migrate_db
-from cloaking import (
+from kwara.db import get_conn, init_db, migrate_db
+from kwara.cloaking import (
     BODY_SIZE_DIFF_THRESHOLD,
     _strip_tracking_params,
     detect_and_store_cloaking,
@@ -110,7 +110,7 @@ def test_detect_no_tracking_params_skips_comparison():
     assert out == {"verdict": "no_tracking_params"}
 
 
-@patch("cloaking.requests.get")
+@patch("kwara.cloaking.requests.get")
 def test_detect_crawlerlanding_style_redirect_cloaking(mock_get):
     """The QSH 2026-04-28 case: ?uid → 302 to visitorlanding, no uid → 200 redacted139."""
     def fake(url, **_):
@@ -130,7 +130,7 @@ def test_detect_crawlerlanding_style_redirect_cloaking(mock_get):
     assert out["without_params"]["final_domain"] == "crawlerlanding.example"
 
 
-@patch("cloaking.requests.get")
+@patch("kwara.cloaking.requests.get")
 def test_detect_no_cloaking_when_responses_match(mock_get):
     """Both fetches return identical body — must be flagged no_cloaking."""
     body = b"<html>same content</html>"
@@ -145,7 +145,7 @@ def test_detect_no_cloaking_when_responses_match(mock_get):
     assert out["diffs"] == []
 
 
-@patch("cloaking.requests.get")
+@patch("kwara.cloaking.requests.get")
 def test_detect_body_size_diff_above_threshold(mock_get):
     """Same status, same domain, but content size differs >30%."""
     def fake(url, **_):
@@ -159,7 +159,7 @@ def test_detect_body_size_diff_above_threshold(mock_get):
     assert "body_content" in out["diffs"]
 
 
-@patch("cloaking.requests.get")
+@patch("kwara.cloaking.requests.get")
 def test_detect_body_size_diff_below_threshold_not_flagged(mock_get):
     """Tiny size variation (e.g. timestamp in HTML) shouldn't fire body_size,
     even if body_content (hash) differs."""
@@ -174,7 +174,7 @@ def test_detect_body_size_diff_below_threshold_not_flagged(mock_get):
     assert "body_content" in out["diffs"]
 
 
-@patch("cloaking.requests.get")
+@patch("kwara.cloaking.requests.get")
 def test_detect_fetch_error_records_verdict_not_raises(mock_get):
     mock_get.side_effect = requests.exceptions.ConnectionError("DNS failed")
     out = detect_cloaking("http://example.com/?uid=1")
@@ -187,7 +187,7 @@ def test_detect_fetch_error_records_verdict_not_raises(mock_get):
 # detect_and_store_cloaking — DB + audit + idempotency
 # ---------------------------------------------------------------------------
 
-@patch("cloaking.requests.get")
+@patch("kwara.cloaking.requests.get")
 def test_detect_and_store_writes_json_to_scan_runs(mock_get):
     mock_get.side_effect = lambda *a, **kw: _resp(
         b"<html>", status_code=200, final_url="http://example.com/"
@@ -205,7 +205,7 @@ def test_detect_and_store_writes_json_to_scan_runs(mock_get):
     assert json.loads(row["cloaking_signal_json"])["verdict"] == result["verdict"]
 
 
-@patch("cloaking.requests.get")
+@patch("kwara.cloaking.requests.get")
 def test_detect_and_store_skips_when_already_done(mock_get):
     """Pre-existing cloaking_signal_json must not be overwritten unless force=True."""
     mock_get.return_value = _resp(b"x", status_code=200, final_url="x")
@@ -222,7 +222,7 @@ def test_detect_and_store_skips_when_already_done(mock_get):
     mock_get.assert_not_called()
 
 
-@patch("cloaking.requests.get")
+@patch("kwara.cloaking.requests.get")
 def test_detect_and_store_force_reruns(mock_get):
     mock_get.side_effect = lambda *a, **kw: _resp(
         b"x", status_code=200, final_url="http://example.com/"
@@ -253,7 +253,7 @@ def test_detect_and_store_returns_none_for_missing_scan_run():
 # never capture, because scan follows the with-params redirect away from it)
 # ---------------------------------------------------------------------------
 
-@patch("cloaking.requests.get")
+@patch("kwara.cloaking.requests.get")
 def test_cloaking_suspect_creates_alt_snapshot_with_extracted_pixels(mock_get):
     """crawlerlanding-style case: with-uid → visitorlanding (small body), no-uid → crawlerlanding
     real redacted139 HTML embedding a Meta Pixel. The alt snapshot row must
@@ -297,7 +297,7 @@ def test_cloaking_suspect_creates_alt_snapshot_with_extracted_pixels(mock_get):
     assert ids == {"Meta Pixel": ["1234567890123456"]}
 
 
-@patch("cloaking.requests.get")
+@patch("kwara.cloaking.requests.get")
 def test_no_cloaking_does_not_create_alt_snapshot(mock_get):
     """Identical responses → verdict=no_cloaking. The without-params body
     contains no new info vs what scan/lightweight already captured, so
@@ -316,7 +316,7 @@ def test_no_cloaking_does_not_create_alt_snapshot(mock_get):
     assert n == 0
 
 
-@patch("cloaking.requests.get")
+@patch("kwara.cloaking.requests.get")
 def test_alt_snapshot_is_idempotent_across_repeated_runs(mock_get):
     """A second call (no force) must not create a second alt snapshot row."""
     def fake(url, **_):
@@ -338,7 +338,7 @@ def test_alt_snapshot_is_idempotent_across_repeated_runs(mock_get):
     assert n == 1
 
 
-@patch("cloaking.requests.get")
+@patch("kwara.cloaking.requests.get")
 def test_alt_snapshot_force_updates_existing_row_no_duplicate(mock_get):
     """force=True re-runs detection and updates the existing alt row in
     place (preserves snapshot_id for cross-references) instead of

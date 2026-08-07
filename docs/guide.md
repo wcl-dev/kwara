@@ -21,9 +21,12 @@ kwara has no graphical interface. Everything runs through the CLI or MCP.
 ```bash
 python -m venv .venv
 source .venv/bin/activate            # Windows: .venv\Scripts\activate
-python -m pip install -r requirements.txt
+python -m pip install -e .          # or: -r requirements.txt
 python -m playwright install chromium
 ```
+
+`pip install -e .` puts a `kwara` command on PATH; without it, every command
+below also works as `python -m kwara.cli ...` from the repository root.
 
 Playwright is optional. Scanning, WHOIS, ads.txt and the attribution analysis
 need no browser; only screenshots do.

@@ -11,7 +11,7 @@ fresh timestamped+random subdirectory. These tests pin that.
 import os
 import re
 
-from snapshots import _per_capture_dir
+from kwara.snapshots import _per_capture_dir
 
 
 def test_per_capture_dir_creates_unique_subdir_per_call():

@@ -12,8 +12,8 @@ import sqlite3
 import tempfile
 from datetime import datetime, timezone
 
-from db import get_conn, init_db, migrate_db
-from index_db import (
+from kwara.db import get_conn, init_db, migrate_db
+from kwara.index_db import (
     SIGNAL_HAR_ENDPOINT,
     SIGNAL_HEADER_VALUE,
     SIGNAL_ASN,
@@ -322,7 +322,7 @@ def test_operator_cross_links_finds_an_endpoint_that_is_also_a_landing():
     three QSH landings load from statics.privatecdn.example and s1.privatecdn2.example, the
     01-family cluster's private CDN — a link that had sat in the HAR for three
     months and contradicted a conclusion drawn from ads.txt alone."""
-    from index_db import operator_cross_links
+    from kwara.index_db import operator_cross_links
     conn = get_index_conn(os.path.join(tempfile.mkdtemp(), "i.db"))
 
     def put(stype, value, domain, case_id=1, srid=1):
@@ -346,7 +346,7 @@ def test_operator_cross_links_finds_an_endpoint_that_is_also_a_landing():
 
 
 def test_cross_links_ignore_a_domain_loading_its_own_assets():
-    from index_db import operator_cross_links
+    from kwara.index_db import operator_cross_links
     conn = get_index_conn(os.path.join(tempfile.mkdtemp(), "i.db"))
     conn.execute(
         """INSERT INTO signals (signal_type, signal_value, platform, source_db,

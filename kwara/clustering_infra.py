@@ -26,8 +26,8 @@ from urllib.parse import parse_qs, urlparse
 
 import ipaddress
 
-import prevalence as _prevalence
-from config import (
+from . import prevalence as _prevalence
+from .config import (
     ADS_TXT_COMMODITY_PREVALENCE,
     ADS_TXT_MANAGER_BREADTH,
     ADS_TXT_MANAGER_MIN_APEXES,
@@ -37,7 +37,7 @@ from config import (
     ADS_TXT_TEMPLATE_PAIR_RATIO,
     HAR_NOISE_HOSTS,
 )
-from utils.domain import extract_domain_from_url
+from .utils.domain import extract_domain_from_url
 
 # Major programmatic ad exchanges — used by millions of unrelated sites, so an
 # account here is NEVER per-operator attribution (a floor under the overlap
@@ -55,7 +55,7 @@ MAJOR_AD_EXCHANGES = frozenset({
     "video.unrulymedia.com", "smartyads.com", "adyoulike.com", "teads.tv",
     "genieesspv.jp", "genieegroup.com", "rhythmone.com", "yieldmo.com",
 })
-from param_attribution import (
+from .param_attribution import (
     PLATFORM_ADS_TXT_SELLER,
     PLATFORM_GOOGLE_ADS,
     PLATFORM_GOOGLE_ADSENSE,
@@ -72,7 +72,7 @@ from param_attribution import (
     identify_param,
     merge_risk_tags,
 )
-from sql import LATEST_DONE_SCAN_RUN, latest_usable_snapshot
+from .sql import LATEST_DONE_SCAN_RUN, latest_usable_snapshot
 
 
 def _is_direct_ip(host: str) -> bool:

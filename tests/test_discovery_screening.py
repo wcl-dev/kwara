@@ -11,7 +11,7 @@ import os
 import sqlite3
 import tempfile
 
-from discovery import (
+from kwara.discovery import (
     VERDICT_NO_ADS_TXT,
     VERDICT_NO_MATCH,
     VERDICT_OFF_SITE,
@@ -21,7 +21,7 @@ from discovery import (
     known_templates,
     screen_ads_txt,
 )
-from index_db import SIGNAL_ADS_TXT_SELLER, SIGNAL_ADS_TXT_TEMPLATE, get_index_conn
+from kwara.index_db import SIGNAL_ADS_TXT_SELLER, SIGNAL_ADS_TXT_TEMPLATE, get_index_conn
 
 
 def _ads(sha, *, status="ok", n=3):
@@ -134,7 +134,7 @@ def test_screen_domains_dedups_without_losing_caller_order(monkeypatch):
     thousands of international domains). Dedup must not scatter them: a set
     comprehension here quietly randomised submission order through a
     half-hour sweep."""
-    import discovery
+    from kwara import discovery
     monkeypatch.setattr(discovery, "screen_domain",
                         lambda d, known, timeout=None: {
                             "domain": d, "verdict": VERDICT_NO_MATCH,

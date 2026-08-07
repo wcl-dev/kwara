@@ -56,9 +56,9 @@ git clone https://github.com/wcl-dev/kwara && cd kwara
 python -m venv .venv
 source .venv/bin/activate           # macOS / Linux
 # .venv\Scripts\activate            # Windows
-python -m pip install -r requirements.txt
+python -m pip install -e .          # or: -r requirements.txt
 python -m playwright install chromium
-python -m kwara.cli case new --title "Op Nightingale"
+kwara case new --title "Op Nightingale"
 ```
 
 > Playwright is optional. Scanning, WHOIS, ads.txt and the attribution analysis need no browser; only screenshots do.
@@ -85,7 +85,7 @@ into `jq` is always safe. Add `--text` for human-readable output.
 To drive kwara from an agent:
 
 ```bash
-python -m pip install -r requirements-agent.txt
+python -m pip install -e '.[agent]'   # or: -r requirements-agent.txt
 claude mcp add kwara -- /abs/path/to/.venv/bin/python -m kwara.mcp_server
 ```
 
@@ -112,7 +112,8 @@ command reference, the tool list, and the reasoning.
 
 | Directory | Description |
 |---|---|
-| `kwara/` | Main application (core analysis, SQLite, scanning, export) |
+| `kwara/` | The package — core analysis, SQLite, scanning, export |
+| `pyproject.toml` | Package metadata; `pip install -e .` puts a `kwara` command on PATH |
 | `kwara/cli.py` | Headless CLI — the source of truth for automation |
 | `kwara/mcp_server.py` | MCP server; a thin wrapper over the CLI's functions |
 | `kwara/config.py` | Centralized configuration and environment variable defaults |

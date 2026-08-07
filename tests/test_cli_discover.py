@@ -10,7 +10,7 @@ import json
 import os
 import tempfile
 
-from cli import build_parser
+from kwara.cli import build_parser
 
 
 def _run(argv):
@@ -66,7 +66,7 @@ def test_cluster_reads_banked_jsonl_and_can_drop_platform_templates():
 def test_prevalence_round_trips_into_a_loadable_table():
     """The table the tier reads must be produced by the tool, not by hand —
     it had no producer at all until this command existed."""
-    import prevalence
+    from kwara import prevalence
     banked = _tmp("obs.jsonl", "\n".join(json.dumps(o) for o in [
         _obs("a.com", "S1", [["ads.com", "1"], ["rare.net", "9"]]),
         _obs("b.com", "S2", [["ads.com", "1"]]),

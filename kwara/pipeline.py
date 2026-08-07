@@ -8,14 +8,14 @@ import sqlite3
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
-from adstxt import fetch_and_store_ads_txt
-from cloaking import detect_and_store_cloaking
-from config import NEW_DOMAIN_DAYS
-from corroboration import corroborate_url
-from scanner import scan_url as _scan
-from snapshots import snapshot_url as _snapshot, snapshot_batch as _snapshot_batch
-from whois_lookup import query_whois, UNKNOWN
-from ip_lookup import lookup_ip
+from .adstxt import fetch_and_store_ads_txt
+from .cloaking import detect_and_store_cloaking
+from .config import NEW_DOMAIN_DAYS
+from .corroboration import corroborate_url
+from .scanner import scan_url as _scan
+from .snapshots import snapshot_url as _snapshot, snapshot_batch as _snapshot_batch
+from .whois_lookup import query_whois, UNKNOWN
+from .ip_lookup import lookup_ip
 
 _POSTED_AT_FMTS = [
     "%Y-%m-%d %H:%M:%S",
@@ -67,7 +67,7 @@ def run_lightweight_fetch_batch(
     Wraps lightweight_fetch.fetch_html_only_batch(). See that module's
     docstring for trade-offs vs the full Playwright snapshot path.
     """
-    from lightweight_fetch import fetch_html_only_batch
+    from .lightweight_fetch import fetch_html_only_batch
     return fetch_html_only_batch(conn, scan_run_ids)
 
 

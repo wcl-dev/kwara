@@ -17,8 +17,8 @@ from datetime import datetime, timezone
 
 import pytest
 
-from db import get_conn, init_db, migrate_db
-from header_analysis import (
+from kwara.db import get_conn, init_db, migrate_db
+from kwara.header_analysis import (
     cookie_origin_signals,
     cross_domain_shared_template,
     detect_fake_versions,

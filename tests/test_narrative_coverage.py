@@ -6,8 +6,8 @@ a case carrying 193 operator-tier ads.txt accounts scored 1544 on that term
 alone. The weakest evidence class saturated the figure by itself and every
 well-populated case reported the same number.
 """
-from config import COVERAGE_CLASS_CAP, COVERAGE_WEIGHTS
-from narrative import evidence_coverage, verdict
+from kwara.config import COVERAGE_CLASS_CAP, COVERAGE_WEIGHTS
+from kwara.narrative import evidence_coverage, verdict
 
 
 def _share(cls: str) -> int:
