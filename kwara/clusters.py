@@ -28,7 +28,7 @@ import os
 import sqlite3
 from collections import defaultdict
 
-from ui_tokens import GROUP_PALETTE
+from palette import GROUP_PALETTE
 
 from clustering_infra import (
     shared_ad_accounts,

@@ -17,7 +17,7 @@
 
 所有聚合函式都是**唯讀 SQL + Python 字典聚合**，沒有外部呼叫、沒有 i18n，可以隨時重跑。
 
-> **介面對應**：這些函式同時供 Streamlit UI 與無介面 CLI／MCP 呼叫——兩條路徑走同一份程式碼，不會各自漂移。CLI 指令與 MCP 工具清單見 [agent-interface.md](agent-interface.md)。
+> **介面對應**：這些函式由 CLI 與 MCP 呼叫，兩條路徑走同一份程式碼。（曾有一個 Streamlit UI，2026-08-07 移除——它顯示的判讀依據比 CLI 少。）指令與工具清單見 [agent-interface.md](agent-interface.md)。
 
 ---
 

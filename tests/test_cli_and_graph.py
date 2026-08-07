@@ -162,20 +162,7 @@ def test_render_dot_explains_missing_graphviz(tmp_path, monkeypatch):
     with pytest.raises(RuntimeError, match="graphviz"):
         graph.render_dot("digraph x {}", str(tmp_path / "g.svg"), "svg")
 
-
-def test_ui_page_reuses_core_build_dot():
-    """views/page_graph.py must not carry its own copy of the DOT builder."""
-    src = open(os.path.join(os.path.dirname(graph.__file__),
-                            "views", "page_graph.py"), encoding="utf-8").read()
-    assert "def build_dot" not in src
-    assert "from graph import build_dot" in src
-
-
-# ---------------------------------------------------------------------------
-# Headless i18n
-# ---------------------------------------------------------------------------
-
-def test_i18n_works_without_streamlit_session():
+def test_i18n_is_a_process_wide_setting():
     import i18n
     original = i18n.get_lang()
     try:
@@ -188,14 +175,15 @@ def test_i18n_works_without_streamlit_session():
         i18n.set_lang(original)
 
 
-def test_core_modules_import_without_streamlit():
-    """Importing the analysis core must not require the UI framework.
-
-    Checked by module graph rather than by unloading streamlit, which pytest
-    may already have imported via another test.
+def test_no_module_imports_streamlit():
+    """The UI was removed on 2026-08-07 and streamlit is no longer a
+    dependency. A stray import would break a fresh install, where the package
+    is simply absent — and it passes silently on a dev machine that still has
+    it lying around in the venv.
     """
     import importlib
-    for name in ("cases", "graph", "cli", "insights", "clusters", "narrative"):
+    for name in ("cases", "graph", "cli", "insights", "clusters", "narrative",
+                 "i18n", "discovery", "index_db", "palette", "mcp_server"):
         mod = importlib.import_module(name)
         src = open(mod.__file__, encoding="utf-8").read()
         assert "import streamlit" not in src, f"{name} imports streamlit"

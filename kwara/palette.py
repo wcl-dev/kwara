@@ -1,13 +1,11 @@
-"""UI design tokens — Swiss 報告風（單一事實來源）.
+"""繪圖用的色票（單一事實來源）。
 
-與 .streamlit/config.toml 的 [theme] 同步維護：
-  ACCENT  ↔ primaryColor / linkColor
-  INK     ↔ textColor
-  NEUTRAL_FILL ↔ secondaryBackgroundColor
-  GROUP_PALETTE ↔ chartCategoricalColors（同順序）
+原本是 Streamlit UI 的 design token，與 .streamlit/config.toml 的 [theme]
+同步維護。UI 於 2026-08-07 移除後，留下的是 `graph.py` 的關聯圖與
+`clusters.py` 的群組標色——兩者都由 CLI 使用，與介面無關。
 
-原則：紅色保留給真正的警示（錯誤、危險操作），不得用於選取、
-識別碼或群組標示；強調一律用 ACCENT 藍。
+原則不變：紅色保留給真正的警示，不得用於選取、識別碼或群組標示；
+強調一律用 ACCENT 藍。群組色刻意克制、傾向色盲友善。
 """
 
 ACCENT = "#1D4ED8"        # 唯一強調藍：判定標題、主要徽章、連結

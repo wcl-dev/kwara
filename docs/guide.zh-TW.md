@@ -1,26 +1,25 @@
 **[English](guide.md)**
 
-# kwara — 操作者歸因與數位證據工具
+# kwara — 辦一個案子
 
-kwara 是一套本地端工具，做操作者歸因與數位證據蒐集，特化於數位廣告生態：從可疑 URL（短連結濫用、網域詐騙、線上詐騙）蒐集、掃描並佐證證據，再沿變現與測量訊號把背後的網站聚合成操作者群組。所有資料儲存於本機 SQLite 資料庫。
+kwara 是本地端的操作者歸因與數位證據工具，特化於數位廣告生態：從可疑 URL 蒐集、掃描並佐證證據，再沿變現與測量訊號把背後的網站聚合成操作者群組。全部資料存在本機 SQLite。
+
+這份文件講**怎麼辦一個案子**——動作的順序與判斷。逐一指令的完整參考在 [agent-interface.md](agent-interface.md)，演算法原理在 [analysis-design.md](analysis-design.md)。
+
+kwara 沒有圖形介面，全部透過 CLI 或 MCP 操作。
 
 ---
 
-## 啟動方式
+## 安裝
 
 ```bash
-cd kwara
 python -m venv .venv
-.venv/Scripts/activate
-pip install -r requirements.txt
+source .venv/bin/activate            # Windows: .venv\Scripts\activate
+python -m pip install -r requirements.txt
 python -m playwright install chromium
-streamlit run app.py
 ```
 
-> 未安裝 Playwright/Chromium 時，掃描和 WHOIS 仍可用——僅截圖功能需要瀏覽器。
-
-這份文件說明的是 **Streamlit 介面**。同樣的事情不開瀏覽器也做得到——CLI 與 MCP
-用法見 [docs/agent-interface.md](docs/agent-interface.md)。
+沒裝 Playwright／Chromium 也能用——掃描、WHOIS、ads.txt、歸因分析都不需要瀏覽器，只有截圖需要。
 
 ---
 
@@ -30,61 +29,94 @@ streamlit run app.py
 cases（案件）
   └─ message_evidence（來源貼文）
         └─ url_artifacts（擷取的 URL）
-              └─ scan_runs（redirect chain、TLS、headers、WHOIS/ASN、佐證）
-                    ├─ redirect_hops（每一跳的 redirect）
+              └─ scan_runs（redirect chain、TLS、headers、WHOIS/ASN、ads.txt、佐證）
+                    ├─ redirect_hops（每一跳，含完整 response headers）
                     └─ snapshots（截圖、HTML、HAR、風險旗標）
 ```
 
-每個案件相互獨立。從側邊欄切換或新增案件。
+案件彼此獨立。唯一橫跨案件的是**跨案件索引**（`~/.kwara/index.db`），它記住訊號出現過的地方——甚至橫跨不同的資料庫檔案。
 
 ---
 
-## 介面說明
+## 一件案子的順序
 
-左欄導覽分三個區塊。**進案先看「總覽」**——它給出判定結論與群組拆解，再決定往哪裡深掘。
-
+```bash
+kwara case new --title "夜鶯專案" --locale-preset tw
+kwara ingest url --case 1 https://suspicious.example/x
+kwara run attribute --case 1
+kwara analyze clusters --case 1
 ```
-案件 Case        總覽 Overview → 群組卷宗 Dossier → 蒐證 Collection
-分析 Analysis    分析 Analysis → 關聯圖 Graph
-全域 Global      跨案件 Cross-case → 匯出 Export
+
+`run attribute` 是**免瀏覽器的輕量歸因**：追跳轉、抓 TLS 與 headers、抓 ads.txt、查 WHOIS、抽靜態 HTML 裡的追蹤碼。
+
+> **進件後不必急著截圖。** 輕量歸因通常已經足夠讓操作者群組浮現。截圖成本高得多，它補的是 **JS 動態注入的追蹤碼**（例如透過 GTM 載入的 GA4）與保全用的頁面證據。
+
+要那些的時候：
+
+```bash
+kwara run snapshot --case 1          # Playwright：截圖 + HTML + HAR
+kwara run corroborate --case 1       # Wayback、urlscan、RFC 3161 時間戳
 ```
 
-### 案件 Case
+**兩條擷取路徑都要跑，OPSEC 判定才成立。** 它比較的是「免瀏覽器」與「開瀏覽器」的成功率差異，用來揭露「擋爬蟲、放瀏覽器」的 WAF 部署。只跑其中一條，每個網域都會是 `indeterminate`——`analyze insights` 的 gaps 會告訴你缺哪一條。
 
-**總覽（Overview）** — 判定結論、操作者群組拆解、證據完整度與資料缺口。落地頁面。
+---
 
-**群組卷宗（Dossier）** — 單一操作者群組的完整卷宗：成員網域、把它們串起來的共用訊號、各自的證據狀態。
+## 讀結果
 
-**蒐證（Collection）** — 六個步驟，用上方切換：
+```bash
+kwara analyze insights --case 1      # 規則式摘要：判定、發現、證據缺口
+kwara analyze clusters --case 1      # 操作者群組與串起它們的訊號
+kwara analyze narrative --case 1     # 白話判定
+kwara analyze graph --case 1 --out graph.svg
+```
 
-| 步驟 | 做什麼 |
-|---|---|
-| 進件 | 貼上貼文／匯入 CSV → 抽出連結並**自動歸因（免截圖）**，群組與關聯圖隨即浮現 |
-| 頁面擷取 | 對重點 URL 用瀏覽器擷取截圖／HTML／HAR——補上 JS 注入的追蹤碼，並作為保全證據 |
-| 掃描 | （進階／手動）重新追蹤跳轉鏈、記錄 TLS 憑證與 HTTP 標頭 |
-| 佐證 | 存檔到 Wayback、提交 urlscan.io、取得 RFC 3161 受信時間戳 |
-| 網路詳情 | 檢視掃描結果：憑證、跳轉路徑、回應標頭、ads.txt |
-| 網域情報 | WHOIS 註冊資訊、IP 與 ASN 託管 |
+**先看 `insights` 的 gaps。** 它會列出還沒蒐集的東西——沒做第三方佐證、沒有 TLS 紀錄、OPSEC 缺哪條路徑。空的分析結果多半代表沒蒐集，不代表沒發現。
 
-> 「進件」之後**不必**急著截圖。自動歸因已足以讓群組浮現；截圖是為了補 JS 注入的追蹤碼與保全證據，成本高得多。
+證據力不是等價的。`analysis-design.md` 有完整分層，但實務上的順序是：
 
-### 分析 Analysis
+1. **逐字節相同的 ads.txt、共用追蹤碼、同一張憑證** — 能綁定操作者群組
+2. **cloaking、偽造版本、跨域 server 模板** — 主動規避的行為觀察
+3. **共用廣告帳號** — 幾乎都是大路貨，不要拿來宣稱同一操作者
 
-**分析（Analysis）** — 依分析問題分組，而非依技術模組：
+---
 
-- **歸因與基礎設施** — 分析洞察（Insights，規則式案件摘要）＋ 服務提供商（Providers，問責視角：註冊商、託管、CA、廣告帳號）
-- **行為觀察** — Cloaking（帶參數 vs 不帶參數的內容差異）＋ OPSEC（lightweight vs Playwright 成功率對比，揭露「擋爬蟲、放瀏覽器」的 WAF 部署）
-- **伺服器標頭鑑識** — 每跳 response header：per-domain 常數、跨域 server 模板、偽造版本字串、Set-Cookie origin 洩漏
+## 跨案件記憶
 
-> **Cloaking / OPSEC / Headers 是證據力最強的訊號層**，其判定會回灌到 Insights 摘要的最上方。詳見 [docs/analysis-design.md](docs/analysis-design.md)。
+```bash
+kwara index build --case 1                    # 把這個案子的訊號存進索引
+kwara index lookup G-B2C3D4E5F6               # 這個值以前出現在哪些案子
+kwara index recurring                         # 跨多個案件再現的訊號
+kwara index crosslinks                        # 第三方 endpoint 本身也是被調查的網域
+```
 
-**關聯圖（Graph）** — 網域與共用識別資產的關聯圖，按操作者群組配色。無介面用法可輸出成 SVG/PNG 檔。
+`recurring` 的結果要**看 `domain_count`**：只涵蓋一個網域的「跨案件重複」通常是同一個網站被兩個案件各收一次，不是真的在別處又出現。
 
-### 全域 Global
+---
 
-**跨案件（Cross-case）** — 某個追蹤碼／憑證序號／註冊商／ASN／網域，過去出現在哪些案件；以及跨多案件再現的訊號。
+## 證據在哪
 
-**匯出（Export）** — ZIP 證據封包（CSV、截圖、HTML、HAR、稽核紀錄、SHA-256 manifest、可選 HMAC 簽章、中英雙語 README）。
+擷取庫用 `scan_run_id` 當目錄名，所以檔案系統本身看不出哪個目錄屬於哪個網域。
+
+```bash
+kwara evidence list --domain visitorlanding.example       # 跨案件找這個網域的證據
+kwara evidence describe                       # 每個目錄放一份 capture.json 說明
+kwara evidence browse --out ~/evidence-area --case 1
+```
+
+`browse` 用網域當目錄名建一棵符號連結樹，可以直接用檔案總管走進去看截圖。證據不會被複製，樹隨時可重建。
+
+---
+
+## 交付
+
+```bash
+kwara export case --case 1
+```
+
+ZIP 含 CSV、截圖、HTML、HAR、稽核紀錄、SHA-256 manifest、中英雙語 README。設了 `KWARA_HMAC_KEY` 才有簽章；沒設的話 manifest 會**自己聲明**未簽章（`integrity_warning`），不會假裝有。
+
+`restore_from_export.py` 可以從封包還原資料庫——收件者可以自己重建，不必信任你的轉述。
 
 ---
 
@@ -102,6 +134,8 @@ cases（案件）
 
 ---
 
-## 環境變數
+## 主動發現
 
-完整清單請見 [README.zh-TW.md](README.zh-TW.md)。
+判別器可以從候選網域裡找出與已知目標同源的站。它是**另一條工作流**，見 [agent-interface.md](agent-interface.md) 的 `discover` 章節。
+
+環境變數完整清單見 [README.zh-TW.md](../README.zh-TW.md)。

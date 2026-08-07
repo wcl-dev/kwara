@@ -1,4 +1,4 @@
-"""語法檢查：確保主要目錄可編譯（不匯入 streamlit app 本體）。"""
+"""語法檢查：確保主要目錄可編譯。"""
 import compileall
 from pathlib import Path
 

@@ -24,40 +24,20 @@ LANGUAGES = {"en": "English", "zh-TW": "正體中文"}
 # Map config.LANG ("zh"/"en") to an i18n key ("zh-TW"/"en").
 _DEFAULT = "zh-TW" if _CONFIG_LANG == "zh" else "en"
 
-# Fallback store for non-Streamlit processes.
+# Process-wide language. This used to defer to st.session_state when running
+# inside a Streamlit script, so two browser tabs could read different
+# languages; with the UI removed there is one process and one language, set by
+# KWARA_LANG or `--lang`.
 _LANG = _DEFAULT
 
 
-def _session_state():
-    """st.session_state when running inside a Streamlit script, else None."""
-    import sys
-
-    st = sys.modules.get("streamlit")
-    if st is None:
-        return None
-    try:
-        from streamlit.runtime.scriptrunner import get_script_run_ctx
-
-        if get_script_run_ctx() is None:
-            return None
-    except Exception:  # noqa: BLE001 — unknown Streamlit version; assume headless
-        return None
-    return st.session_state
-
-
 def get_lang() -> str:
-    state = _session_state()
-    if state is None:
-        return _LANG
-    return state.get("lang", _DEFAULT)
+    return _LANG
 
 
 def set_lang(lang: str) -> None:
     global _LANG
     _LANG = lang
-    state = _session_state()
-    if state is not None:
-        state["lang"] = lang
 
 
 def t(_key: str, **kwargs) -> str:

@@ -1,6 +1,6 @@
 # kwara agent interface — CLI and MCP
 
-kwara has two headless surfaces beside the Streamlit UI:
+kwara has two surfaces, and no others:
 
 - **`kwara/cli.py`** — the CLI. This is the source of truth for automation.
 - **`kwara/mcp_server.py`** — an MCP server that wraps the CLI's command
@@ -10,8 +10,11 @@ The MCP server contains no analysis logic of its own; every tool builds an
 argument namespace and calls the same `cmd_*` function the CLI calls. The two
 surfaces cannot drift apart.
 
-The Streamlit UI still works and shares the same core modules. It is frozen —
-new capability lands on the CLI/MCP side.
+There was a Streamlit UI; it was removed on 2026-08-07. It had been frozen
+since the CLI landed, and freezing turned out to mean it showed *less* than
+the CLI did — no reasoning behind a tier verdict, no explanation for an empty
+OPSEC result. A surface that quietly claims more confidence than another is
+worse than no surface. Browsing evidence is now `evidence browse`.
 
 ---
 
@@ -264,10 +267,12 @@ quietly diverge.
   regression tests.
 - `kwara/graph.py` — the DOT builder, previously inside `views/page_graph.py`.
   The graph was the one analytic output that only existed as a client-side
-  render; it can now be written to a file. The UI imports it from here.
-- `kwara/i18n.py` — Streamlit is now imported lazily and optionally, so a
-  headless process neither pulls in the UI framework nor emits
-  "missing ScriptRunContext" warnings.
+  render; it can now be written to a file.
+- `kwara/i18n.py` — language is a process-wide setting. It used to defer to
+  `st.session_state` so two browser tabs could differ; with one process there
+  is one language, from `KWARA_LANG` or `--lang`.
+- `kwara/palette.py` — was `ui_tokens.py`. The colours outlived the UI: the
+  relationship graph and the operator-group labelling both use them.
 
 
 ### MCP 的 discovery 工具

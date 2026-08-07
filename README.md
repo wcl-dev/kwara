@@ -19,15 +19,15 @@ All evidence is stored locally in SQLite and can be exported as a ZIP evidence p
 
 ## Key features
 
-- **Two surfaces, one core** — a Streamlit UI for reading evidence with your own eyes, and a headless CLI + MCP server for automation and agents. Both call the same analysis code
-- **Group-centric workflow** — an Overview verdict landing page, per-operator-group dossiers, and an operator relationship graph, with Collection / Analysis / Cross-case / Export in a left-rail navigation
+- **Headless by design** — a CLI that is the source of truth for automation, and an MCP server that is a thin wrapper over it, so the two cannot drift
+- **Candidate discovery** — screens a candidate population by ads.txt to find sites sharing a deployment with known targets, before spending the expensive pipeline on them
 - **Operator-level signal clustering** — cross-domain matching of HTML tracking IDs (11 platforms), TLS certificates, URL parameters, and wrapper redirects
 - **Active-evasion forensics** — cloaking detection, HTTP header forensics (origin leak / fabricated versions / server templates), and OPSEC path differential
 - **Monetisation forensics** — fetches each domain's `ads.txt` and clusters shared DIRECT ad accounts + byte-identical templates, frequency-weighted to separate shared monetisation managers (weak) from operator-cluster signals (strong)
 - **Third-party proof** — Wayback Machine, urlscan.io, and RFC 3161 timestamps provide independent records
 - **Per-case locale** — set victim's region so screenshots reflect what they actually saw (defeats geo-cloaking)
 - **URL parameter attribution** — auto-identifies 50+ tracking parameters (UTM, fbclid, gclid, etc.)
-- **Bilingual** — English and Traditional Chinese, switchable from the sidebar or via `--lang`
+- **Bilingual** — English and Traditional Chinese, via `--lang` or `KWARA_LANG`
 - **Evidence pack export** — ZIP with CSVs, screenshots, HTML, HAR, audit log, SHA-256 manifest, and bilingual README
 - **Fully offline-capable** — all data stored in local SQLite; third-party services are optional
 
@@ -58,19 +58,17 @@ source .venv/bin/activate           # macOS / Linux
 # .venv\Scripts\activate            # Windows
 python -m pip install -r requirements.txt
 python -m playwright install chromium
-streamlit run kwara/app.py
+python -m kwara.cli case new --title "Op Nightingale"
 ```
 
-On Windows with dependencies already installed, double-click `start_kwara.bat` from the project root.
-
-> If `playwright install chromium` has not been run, screenshot features won't work but scanning, WHOIS, and analysis still function.
+> Playwright is optional. Scanning, WHOIS, ads.txt and the attribution analysis need no browser; only screenshots do.
 
 
-## Headless: CLI and MCP
+## CLI and MCP
 
-Everything the UI can do to a case is available without a browser. The CLI is
-the source of truth for automation; the MCP server is a thin wrapper over the
-same functions, so the two cannot drift apart.
+The CLI is the source of truth for automation; the MCP server is a thin wrapper
+over the same functions, so the two cannot drift apart. There is no other
+surface.
 
 ```bash
 python -m kwara.cli case new --title "Op Nightingale" --locale-preset tw
@@ -100,7 +98,7 @@ command reference, the tool list, and the reasoning.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `KWARA_LANG` | `en` | Default UI language (`en` or `zh`) |
+| `KWARA_LANG` | `en` | Language for insights and narrative (`en` or `zh`) |
 | `KWARA_BROWSER_LOCALE` | `zh-TW` | Playwright browser locale for screenshots |
 | `KWARA_BROWSER_TIMEZONE` | `Asia/Taipei` | Playwright browser timezone |
 | `KWARA_HMAC_KEY` | *(unset)* | HMAC key for signing evidence pack manifest |
@@ -117,7 +115,6 @@ command reference, the tool list, and the reasoning.
 | `kwara/` | Main application (core analysis, SQLite, scanning, export) |
 | `kwara/cli.py` | Headless CLI — the source of truth for automation |
 | `kwara/mcp_server.py` | MCP server; a thin wrapper over the CLI's functions |
-| `kwara/views/` | Streamlit UI tab modules (one file per tab) |
 | `kwara/config.py` | Centralized configuration and environment variable defaults |
 | `kwara/corroboration.py` | Third-party evidence services (Wayback, urlscan, RFC 3161) |
 | `docs/agent-interface.md` | Full CLI command reference and MCP tool list |

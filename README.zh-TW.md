@@ -19,15 +19,15 @@ kwara 接收社群貼文中的可疑 URL，引導你走過六步驟的證據鏈�
 
 ## 主要特色
 
-- **兩套介面、同一核心** — Streamlit 介面供人工檢視證據，無介面 CLI + MCP server 供自動化與 agent 操作；兩者呼叫同一份分析程式碼
-- **群組導向工作流** — 以「總覽判定頁 → 操作者群組卷宗 → 關聯圖」為核心，蒐證／分析／跨案件／匯出以左側導覽列組織
+- **無介面設計** — CLI 是自動化的唯一真相來源，MCP server 只是薄薄包一層，兩者不會漂移
+- **主動發現** — 以 ads.txt 篩選候選母體，找出與已知目標同源的網站，再決定要不要花昂貴的完整管線
 - **操作者層訊號聚合** — 跨網域比對 HTML 追蹤碼（11 平台）、TLS 憑證、URL 參數、wrapper 跳轉
 - **主動防偵測對抗** — cloaking 偵測、HTTP header 鑑識（origin 洩漏 / 偽造版本 / server 模板）、OPSEC 路徑差異
 - **變現歸因鑑識** — 抓取每個網域的 `ads.txt`，聚類共用的 DIRECT 廣告帳號與逐字節相同的模板；以頻率加權區分共用變現代管商（弱）與操作者聚類訊號（強）
 - **第三方佐證** — Wayback Machine、urlscan.io、RFC 3161 時間戳提供獨立紀錄
 - **Per-case 語系設定** — 依受害者所在地設定截圖瀏覽器語系，突破地理封鎖
 - **URL 參數歸屬** — 自動辨識 50+ 已知追蹤參數（UTM、fbclid、gclid 等）
-- **雙語** — 英文與正體中文，側欄即時切換或以 `--lang` 指定
+- **雙語** — 英文與正體中文，以 `--lang` 或 `KWARA_LANG` 指定
 - **證據封包匯出** — ZIP 含 CSV、截圖、HTML、HAR、稽核紀錄、SHA-256 manifest、中英雙語 README
 - **完全可離線運作** — 所有資料存於本機 SQLite；第三方服務為選用
 
@@ -58,18 +58,16 @@ source .venv/bin/activate           # macOS / Linux
 # .venv\Scripts\activate            # Windows
 python -m pip install -r requirements.txt
 python -m playwright install chromium
-streamlit run kwara/app.py
+python -m kwara.cli case new --title "夜鶯專案"
 ```
 
-Windows 已安裝依賴的情況下，從專案根目錄雙擊 `start_kwara.bat` 即可。
-
-> 未執行 `playwright install chromium` 時，截圖功能不可用，但掃描、WHOIS 和分析仍正常運作。
+> Playwright 是選用的。掃描、WHOIS、ads.txt 與歸因分析都不需要瀏覽器，只有截圖需要。
 
 
-## 無介面操作：CLI 與 MCP
+## CLI 與 MCP
 
-UI 能對案件做的事，不開瀏覽器也全部做得到。CLI 是自動化的唯一真相來源，MCP
-server 只是薄薄包一層、呼叫同一批函式，兩者不會各自漂移。
+CLI 是自動化的唯一真相來源，MCP server 只是薄薄包一層、呼叫同一批函式，兩者不會
+各自漂移。除此之外沒有別的介面。
 
 ```bash
 python -m kwara.cli case new --title "夜鶯專案" --locale-preset tw
@@ -98,7 +96,7 @@ claude mcp add kwara -- /abs/path/to/.venv/bin/python -m kwara.mcp_server
 
 | 變數 | 預設值 | 用途 |
 |---|---|---|
-| `KWARA_LANG` | `en` | 預設介面語言（`en` 或 `zh`） |
+| `KWARA_LANG` | `en` | 分析摘要與敘事的語言（`en` 或 `zh`） |
 | `KWARA_BROWSER_LOCALE` | `zh-TW` | Playwright 截圖瀏覽器語系 |
 | `KWARA_BROWSER_TIMEZONE` | `Asia/Taipei` | Playwright 截圖瀏覽器時區 |
 | `KWARA_HMAC_KEY` | *（未設定）* | 證據封包 manifest HMAC 簽章密鑰 |
@@ -115,7 +113,6 @@ claude mcp add kwara -- /abs/path/to/.venv/bin/python -m kwara.mcp_server
 | `kwara/` | 主應用程式（核心分析、SQLite、掃描、匯出） |
 | `kwara/cli.py` | 無介面 CLI——自動化的唯一真相來源 |
 | `kwara/mcp_server.py` | MCP server；薄薄包一層 CLI 的函式 |
-| `kwara/views/` | Streamlit UI tab 模組（每個 tab 一個檔案） |
 | `kwara/config.py` | 集中配置與環境變數預設值 |
 | `kwara/corroboration.py` | 第三方證據服務（Wayback、urlscan、RFC 3161） |
 | `docs/agent-interface.md` | 完整 CLI 指令參考與 MCP 工具清單 |
