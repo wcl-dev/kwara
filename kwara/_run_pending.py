@@ -43,9 +43,14 @@ ENV_ABORTED_EXIT_CODE = 3
 
 
 def _pending_scan_run_ids(conn, case_id: int) -> list[int]:
-    """Latest snapshot per scan_run only. Pending = no row, explicit
+    """Latest BROWSER snapshot per scan_run only. Pending = no row, explicit
     failure status, or legacy row (capture_status NULL) with missing/empty
-    screenshot file."""
+    screenshot file.
+
+    2026-08-08: the cheap pass is excluded from "latest". `run attribute`
+    writes an http_only row with capture_status='ok' and no screenshot, which
+    as the newest row made every scanned URL look captured and drained nothing.
+    """
     rows = conn.execute(
         """
         SELECT sr.id AS scan_run_id, s.id AS snap_id, s.capture_status, s.screenshot_path
@@ -55,7 +60,9 @@ def _pending_scan_run_ids(conn, case_id: int) -> list[int]:
         )
         LEFT JOIN snapshots s ON s.scan_run_id = sr.id
             AND s.id = (
-                SELECT id FROM snapshots WHERE scan_run_id = sr.id ORDER BY id DESC LIMIT 1
+                SELECT id FROM snapshots WHERE scan_run_id = sr.id
+                   AND capture_method IS NOT 'http_only'
+                 ORDER BY id DESC LIMIT 1
             )
         WHERE ua.case_id = ?
         ORDER BY sr.id

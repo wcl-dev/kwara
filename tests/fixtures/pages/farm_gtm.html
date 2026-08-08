@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>限時優惠｜輕鬆理財誌</title>
+
+<!--
+  Fixture note. This is the page that justifies Playwright's existence.
+
+  Static HTML carries the GTM container ID and nothing else. The GA4
+  measurement ID G-V3H8N2QK4T exists only in the DOM after script execution,
+  assembled from fragments so it appears nowhere in the source bytes — which
+  is what a container-delivered tag looks like to an HTTP-only fetch.
+
+  So: requests.get() on this page yields Google Tag Manager alone, a browser
+  capture yields Google Tag Manager AND Google Analytics 4. That difference is
+  the whole argument for the browser capture path, and it is measurable here
+  rather than asserted.
+
+  The real container loader (googletagmanager.com/gtm.js?id=...) is replaced by
+  loadContainer() below: the fixture must never touch the network. Injection is
+  synchronous at parse time rather than on a timer, so the result does not
+  depend on how long a test happens to wait.
+-->
+<script>
+  // Stands in for what gtm.js does once the container has loaded: push the
+  // publisher's GA4 config tag into the page.
+  function loadContainer(containerId) {
+    var measurementId = ['G', 'V3H8N2QK4T'].join('-');
+    var tag = document.createElement('script');
+    tag.setAttribute('data-gtm-container', containerId);
+    tag.textContent = "gtag('config', '" + measurementId + "');";
+    document.head.appendChild(tag);
+    window.__kwara_container_loaded = true;
+  }
+</script>
+
+<!-- Google Tag Manager -->
+<script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
+new Date().getTime(),event:'gtm.js'});
+/* real snippet appends a script tag, src "https://www.googletagmanager.com/gtm.js?id="+i */
+loadContainer(i);
+})(window,document,'script','dataLayer','GTM-K7T2WQ9');</script>
+<!-- End Google Tag Manager -->
+</head>
+
+<body>
+<!-- Google Tag Manager (noscript) — inert while scripting is enabled -->
+<!-- <noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-K7T2WQ9"
+  height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript> -->
+
+<header><h1>輕鬆理財誌</h1></header>
+
+<main>
+  <h2>限時優惠：新戶開戶送 1,000 元</h2>
+  <p>活動期間內完成線上開戶並於三十日內完成首筆交易，即可獲得回饋金。
+     名額有限，額滿為止。</p>
+  <form action="/lead" method="post">
+    <label>姓名 <input type="text" name="name"></label>
+    <label>手機 <input type="tel" name="phone"></label>
+    <button type="submit">立即領取</button>
+  </form>
+</main>
+
+<footer><p>© 2026 輕鬆理財誌</p></footer>
+</body>
+</html>

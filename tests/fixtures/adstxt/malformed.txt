@@ -1,0 +1,14 @@
+# Nothing below this line is well formed, apart from three rows.
+
+google.com
+google.com, pub-1
+, pub-9999, DIRECT
+google.com, , DIRECT
+=NOTAVARIABLE
+OWNERDOMAIN=
+   
+appnexus.com, 12447, direct, f08c47fec0942fa0, extra, fields
+"quoted.com", 'x', DIRECT
+# a comment that mentions google.com, pub-000, DIRECT
+google.com, pub-4821096375510283, DIRECT   # trailing comment
+

@@ -8,6 +8,7 @@ import 會把 config、db、graph 這些通名污染到全域 sys.path。
 安裝過（`pip install -e .`）的話這裡其實不必要，但保留讓 clone 後直接跑
 pytest 也能動。
 """
+import os
 import sys
 from pathlib import Path
 
@@ -17,6 +18,39 @@ if _ROOT not in sys.path:
 
 
 import pytest
+
+
+def _enable_subprocess_coverage() -> None:
+    """Make the Playwright worker's coverage countable, but only when measuring.
+
+    _snapshot_worker.py runs in a subprocess, so its 224 statements reported 0%
+    even with ten tests driving it — a number that flattered the gap and lied
+    about the covered part. coverage's startup hook needs COVERAGE_PROCESS_START
+    pointing at a config file; without it the child simply does not record, and
+    silently. Setting it unconditionally would start coverage in every
+    subprocess of every ordinary run, so it is set only when the parent is
+    already measuring.
+    """
+    try:
+        import coverage
+    except ImportError:
+        return
+    if coverage.Coverage.current() is None:
+        return
+    os.environ.setdefault(
+        "COVERAGE_PROCESS_START",
+        str(Path(__file__).resolve().parent.parent / "pyproject.toml"))
+
+
+_enable_subprocess_coverage()
+
+
+# The local HTTP origin every collection test runs against. Registered here so
+# `site` is available everywhere without an import: the alternative to a real
+# server is mocking requests.get, which exercises the call site but never the
+# behaviour that actually breaks — redirect chains, timeouts, truncation,
+# content that differs by query string.
+from fixtures.server import site  # noqa: F401
 
 
 @pytest.fixture(autouse=True)

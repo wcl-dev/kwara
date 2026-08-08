@@ -251,12 +251,26 @@ def cmd_run_snapshot(args):
     if args.scan_run:
         targets = args.scan_run
     else:
+        # Pending means "has no BROWSER capture", not "has no snapshot".
+        # `run attribute` writes an http_only snapshot for every URL, so the
+        # older any-snapshot test made `run snapshot` a silent no-op after the
+        # cheap pass — which is the exact order the guide recommends. A manual
+        # upload or a Wayback substitute counts as satisfied; those are the
+        # analyst deliberately supplying the page another way.
         targets = [
             r["id"] for r in conn.execute(
                 """SELECT sr.id FROM scan_runs sr
                      JOIN url_artifacts ua ON ua.id = sr.url_artifact_id
-                     LEFT JOIN snapshots s ON s.scan_run_id = sr.id
-                    WHERE ua.case_id = ? AND s.id IS NULL
+                    WHERE ua.case_id = ?
+                      AND NOT EXISTS (
+                          SELECT 1 FROM snapshots s
+                           WHERE s.scan_run_id = sr.id
+                             AND (
+                                 (s.capture_method = 'playwright'
+                                  AND s.capture_status IN ('ok', 'manual', 'wayback'))
+                                 OR s.capture_status IN ('manual', 'wayback')
+                             )
+                      )
                     ORDER BY sr.id""",
                 (args.case,),
             ).fetchall()

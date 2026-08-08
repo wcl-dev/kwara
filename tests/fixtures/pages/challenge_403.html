@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en-US">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="X-UA-Compatible" content="IE=Edge">
+<meta name="robots" content="noindex,nofollow">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Just a moment...</title>
+
+<!--
+  Fixture note. A Cloudflare-style interstitial, served with status 403.
+
+  Two code paths care about it. _snapshot_worker._is_cf_blocked() scans the
+  first 5000 bytes for the strings in _CF_SIGNALS, so those strings are
+  present here and near the top; and adstxt / scanner record a non-200 rather
+  than dropping it, because a WAF challenge on an ads.txt path is itself an
+  OPSEC signal.
+
+  The orchestrate script below is same-origin on purpose. A test that routes
+  it can count the hit; a test that does not gets a harmless 404 from the
+  fixture server. Nothing here leaves the loopback interface.
+-->
+<style>
+  body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+       background:#f6f7f8;color:#313131;text-align:center}
+  .main-wrapper{max-width:60rem;margin:0 auto;padding:6rem 1.5rem}
+  h1{font-size:2.5rem;font-weight:500;margin:0 0 1rem}
+  h2{font-size:1.25rem;font-weight:400;color:#5c5c5c;margin:0 0 3rem}
+  .spinner{width:3rem;height:3rem;margin:0 auto 3rem;border:3px solid #d9d9d9;
+           border-top-color:#f38020;border-radius:50%}
+  .footer{font-size:.75rem;color:#828282;border-top:1px solid #d9d9d9;
+          padding-top:1rem;margin-top:4rem}
+</style>
+</head>
+
+<body class="no-js">
+<div class="main-wrapper" role="main">
+  <div class="main-content">
+    <h1><span data-translate="checking_browser">Checking your browser before accessing</span></h1>
+    <h2 id="challenge-running">Verify you are human by completing the action below.</h2>
+    <p lang="zh-Hant">正在執行安全驗證，請稍候…</p>
+    <div class="spinner" id="cf-spinner"></div>
+    <div id="challenge-stage">
+      <div id="cf-turnstile" data-sitekey="0x4AAAAAAAcfIxJ3RhBqvPKz"></div>
+      <input type="hidden" name="cf-turnstile-response" id="cf-chl-widget-response" value="">
+    </div>
+    <noscript>
+      <div id="challenge-error-title">
+        Please enable JavaScript and cookies to continue.
+      </div>
+    </noscript>
+  </div>
+
+  <div class="footer" role="contentinfo">
+    <div class="ray-id">Ray ID: <code>8f2c41d7ae930b16</code></div>
+    <div>Performance &amp; security by Cloudflare</div>
+  </div>
+</div>
+
+<script src="/cdn-cgi/challenge-platform/h/b/orchestrate/chl_page/v1?ray=8f2c41d7ae930b16"></script>
+</body>
+</html>

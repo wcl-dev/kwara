@@ -73,3 +73,8 @@ reports/
 *.egg-info/
 /build/
 /dist/
+
+# coverage data (parallel mode writes .coverage.<host>.<pid>.<rand>)
+.coverage
+.coverage.*
+htmlcov/

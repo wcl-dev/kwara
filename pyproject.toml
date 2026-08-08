@@ -49,3 +49,17 @@ kwara = ["_snapshot_worker.py"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "browser: drives a real Chromium via Playwright — slow, and skipped when chromium is not installed",
+    "slow: takes more than a second or two",
+    "network: would contact something outside this machine (nothing should be marked this; it exists so a stray one is visible)",
+]
+
+[tool.coverage.run]
+# The Playwright worker runs in a SUBPROCESS, so its 224 statements were
+# reported as 0% even once tests drove it — a number that flatters the gaps
+# and lies about the covered part. parallel + the pytest-cov startup hook let
+# the child process report too; `combine` merges the data files.
+parallel = true
+concurrency = ["multiprocessing", "thread"]
+source = ["kwara"]

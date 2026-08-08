@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Set up your tag — Developer documentation</title>
+
+<!--
+  Fixture note. A vendor-documentation page. extract_tracking_ids() must
+  return {} for it.
+
+  This is the page that would break the tool if the extractor regressed. A
+  tracking ID is used downstream as "the same ID on two domains means one
+  operator" — evidence, not a hint. Documentation, help centres, tutorials and
+  Stack Overflow answers are full of plausible IDs, and any hosting provider's
+  help page mirrored onto two client domains would manufacture a shared-account
+  edge between them out of nothing.
+
+  Two defences are exercised here:
+    - post-match placeholder filtering, for IDs that sit in a genuine
+      invocation context (G-XXXXXXXX inside gtag('config'), GTM-EXAMPLE inside
+      the dataLayer snippet)
+    - context anchoring, for IDs written in prose or in an attribute with no
+      invocation around them (G-AB12CD34, ca-pub-XXXXXXXXXXXXXXXX)
+
+  No loader tags are live; see farm_static.html for the reasoning.
+-->
+</head>
+
+<body>
+<h1>Install the tag on your site</h1>
+
+<h2>Step 1 — find your measurement ID</h2>
+<p>Your measurement ID looks like <code>G-AB12CD34</code> and is shown in
+   Admin &rsaquo; Data Streams. Your Universal Analytics property, if you still
+   have one, uses the older <code>UA-XXXXXX-X</code> form.</p>
+
+<h2>Step 2 — paste the tag</h2>
+<p>Copy the snippet below into the <code>&lt;head&gt;</code> of every page,
+   replacing <code>G-XXXXXXXX</code> with the measurement ID from step 1.</p>
+
+<pre><code>&lt;!-- Google tag (gtag.js) --&gt;
+&lt;script async src="https://www.googletagmanager.com/gtag/js?id=G-XXXXXXXX"&gt;&lt;/script&gt;
+&lt;script&gt;
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-XXXXXXXX');
+&lt;/script&gt;</code></pre>
+
+<h2>Step 3 — or install through a container</h2>
+<p>If you manage tags through a container, use your own container ID in place
+   of <code>GTM-EXAMPLE</code>:</p>
+
+<pre><code>&lt;script&gt;(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
+new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
+j=d.createElement(s),dl=l!='dataLayer'?'&amp;l='+l:'';j.async=true;
+j.src='https://www.googletagmanager.com/gtm.js?id='+i+dl;
+f.parentNode.insertBefore(j,f);})(window,document,'script','dataLayer','GTM-EXAMPLE');&lt;/script&gt;</code></pre>
+
+<h2>Step 4 — conversion and monetisation tags</h2>
+<p>Google Ads conversion tags take the form <code>AW-XXXXXXXXX</code>, and an
+   AdSense publisher ID takes the form <code>ca-pub-XXXXXXXXXXXXXXXX</code>.
+   Both are visible in the respective product console.</p>
+
+<pre><code>&lt;ins class="adsbygoogle"
+     data-ad-client="ca-pub-XXXXXXXXXXXXXXXX"
+     data-ad-slot="0000000000"&gt;&lt;/ins&gt;</code></pre>
+
+<p>For the Meta pixel, call
+   <code>fbq('init', '&lt;YOUR_PIXEL_ID&gt;')</code> after the base code.</p>
+
+<footer><p>Last updated 2026-03-11</p></footer>
+</body>
+</html>
