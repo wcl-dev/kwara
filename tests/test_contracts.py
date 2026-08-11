@@ -17,7 +17,7 @@ from kwara import config, prevalence
 from kwara.clustering_infra import MAJOR_AD_EXCHANGES
 from kwara.fingerprints import extract_tracking_ids
 from kwara.param_attribution import PLATFORM_ADS_TXT_SELLER, PLATFORM_GOOGLE_ANALYTICS
-from kwara.sql import LATEST_DONE_SCAN_RUN, latest_usable_snapshot
+from kwara.sql import LATEST_DONE_SCAN_RUN, usable_snapshots
 
 
 def test_contract_01_platform_ids_are_constants_not_display_strings():
@@ -50,16 +50,51 @@ def test_contract_05_placeholder_filter_applies_to_letters_not_digits():
     assert not _looks_like_placeholder("AW-1111111111")
 
 
-def test_contract_06_latest_usable_snapshot_not_merely_latest():
+def test_contract_06_a_failed_recapture_does_not_shadow_a_good_one():
     """A later failed re-capture — a Cloudflare challenge, a timeout — must not
     shadow an earlier good snapshot's data. The rule lives in sql.py so the
     ~10 call sites cannot drift; assert the SQL still carries both halves."""
-    frag = latest_usable_snapshot("tracking_ids_json")
+    frag = usable_snapshots("tracking_ids_json")
     assert "capture_status = 'ok'" in frag
     assert "tracking_ids_json IS NOT NULL" in frag
-    assert "ORDER BY id DESC" in frag
     with pytest.raises(ValueError):
-        latest_usable_snapshot("arbitrary_column")   # allow-list, not interpolation
+        usable_snapshots("arbitrary_column")   # allow-list, not interpolation
+
+    # Assert the invariant itself, not the shape of the SQL that delivers it.
+    # The string form was pinned to `ORDER BY id DESC`, which is exactly what
+    # had to change on 2026-08-11 to stop recency selecting the crawler-facing
+    # capture — a test that fails when a defect is fixed is defending nothing.
+    import tempfile
+    from kwara.db import get_conn, init_db, migrate_db
+
+    conn = get_conn(os.path.join(tempfile.mkdtemp(), "c6.db"))
+    init_db(conn)
+    migrate_db(conn)
+    conn.execute("INSERT INTO cases (title, description, created_at, updated_at) "
+                 "VALUES ('c6', '', '', '')")
+    conn.execute("""INSERT INTO message_evidence (case_id, platform, permalink,
+                    actor_label, posted_at, message_text, screenshot_path,
+                    ingested_at) VALUES (1, '', '', '', '', '', '', '')""")
+    conn.execute("INSERT INTO url_artifacts (message_id, case_id, original_url, "
+                 "domain, url_order, created_at) VALUES (1, 1, 'https://a.test/', "
+                 "'a.test', 0, '')")
+    conn.execute("INSERT INTO scan_runs (url_artifact_id, run_at, final_url, "
+                 "hop_count, status) VALUES (1, '', 'https://a.test/', 0, 'done')")
+    good = conn.execute(
+        "INSERT INTO snapshots (scan_run_id, capture_method, capture_status, "
+        "tracking_ids_json) VALUES (1, 'playwright', 'ok', ?)",
+        (json.dumps(["G-GOOD"]),)).lastrowid
+    conn.execute(
+        "INSERT INTO snapshots (scan_run_id, capture_method, capture_status, "
+        "tracking_ids_json) VALUES (1, 'playwright', 'cf_challenge', ?)",
+        (json.dumps(["G-FROM-A-CHALLENGE-PAGE"]),))
+    conn.commit()
+
+    used = {r["id"] for r in conn.execute(
+        f"SELECT s.id FROM scan_runs sr JOIN snapshots s "
+        f"ON s.id IN {usable_snapshots('tracking_ids_json')} WHERE sr.id = 1")}
+    assert used == {good}, \
+        "the challenge page was read as data, or the good capture was dropped"
 
 
 def test_contract_analysis_pins_the_latest_done_scan():

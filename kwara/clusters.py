@@ -38,6 +38,7 @@ from .clustering_infra import (
 from .header_analysis import cross_domain_shared_template, detect_fake_versions
 from .insights import _count_cloaking_suspects
 from .opsec import compute_opsec_profile
+from .sql import browser_capture_exists
 
 # ── Confidence tiers (neutral; from the report) ───────────────────────────
 TIER_CONFIRMED = "確證同群"      # bound by a shared hard identifier
@@ -230,11 +231,14 @@ def _completeness(conn, case_id, n_urls, scanned) -> dict:
 
     present = {
         "scanned": scanned > 0,
+        # "A snapshots row exists" is not "a page was captured": the
+        # browser-free pass writes a row for every URL. Until 2026-08-11 this
+        # reported page_captured=True — and therefore no gap, completeness
+        # 高 — for five cases in which no browser had ever rendered a page.
         "page_captured": _exists(
-            """SELECT COUNT(*) AS n FROM snapshots s
-               JOIN scan_runs sr ON sr.id = s.scan_run_id
-               JOIN url_artifacts ua ON ua.id = sr.url_artifact_id
-               WHERE ua.case_id = ?"""),
+            f"""SELECT COUNT(*) AS n FROM scan_runs sr
+                JOIN url_artifacts ua ON ua.id = sr.url_artifact_id
+                WHERE ua.case_id = ? AND {browser_capture_exists()}"""),
         "tls": _exists(
             """SELECT COUNT(*) AS n FROM scan_runs sr
                JOIN url_artifacts ua ON ua.id = sr.url_artifact_id

@@ -68,7 +68,7 @@ from . import prevalence as _prevalence
 from .clustering_infra import (MAJOR_AD_EXCHANGES, _account_apex_footprint,
                               _is_noise_endpoint, shared_ad_accounts)
 from .utils.domain import extract_domain_from_url
-from .sql import LATEST_DONE_SCAN_RUN, latest_usable_snapshot
+from .sql import LATEST_DONE_SCAN_RUN, usable_snapshots
 
 # Signal type tags. Stable strings — stored in the DB and matched on lookup.
 SIGNAL_TRACKING_ID     = "tracking_id"
@@ -227,7 +227,7 @@ def extract_case_signals(
                    COALESCE(s.final_domain, '') AS final_domain
             FROM url_artifacts ua
             JOIN scan_runs sr ON sr.id = {LATEST_DONE_SCAN_RUN}
-            JOIN snapshots s ON s.id = {latest_usable_snapshot("tracking_ids_json")}
+            JOIN snapshots s ON s.id IN {usable_snapshots("tracking_ids_json")}
             WHERE ua.case_id = ?""",
         (case_id,),
     ).fetchall()
@@ -343,7 +343,7 @@ def extract_case_signals(
                    sr.run_at
               FROM url_artifacts ua
               JOIN scan_runs sr ON sr.id = {LATEST_DONE_SCAN_RUN}
-              JOIN snapshots s ON s.id = {latest_usable_snapshot("request_domains_json")}
+              JOIN snapshots s ON s.id IN {usable_snapshots("request_domains_json")}
              WHERE ua.case_id = ?""",
         (case_id,),
     ).fetchall():

@@ -150,15 +150,25 @@ def test_run_pending_agrees_with_run_snapshot_about_what_is_pending(case):
     assert _pending_scan_run_ids(conn, case["case"]) == [sr], \
         "an http_only row made a never-captured URL look finished"
 
-    add("playwright", "ok")
-    assert _pending_scan_run_ids(conn, case["case"]) == []
-
     add("playwright", "error")
-    assert _pending_scan_run_ids(conn, case["case"]) == [sr], "failure not retried"
+    assert _pending_scan_run_ids(conn, case["case"]) == [sr], \
+        "a failed browser capture is still work outstanding"
 
     add("http_only", "ok")
     assert _pending_scan_run_ids(conn, case["case"]) == [sr], \
         "a later cheap pass masked an earlier capture failure"
+
+    add("cloaking_alt", "ok")
+    assert _pending_scan_run_ids(conn, case["case"]) == [sr], \
+        "the crawler-facing persona is not a capture of the visitor-facing page"
+
+    # Only a successful visitor-facing render settles it — and once it exists,
+    # a later failed retry cannot make it untrue (contract 6).
+    add("playwright", "ok")
+    assert _pending_scan_run_ids(conn, case["case"]) == []
+    add("playwright", "timeout")
+    assert _pending_scan_run_ids(conn, case["case"]) == [], \
+        "a failed retry re-opened a scan_run whose page we already hold"
 
 
 # ── real capture through the CLI ───────────────────────────────────────────

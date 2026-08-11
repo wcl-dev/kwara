@@ -29,10 +29,7 @@ from .config import DB_PATH as DB
 from .db import get_conn, migrate_db
 from .pipeline import run_snapshot_batch
 from .scanner import reclaim_stuck_scans
-from .snapshots import (
-    CAPTURE_OK, CAPTURE_MANUAL, CAPTURE_WAYBACK,
-    CAPTURE_CF, CAPTURE_ERROR, CAPTURE_TIMEOUT, CAPTURE_FILE_MISSING,
-)
+from .snapshots import CAPTURE_OK, CAPTURE_MANUAL, CAPTURE_WAYBACK
 
 MAX_BATCHES       = int(os.environ.get("KWARA_MAX_SNAPSHOT_BATCHES", "999999"))
 FAILURE_THRESHOLD = float(os.environ.get("KWARA_FAILURE_THRESHOLD", "0.5"))
@@ -43,52 +40,71 @@ ENV_ABORTED_EXIT_CODE = 3
 
 
 def _pending_scan_run_ids(conn, case_id: int) -> list[int]:
-    """Latest BROWSER snapshot per scan_run only. Pending = no row, explicit
-    failure status, or legacy row (capture_status NULL) with missing/empty
-    screenshot file.
+    """Pending = `sql.browser_capture_exists` is not satisfied, plus the one
+    case SQL cannot decide: a legacy row (capture_status NULL) that satisfies
+    the predicate on paper but whose screenshot file is missing or empty on
+    disk. Only this module can check that, because only this module is allowed
+    to touch the filesystem.
 
-    2026-08-08: the cheap pass is excluded from "latest". `run attribute`
-    writes an http_only row with capture_status='ok' and no screenshot, which
-    as the newest row made every scanned URL look captured and drained nothing.
+    2026-08-08: the browser-free pass writes an http_only row with
+    capture_status='ok' and no screenshot; as the newest row it made every
+    scanned URL look captured and drained nothing.
+    2026-08-11: the definition moved to sql.py. This module had excluded only
+    'http_only', so `cloaking_alt` — the crawler-facing persona — satisfied it
+    here while failing the same check in cli.py.
     """
     rows = conn.execute(
         """
-        SELECT sr.id AS scan_run_id, s.id AS snap_id, s.capture_status, s.screenshot_path
+        SELECT sr.id AS scan_run_id,
+               s.capture_method, s.capture_status, s.screenshot_path
         FROM url_artifacts ua
         JOIN scan_runs sr ON sr.id = (
             SELECT id FROM scan_runs WHERE url_artifact_id = ua.id ORDER BY id DESC LIMIT 1
         )
         LEFT JOIN snapshots s ON s.scan_run_id = sr.id
-            AND s.id = (
-                SELECT id FROM snapshots WHERE scan_run_id = sr.id
-                   AND capture_method IS NOT 'http_only'
-                 ORDER BY id DESC LIMIT 1
-            )
         WHERE ua.case_id = ?
-        ORDER BY sr.id
+        ORDER BY sr.id, s.id
         """,
         (case_id,),
     ).fetchall()
-    pending: list[int] = []
+
+    order: list[int] = []
+    seen: set[int] = set()
+    satisfied: set[int] = set()
     for r in rows:
-        st = r["capture_status"]
-        sp = r["screenshot_path"]
-        if r["snap_id"] is None:
-            pending.append(r["scan_run_id"])
-            continue
-        if st in (CAPTURE_OK, CAPTURE_MANUAL, CAPTURE_WAYBACK):
-            continue
-        if st in (CAPTURE_CF, CAPTURE_ERROR, CAPTURE_TIMEOUT, CAPTURE_FILE_MISSING):
-            pending.append(r["scan_run_id"])
-            continue
-        # legacy NULL status: need resnapshot only if file missing
-        if st is None or st == "":
-            if sp and os.path.isfile(sp) and os.path.getsize(sp) > 0:
-                continue
-            pending.append(r["scan_run_id"])
-            continue
-        pending.append(r["scan_run_id"])
-    return pending
+        sid = r["scan_run_id"]
+        if sid not in seen:
+            seen.add(sid)
+            order.append(sid)
+        if _row_satisfies(r["capture_method"], r["capture_status"],
+                          r["screenshot_path"]):
+            satisfied.add(sid)
+    return [sid for sid in order if sid not in satisfied]
+
+
+def _row_satisfies(method, status, screenshot_path) -> bool:
+    """One snapshot row's answer to `sql.browser_capture_exists`.
+
+    A strict refinement of it: identical except that a legacy row (written
+    before capture_status existed) is trusted only when its screenshot is
+    really on disk. SQL can check that a path was recorded; it cannot check
+    that the file survived. test_capture_predicate.py pins the two together
+    so the refinement stays a refinement and does not drift into a difference.
+    """
+    if status in (CAPTURE_MANUAL, CAPTURE_WAYBACK):
+        return True
+    if method == "playwright" and status == CAPTURE_OK:
+        return True
+    # Unmigrated row: db.py backfills a NULL method to 'playwright'.
+    if method is None and status == CAPTURE_OK:
+        return True
+    if status in (None, "") and method not in ("http_only", "cloaking_alt"):
+        return bool(screenshot_path
+                    and os.path.isfile(screenshot_path)
+                    and os.path.getsize(screenshot_path) > 0)
+    return False
+
+
 
 
 def _chunk_failure_rate(conn, snapshot_ids: list[int]) -> tuple[int, int, float]:

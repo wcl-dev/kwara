@@ -72,7 +72,7 @@ from .param_attribution import (
     identify_param,
     merge_risk_tags,
 )
-from .sql import LATEST_DONE_SCAN_RUN, latest_usable_snapshot
+from .sql import LATEST_DONE_SCAN_RUN, usable_snapshots
 
 
 def _is_direct_ip(host: str) -> bool:
@@ -453,11 +453,11 @@ def shared_tracking_ids(conn: sqlite3.Connection, case_id: int) -> list:
            FROM url_artifacts ua
            JOIN message_evidence me ON me.id = ua.message_id
            JOIN scan_runs sr ON sr.id = {LATEST_DONE_SCAN_RUN}
-           -- Pick the latest *usable* snapshot, not just latest-by-id
-           -- (codex review fix #2). A bad re-snapshot (Cloudflare challenge,
-           -- timeout, empty HTML) on top of an earlier good one previously
-           -- erased the earlier attribution silently.
-           JOIN snapshots s ON s.id = {latest_usable_snapshot("tracking_ids_json")}
+           -- EVERY usable snapshot of the pinned scan, not one of them: a
+           -- cloaker serves a different page — often a different landing
+           -- DOMAIN — to a browser than to a crawler, and both are the
+           -- operator's. Failed captures stay excluded (contract 6).
+           JOIN snapshots s ON s.id IN {usable_snapshots("tracking_ids_json")}
            WHERE ua.case_id = ?""",
         (case_id,),
     ).fetchall()
@@ -561,11 +561,10 @@ def ad_tracking_platforms(conn: sqlite3.Connection, case_id: int) -> list:
                    SELECT id FROM scan_runs WHERE url_artifact_id = ua.id
                    ORDER BY id DESC LIMIT 1
                )
-           -- Pick the latest *usable* snapshot (codex fix #2). HTML pixel
-           -- signals only count when the capture actually succeeded; a later
-           -- failed re-snapshot shouldn't shadow an earlier good one.
+           -- HTML pixel signals count from every persona that was captured
+           -- successfully; a failed re-snapshot is not one of them.
            LEFT JOIN snapshots s ON s.scan_run_id = sr.id
-               AND s.id = {latest_usable_snapshot("tracking_ids_json")}
+               AND s.id IN {usable_snapshots("tracking_ids_json")}
            WHERE ua.case_id = ?""",
         (case_id,),
     ).fetchall()
@@ -710,7 +709,7 @@ def shared_endpoints(conn: sqlite3.Connection, case_id: int) -> list:
                   COALESCE(s.final_domain, '') AS final_domain
            FROM url_artifacts ua
            JOIN scan_runs sr ON sr.id = {LATEST_DONE_SCAN_RUN}
-           JOIN snapshots s ON s.id = {latest_usable_snapshot("request_domains_json")}
+           JOIN snapshots s ON s.id IN {usable_snapshots("request_domains_json")}
            WHERE ua.case_id = ?""",
         (case_id,),
     ).fetchall()

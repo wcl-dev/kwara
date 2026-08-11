@@ -24,6 +24,8 @@ import sqlite3
 import stat
 import sys
 
+from .sql import browser_capture_exists
+
 
 
 def _err(msg: str) -> None:
@@ -133,11 +135,13 @@ def cmd_case_show(args):
     conn = _open_db(args)
     case = cases.require_case(conn, args.case)
     n_urls, scanned = case_counts(conn, args.case)
+    # Must be the SAME question `run snapshot` asks, or `case show` reports
+    # work that does not exist or — as it did until 2026-08-11 — hides work
+    # that does. See sql.browser_capture_exists.
     pending_snapshots = conn.execute(
-        """SELECT COUNT(*) AS n FROM scan_runs sr
-             JOIN url_artifacts ua ON ua.id = sr.url_artifact_id
-             LEFT JOIN snapshots s ON s.scan_run_id = sr.id
-            WHERE ua.case_id = ? AND s.id IS NULL""",
+        f"""SELECT COUNT(*) AS n FROM scan_runs sr
+              JOIN url_artifacts ua ON ua.id = sr.url_artifact_id
+             WHERE ua.case_id = ? AND NOT {browser_capture_exists()}""",
         (args.case,),
     ).fetchone()["n"]
     return {
@@ -251,27 +255,16 @@ def cmd_run_snapshot(args):
     if args.scan_run:
         targets = args.scan_run
     else:
-        # Pending means "has no BROWSER capture", not "has no snapshot".
-        # `run attribute` writes an http_only snapshot for every URL, so the
-        # older any-snapshot test made `run snapshot` a silent no-op after the
-        # cheap pass — which is the exact order the guide recommends. A manual
-        # upload or a Wayback substitute counts as satisfied; those are the
-        # analyst deliberately supplying the page another way.
+        # Pending means "has no BROWSER capture", not "has no snapshot" — the
+        # browser-free pass writes a row for every URL. Definition lives in
+        # sql.browser_capture_exists so `case show` and `_run_pending` cannot
+        # drift from it again.
         targets = [
             r["id"] for r in conn.execute(
-                """SELECT sr.id FROM scan_runs sr
-                     JOIN url_artifacts ua ON ua.id = sr.url_artifact_id
-                    WHERE ua.case_id = ?
-                      AND NOT EXISTS (
-                          SELECT 1 FROM snapshots s
-                           WHERE s.scan_run_id = sr.id
-                             AND (
-                                 (s.capture_method = 'playwright'
-                                  AND s.capture_status IN ('ok', 'manual', 'wayback'))
-                                 OR s.capture_status IN ('manual', 'wayback')
-                             )
-                      )
-                    ORDER BY sr.id""",
+                f"""SELECT sr.id FROM scan_runs sr
+                      JOIN url_artifacts ua ON ua.id = sr.url_artifact_id
+                     WHERE ua.case_id = ? AND NOT {browser_capture_exists()}
+                     ORDER BY sr.id""",
                 (args.case,),
             ).fetchall()
         ]
