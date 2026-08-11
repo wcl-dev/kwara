@@ -270,7 +270,7 @@ OPSEC level 規則（刻意粗略，分析師最終判讀）：
 |---|---|---|
 | `manager` | **每個載體都宣告了 `MANAGERDOMAIN`**；或名列 `MAJOR_AD_EXCHANGES`；或 breadth_ratio ≥ `ADS_TXT_MANAGER_BREADTH`；或載體多數配對共用同一疊 ads.txt；或 `global_apex_count` ≥ `ADS_TXT_MANAGER_MIN_APEXES` | 代管商／轉售網路，**不是**同操作者訊號 |
 | `operator` | `global_apex_count` ≤ `ADS_TXT_OPERATOR_MAX_APEXES` | 全庫範圍內確實稀有，**強訊號** |
-| `uncertain` | 介於兩者之間 | 本機證據判不出來，**據實回報而非猜測**（見 §十二 原則 6） |
+| `uncertain` | 介於兩者之間 | 本機證據判不出來，**據實回報而非猜測**（見 §十三 原則 6） |
 
 **`operator` 必須被「賺到」**。舊版的預設值是 operator——沒有任何降級規則觸發就宣告同操作者，這正是 23 域的中介被判成強訊號的原因。強主張應該要求正面證據，不是預設值。
 
@@ -321,15 +321,45 @@ OPSEC level 規則（刻意粗略，分析師最終判讀）：
 
 ---
 
-## 十二、貫穿整個分析層的設計原則
+## 十二、擷取人格與「已擷取」的定義
 
-整個分析層遵循六條規則。它們是「必須保留的契約」的核心子集——重構時最容易被靜悄悄破壞，而且破壞了測試不一定會紅：
+同一個 URL，kwara 會用不同人格擷取好幾次，而 cloaker **正是靠人格差異運作的**。這一層決定「分析要讀哪一份擷取」與「什麼才算已經擷取過」，兩個問題的答案不一樣。
 
-1. **Schema 完整最重要**——每個聚合函式都用 `JOIN scan_runs ON sr.id = (... ORDER BY id DESC LIMIT 1)` 確保拿到「latest done」記錄；snapshot join 時還要過濾 `capture_status = 'ok'`，避免失敗的重截圖蓋掉成功的證據。
+### 歸因讀所有人格的聯集 — `sql.usable_snapshots`
+
+原本的做法是挑一份：`ORDER BY id DESC LIMIT 1`。問題在於 `cloaking_alt`（給爬蟲看的那份）永遠是最後寫入的，所以永遠贏。
+
+2026-08-11 在實際資料庫上量到：**469 個 scan_run 有 372 個是拿爬蟲人格在做歸因**，其中 252 個兩種人格的追蹤碼不同。更關鍵的是那 252 個**落在不同的網域**——同一個 URL 把瀏覽器送去 `visitorlanding.example`、把爬蟲送去 `crawlerlanding.example`。
+
+改成挑訪客人格也不對，那只是把盲點換一邊：救回 756 筆追蹤碼觀察，卻讓 `crawlerlanding.example`／`.org` 整組退出案件。
+
+**兩個網域都是同一個操作的資產。** cloaking 的定義就是「對不同對象送不同東西」，所以歸因必須讀全部：
+
+- 範圍是**單一 scan_run**——`LATEST_DONE_SCAN_RUN` 已經把它釘在單一時刻，所以聯集只跨人格與重試，不會跨到別天的觀察。
+- 仍然排除失敗的擷取（契約 6）。Cloudflare 攔截頁不是網站送出的東西。
+
+實測結果：操作者群組涵蓋的網域 77 → 79，一個都沒少；案件 3 的 `visitorlanding.example` 同時帶著 `GTM-T5N9K2Q` 與 Meta Page `1000000000000001`，把 10 站網絡與 crawlerlanding 接成同一個操作者。
+
+### 「已擷取」則只認訪客人格 — `sql.browser_capture_exists`
+
+這裡刻意與上面不對稱。判斷「這個 scan_run 還需不需要開瀏覽器去擷取」時，`cloaking_alt` **不算數**——它是爬蟲看到的那一面，它存在不代表訪客看到的那一頁被保全過。免瀏覽器的輕量擷取同樣不算。
+
+會滿足的只有：成功的瀏覽器算繪，或分析師刻意用別的方式提供的頁面（人工上傳、Wayback 替代）。
+
+這個定義原本被手寫在四個地方——`run snapshot`、`case show`、`clusters._completeness`、`_run_pending`——而四份互不相同，每一份都低報了未完成的工作：`run attribute` 之後 `run snapshot` 回報「沒有待處理」，`case show` 對有工作的案件回報 0，`_completeness` 對五個從未開過瀏覽器的案件回報 `page_captured=True`、完整度「高」。現在只有一份定義。
+
+---
+
+## 十三、貫穿整個分析層的設計原則
+
+整個分析層遵循七條規則。它們是「必須保留的契約」的核心子集——重構時最容易被靜悄悄破壞，而且破壞了測試不一定會紅：
+
+1. **Schema 完整最重要**——每個聚合函式都用 `JOIN scan_runs ON sr.id = (... ORDER BY id DESC LIMIT 1)` 確保拿到「latest done」記錄；snapshot join 時還要過濾 `capture_status = 'ok'`，避免失敗的重截圖蓋掉成功的證據。**而且是 join 該次掃描的所有可用擷取，不是挑一份**——挑一份等於在 cloaking 站上二選一地丟證據（見 §十二）。
 2. **跨模組去重靠常數，不靠字串**——`PLATFORM_*` 是 symbol；任何 typo 會炸成 `NameError` 而不是靜悄悄寫到錯桶子。
 3. **可驗證 ＞ 演算法巧妙**——每個 cluster 都帶 `domains`/`urls`/`posts` 清單，分析師可以順著回頭看原始證據；而不是只給 cluster ID。
 4. **Threshold 不掛 magic number**——所有可調參數（`PARAM_KEY_MIN_POSTS`、`PARAM_VALUE_HASH_THRESHOLD`、`CLOAKING_BODY_SIZE_DIFF`、`ADS_TXT_MANAGER_BREADTH` 等）都集中在 [config.py](../kwara/config.py) 或模組頂部常數，能調、能解釋、能在報告裡引用。
 5. **Fingerprint 必須有 invocation context**——`gtag/ga/fbq/ttq/_lt/twq/clarity` 等函式呼叫、vendor URL host、或 `dataLayer` 字面量；新增 fingerprint 必須附負面測試。
-6. **不自動下協同行為判定**——任何協同門檻（同一支內容 N 分鐘內 ≥ M 個帳號發出、時間分布 z-score）只要 tune 到單一 dataset 就會 overfit 那個 operator。kwara 輸出原始分布與 cluster，判定留給分析師的跨案例脈絡。這是設計立場，不是尚未實作的功能。
+6. **檢查要 fail closed**——任何「證據是否可信」的閘門，在資料缺漏時必須**拒絕**而不是放行。對抗性審查在 `reconcile` 上抓到四個同型缺陷，全都寫成 `if a and b and 不符:`——只要任一邊取不到值，檢查就整個跳過，而遊蕩證據的形狀正好就是「取不到值」。看不見就棄權的檢查不是檢查。
+7. **不自動下協同行為判定**——任何協同門檻（同一支內容 N 分鐘內 ≥ M 個帳號發出、時間分布 z-score）只要 tune 到單一 dataset 就會 overfit 那個 operator。kwara 輸出原始分布與 cluster，判定留給分析師的跨案例脈絡。這是設計立場，不是尚未實作的功能。
 
-這六條合起來，目標只有一個：**讓拿到 ZIP 證據封包的第三方，不需要信任 kwara、也不需要信任分析師，就能重現我們的所見。**
+這七條合起來，目標只有一個：**讓拿到 ZIP 證據封包的第三方，不需要信任 kwara、也不需要信任分析師，就能重現我們的所見。**
