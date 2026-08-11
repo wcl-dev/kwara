@@ -151,6 +151,54 @@ python -m kwara.cli export case --case 1
 `missing_screenshot_files` — a database row pointing at a file that is gone is
 a chain-of-custody gap, not a cosmetic issue.
 
+**Reconciling the store against the database**
+
+```bash
+python -m kwara.cli evidence reconcile
+python -m kwara.cli evidence reconcile --attach                # dry run
+python -m kwara.cli evidence reconcile --attach --apply        # writes rows
+```
+
+`evidence list` runs database → disk. `evidence reconcile` runs the other
+direction, which nothing else does: it walks the capture store and finds
+directories **no database claims**. That matters because a row can lose its
+paths — a batch timeout, a re-capture that repointed the row at a fresh
+directory, a database replaced between investigations — and the files then
+stay on disk with nothing pointing at them. On one live store that was 12,873
+directories holding 1.2 GB of real screenshots, page bodies and HARs from
+open cases, and no command in the tool could have surfaced any of it.
+
+Read `safe` first:
+
+| Field | Meaning |
+|---|---|
+| `safe` | false when a database that might own these captures could not be read. Every "orphan" is then provisional — **do not act on the list** |
+| `databases` | every database consulted, and where that path came from |
+| `by_kind` | `empty` / `manifest_only` / `partial` / `capture`, with byte totals, size bands and a `single_byte_fill` count |
+| `loose_legacy_files` | artifacts written directly into a scan_run bucket, before per-capture directories existed. Invisible to any depth-2 sweep |
+
+"Orphan" is a claim about a **set** of databases, not about a directory. The
+set is assembled from the cross-case index's `source_db` registry — the only
+record of which databases have seen this store — plus any `--also-db` you
+name. Judged against one database alone, another investigation's captures
+read as debris.
+
+`--attach` reconstructs the missing rows, re-deriving tracking IDs and request
+domains so the recovered evidence actually counts in analysis. It is a dry run
+unless `--apply` is given, and it refuses far more than it accepts:
+
+- the domain recovered from the **artifacts** must be one the scan_run has
+  been observed reaching. capture.json is written at directory *allocation*
+  time, so it records intent, not result, and cannot corroborate itself
+- the capture must **postdate** the scan. scan_run ids are not stable across
+  databases, so a bucket number alone proves nothing about which scan wrote it
+- `--include-partial` also considers page-body-only directories; without it
+  they are left alone, because those are real evidence when the browser-free
+  pass wrote them and test debris when a test did
+
+Nothing here deletes. The module contains no deletion primitive at all, and a
+test asserts that against the parsed source.
+
 ### Where the evidence actually lives
 
 Captured files are ordinary files, independent of any UI:
@@ -230,15 +278,34 @@ Set `KWARA_DB_PATH` in the environment, or pass `db` per tool call.
 | `lookup_signal` | Every case a signal value appears in |
 | `recurring_signals` | Signals spanning multiple investigations |
 | `list_evidence` | Evidence files with on-disk existence checks |
+| `reconcile_evidence` | Captures on disk no database knows about (dry run only) |
+| `describe_evidence` | Write a capture.json caption into each directory |
+| `browse_evidence` | Domain-keyed symlink tree over the store |
+| `ingest_csv` | Ingest a CSV of messages/URLs |
+| `set_case_locale` | Set the locale and timezone captures render under |
 | `export_case` | ZIP evidence pack |
 
 ### Deliberately not exposed
+
+The list below is enforced, not documented: `mcp_server._WITHHELD` names each
+withheld command with its reason, and a test fails if any `cmd_*` in cli.py is
+neither wrapped nor listed there. It became enforced on 2026-08-11, when the
+prose claimed three exclusions while eleven commands were quietly missing.
 
 - **Deleting a case.** It irreversibly destroys evidence files. An agent
   should never be one tool call away from that — use `cli case delete`.
 - **Unbounded capture.** `capture_snapshots` requires a limit (default 5,
   capped at 25) so one tool call cannot become an hour-long crawl of live
   scam infrastructure.
+- **Writing recovered captures.** `reconcile_evidence` reports and dry-runs;
+  `--apply` is CLI-only. Attaching binds a directory to a scan_run on
+  circumstantial grounds, and a person signs for that.
+- **The passes inside `run attribute`.** scan, ads.txt, cloaking and intel are
+  steps of one pass that is exposed whole; driving them separately produces
+  half-attributed scan_runs that read as complete.
+- **Third-party corroboration.** `run corroborate` sends the URL under
+  investigation to Wayback and urlscan, publishing the fact that it is being
+  investigated. That is a disclosure decision, not a tool call.
 
 ### A reasonable agent workflow
 

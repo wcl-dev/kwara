@@ -117,6 +117,7 @@ claude mcp add kwara -- /abs/path/to/.venv/bin/python -m kwara.mcp_server
 | `kwara/mcp_server.py` | MCP server；薄薄包一層 CLI 的函式 |
 | `kwara/config.py` | 集中配置與環境變數預設值 |
 | `kwara/corroboration.py` | 第三方證據服務（Wayback、urlscan、RFC 3161） |
+| `kwara/reconcile.py` | 磁碟↔資料庫對帳：找出資料庫已遺忘的擷取 |
 | `docs/agent-interface.md` | 完整 CLI 指令參考與 MCP 工具清單 |
 | `docs/analysis-design.md` | 分析層原理與設計——演算法、門檻、必須保留的契約 |
 | `docs/guide.md` · `docs/guide.zh-TW.md` | 操作說明，中英各一 |

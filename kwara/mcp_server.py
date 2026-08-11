@@ -11,7 +11,11 @@ Run it:
 Register it with Claude Code:
     claude mcp add kwara -- /path/to/.venv/bin/python -m kwara.mcp_server
 
-Two things are intentionally NOT exposed:
+Some CLI commands are deliberately NOT exposed, and `_WITHHELD` below is the
+list. It is enforced: test_mcp_dispatch asserts every `cmd_*` in cli.py is
+either wrapped here or named there with a reason. Until 2026-08-11 this prose
+claimed three exclusions while eleven commands were actually missing — the
+"cannot drift" contract had drifted, silently, which is the only way it can.
 
   • **Deleting a case.** It destroys evidence files irreversibly. An agent
     should never be one tool call away from that; use the CLI.
@@ -22,6 +26,16 @@ Two things are intentionally NOT exposed:
     candidate directly, and a sweep list runs to five figures. Same reasoning
     as snapshots: it is capped per call so an agent cannot start a ten-thousand
     site sweep unattended. Larger runs belong in the CLI, with a human there.
+  • **Writing recovered captures into the database.** `reconcile_evidence`
+    reports and dry-runs; `--apply` is CLI-only. It writes rows into an
+    evidence database on the strength of what a directory looks like, and that
+    is a judgement a person signs for.
+  • **The individual passes inside `run attribute`.** scan, ads.txt, cloaking
+    and intel are steps of one pass that is exposed whole. Driving them
+    separately produces half-attributed scan_runs that read as complete.
+  • **Third-party corroboration.** `run corroborate` sends the URL under
+    investigation to Wayback and urlscan, which publishes the fact that it is
+    being investigated. That belongs to a human who has decided to disclose.
 """
 import argparse
 import os
@@ -29,6 +43,16 @@ import sys
 
 
 from . import cli
+
+# CLI command → why an agent does not get it. Enforced by test_mcp_dispatch.
+_WITHHELD = {
+    "cmd_case_delete": "destroys evidence files irreversibly",
+    "cmd_run_scan": "a step inside run attribute, which is exposed whole",
+    "cmd_run_adstxt": "a step inside run attribute, which is exposed whole",
+    "cmd_run_cloaking": "a step inside run attribute, which is exposed whole",
+    "cmd_run_intel": "a step inside run attribute, which is exposed whole",
+    "cmd_run_corroborate": "discloses the investigation to third parties",
+}
 
 try:
     from mcp.server.fastmcp import FastMCP
@@ -245,6 +269,81 @@ def list_evidence(case: int | None = None, domain: str | None = None,
     but which are no longer on disk — a chain-of-custody gap worth raising.
     """
     return _call(cli.cmd_evidence_list, case=case, domain=domain, db=db)
+
+
+@mcp.tool()
+def reconcile_evidence(attach: bool = False, include_partial: bool = False,
+                       also_db: list[str] | None = None, limit: int = 20,
+                       db: str | None = None) -> dict:
+    """Find captures on disk that no database knows about, and optionally
+    reconstruct their rows.
+
+    This is the only check that runs disk → database. Everything else starts
+    from a row and asks whether its file survived, so nothing else can see a
+    capture the database has forgotten — on one live store that was 12,873
+    directories holding 1.2 GB of real evidence from open cases.
+
+    Read `safe` first. It is false when a database that might own these
+    captures could not be read, and then every "orphan" here is provisional —
+    do not act on the list, and never propose deleting anything from it.
+
+    `attach` is always a DRY RUN from this tool: it reports what would be
+    reconstructed and why the rest was refused. Writing needs
+    `kwara evidence reconcile --attach --apply` at the CLI, because attaching
+    binds a directory to a scan_run on circumstantial grounds and a person
+    signs for that.
+
+    `include_partial` also considers directories holding only a page body (no
+    screenshot, no HAR). Those are real evidence when the browser-free pass
+    wrote them and test debris when a test did, so the default declines to
+    guess.
+    """
+    return _call(cli.cmd_evidence_reconcile, attach=attach, apply=False,
+                 force=False, include_partial=include_partial,
+                 also_db=list(also_db or []), limit=limit, db=db)
+
+
+@mcp.tool()
+def describe_evidence(case: int | None = None, db: str | None = None) -> dict:
+    """Write a capture.json caption into each capture directory.
+
+    The store is keyed by scan_run_id, so a directory alone does not say which
+    domain, case or URL it belongs to. This backfills that from the database
+    so the evidence remains readable by someone who only has the files.
+    """
+    return _call(cli.cmd_evidence_describe, case=case, dry_run=False, db=db)
+
+
+@mcp.tool()
+def browse_evidence(out: str, case: int | None = None,
+                    domain: str | None = None, db: str | None = None) -> dict:
+    """Build a domain-keyed symlink tree over the capture store at `out`.
+
+    Nothing is copied and the tree can be rebuilt at will; it exists so a file
+    manager can walk the evidence by domain instead of by scan_run id.
+    """
+    return _call(cli.cmd_evidence_browse, out=out, case=case, domain=domain,
+                 db=db)
+
+
+@mcp.tool()
+def ingest_csv(case: int, file: str, db: str | None = None) -> dict:
+    """Ingest a CSV of messages/URLs into a case, one scan target per row."""
+    return _call(cli.cmd_ingest_csv, case=case, file=file, db=db)
+
+
+@mcp.tool()
+def set_case_locale(case: int, locale_preset: str | None = None,
+                    locale: str | None = None, timezone: str | None = None,
+                    db: str | None = None) -> dict:
+    """Set the browser locale and timezone a case's captures render under.
+
+    Captures must reproduce what the victim would have seen; a geo-cloaked
+    page shows something else entirely to an analyst's default locale, and the
+    screenshot then supports a claim nobody made.
+    """
+    return _call(cli.cmd_case_locale, case=case, locale_preset=locale_preset,
+                 locale=locale, timezone=timezone, db=db)
 
 
 @mcp.tool()

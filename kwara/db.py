@@ -129,10 +129,19 @@ def _backfill_legacy_capture_status(conn: sqlite3.Connection) -> None:
                 ("cf_challenge", "legacy_backfill_html_cf_signals", sid),
             )
         else:
+            # Never clear capture_detail. This ran `capture_detail = NULL` on
+            # every row it touched, and it runs on EVERY kwara command via
+            # migrate_db — a read-only-looking command could erase a recorded
+            # note. Write a marker only where the column is empty, so an 'ok'
+            # that was INFERRED from a screenshot on disk stays distinguishable
+            # from one that was observed at capture time.
             conn.execute(
-                """UPDATE snapshots SET capture_status = ?, capture_detail = NULL
-                   WHERE id = ?""",
-                ("ok", sid),
+                """UPDATE snapshots
+                      SET capture_status = ?,
+                          capture_detail = COALESCE(
+                              NULLIF(TRIM(capture_detail), ''), ?)
+                    WHERE id = ?""",
+                ("ok", "legacy_backfill_screenshot_present", sid),
             )
     conn.commit()
 

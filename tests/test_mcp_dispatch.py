@@ -136,3 +136,55 @@ def test_destructive_operations_are_not_exposed():
     assert "delete_case" not in names
     assert not any("delete" in n for n in names), names
     assert "Deleting a case" in mcp_server.__doc__
+
+
+# ── the no-drift contract, made enforceable ───────────────────────────────
+
+def test_every_cli_command_is_exposed_or_explicitly_withheld():
+    """mcp_server.py's opening line is "a deliberately thin wrapper... so the
+    MCP tools and the CLI cannot drift apart". That was prose, and by
+    2026-08-11 eleven commands were missing while the docstring claimed three
+    exclusions. A contract nothing checks is a wish."""
+    import re
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    cli_src = (root / "kwara" / "cli.py").read_text()
+    mcp_src = (root / "kwara" / "mcp_server.py").read_text()
+
+    from kwara.mcp_server import _WITHHELD
+
+    commands = set(re.findall(r"^def (cmd_[a-z_]+)", cli_src, re.M))
+    # A command counts as exposed when a tool actually calls it.
+    exposed = set(re.findall(r"cli\.(cmd_[a-z_]+)", mcp_src))
+
+    unaccounted = commands - exposed - set(_WITHHELD)
+    assert not unaccounted, (
+        "these CLI commands are neither exposed as MCP tools nor listed in "
+        f"_WITHHELD with a reason: {sorted(unaccounted)}")
+
+
+def test_the_withheld_list_names_only_real_commands():
+    """A stale entry would silently license a gap that no longer exists."""
+    import re
+    from pathlib import Path
+
+    from kwara.mcp_server import _WITHHELD
+
+    root = Path(__file__).resolve().parent.parent
+    commands = set(re.findall(r"^def (cmd_[a-z_]+)",
+                              (root / "kwara" / "cli.py").read_text(), re.M))
+    assert set(_WITHHELD) <= commands, sorted(set(_WITHHELD) - commands)
+    assert all(reason.strip() for reason in _WITHHELD.values())
+
+
+def test_reconcile_over_mcp_can_never_write():
+    """`--apply` is CLI-only: attaching binds a directory to a scan_run on
+    circumstantial grounds, and an agent must not be one call from that."""
+    import inspect
+
+    from kwara import mcp_server
+
+    src = inspect.getsource(mcp_server.reconcile_evidence)
+    assert "apply=False" in src
+    assert "force=False" in src

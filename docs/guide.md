@@ -137,6 +137,36 @@ kwara evidence browse --out ~/evidence-area --case 1
 `browse` builds a symlink tree keyed by domain, so a file manager can walk it
 and open the screenshots. Nothing is copied and the tree can be rebuilt at will.
 
+Those three all start from a database row and ask whether its file survived.
+The reverse question needs its own command:
+
+```bash
+kwara evidence reconcile                       # what is on disk that no DB knows
+kwara evidence reconcile --attach              # dry run: what could be recovered
+kwara evidence reconcile --attach --apply      # write the recovered rows
+```
+
+A row can lose its paths — a batch timeout, a re-capture that repointed the
+row at a fresh directory, a database replaced between investigations — and the
+files then sit on disk with nothing pointing at them. Nothing else in kwara
+can see that.
+
+**Read `safe` before anything else.** It is false when a database that might
+own these captures could not be read, and every "orphan" is then provisional.
+"Orphan" is a claim about a *set* of databases: the set comes from the
+cross-case index plus any `--also-db` you name, and judged against one
+database alone another investigation's captures look like debris.
+
+`--attach` refuses far more than it accepts, and the refusals are the useful
+part. A capture is only reattached when the domain recovered from its
+**artifacts** is one that scan_run has been observed reaching, and when it
+postdates the scan — scan_run ids are not stable across databases, so a bucket
+number alone proves nothing. Evidence that fails those tests is still real;
+it is just no longer connected to anything the current database records, and
+the tool will not invent the connection for you.
+
+`reconcile` never deletes.
+
 ---
 
 ## Delivery
