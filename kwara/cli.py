@@ -567,6 +567,55 @@ def cmd_evidence_describe(args):
             "already_described": already, "missing_on_disk": orphaned}
 
 
+def cmd_evidence_reconcile(args):
+    """Disk → database. The direction nothing else in kwara ran.
+
+    `evidence list` and `evidence describe` both start from a database row and
+    ask whether its file is still there. Neither can see a capture the database
+    has forgotten, which on the live store turned out to be 12,873 directories
+    holding 1.2 GB of real evidence from open cases.
+
+    Reports by default. `--attach` reconstructs the missing rows, and is a dry
+    run unless `--apply` is also given: attaching writes into the evidence
+    database, so it takes the same two-step as anything else that does.
+    """
+    from . import config, reconcile
+
+    # Deliberately NOT _open_db. That helper creates the database if it is
+    # absent, which for this command destroys the one safety property it has:
+    # `safe` is false when a database that might own these captures cannot be
+    # read, and a mistyped --db or an unset KWARA_DB_PATH is exactly that case.
+    # Creating it made the primary always readable, always empty, and turned
+    # every capture in the store into an "orphan" with safe=true — the wrong
+    # verdict, with its own warning suppressed. Reporting also has no business
+    # opening the evidence database read-write and migrating it.
+    db_path = args.db or config.DB_PATH
+    rep = reconcile.report(
+        config.SNAPSHOT_ROOT, db_path,
+        index_db=getattr(args, "index_db", None) or config.INDEX_DB_PATH,
+        extra_dbs=tuple(args.also_db),
+    )
+
+    if not args.quiet and not rep["safe"]:
+        _err("WARNING: a database registered against this store could not be "
+             "read, so every 'orphan' below is provisional:")
+        for p in rep["unreadable_databases"]:
+            _err(f"  missing: {p}")
+
+    out = {k: v for k, v in rep.items() if k != "orphan_details"}
+    out["examples"] = rep["orphan_details"][: max(0, args.limit)]
+
+    if args.attach:
+        if not os.path.isfile(db_path):
+            raise ValueError(
+                f"no database at {db_path} — attaching would write recovered "
+                f"captures into a database that does not exist yet")
+        out["attach"] = reconcile.attach(
+            _open_db(args), rep, dry_run=not args.apply, force=args.force,
+            include_partial=args.include_partial)
+    return out
+
+
 def cmd_evidence_list(args):
     """Where the evidence for a domain actually sits on disk.
 
@@ -998,6 +1047,30 @@ def build_parser() -> argparse.ArgumentParser:
     e_desc.add_argument("--case", type=int, help="limit to one case")
     e_desc.add_argument("--dry-run", action="store_true")
     e_desc.set_defaults(fn=cmd_evidence_describe)
+
+    e_rec = _leaf(ev, "reconcile",
+                  help="walk the capture store and find captures no database "
+                       "knows about")
+    e_rec.add_argument("--also-db", action="append", default=[], metavar="PATH",
+                       help="another kwara database that may own captures in "
+                            "this store; repeatable. The cross-case index is "
+                            "consulted automatically.")
+    e_rec.add_argument("--attach", action="store_true",
+                       help="write a snapshots row for each recovered capture, "
+                            "re-deriving its tracking IDs and request domains")
+    e_rec.add_argument("--apply", action="store_true",
+                       help="with --attach, actually write (default is a "
+                            "dry run)")
+    e_rec.add_argument("--include-partial", action="store_true",
+                       help="also attach directories with no structurally "
+                            "valid screenshot or HAR (page bodies only); "
+                            "still refuses anything that fails corroboration")
+    e_rec.add_argument("--force", action="store_true",
+                       help="attach even though a registered database could "
+                            "not be read; recorded in the audit log")
+    e_rec.add_argument("--limit", type=int, default=20,
+                       help="orphan examples to show (default 20)")
+    e_rec.set_defaults(fn=cmd_evidence_reconcile)
 
     e_list.add_argument("--case", type=int,
                         help="limit to one case (or use --domain)")
