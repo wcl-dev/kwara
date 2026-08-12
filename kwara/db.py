@@ -263,7 +263,13 @@ def init_db(conn: sqlite3.Connection) -> None:
         -- compared for byte-identity.
         complete_sha256       TEXT,
         error                 TEXT,
-        FOREIGN KEY (scan_run_id) REFERENCES scan_runs(id) ON DELETE CASCADE
+        -- NO CASCADE, deliberately. `delete_case` deletes scan_runs, and a
+        -- cascade here would silently delete acquisitions with them — an
+        -- append-only table that quietly loses rows is not append-only. The
+        -- scan_run reference may dangle; an orphaned acquisition is still a
+        -- record that a fetch happened, and `evidence reconcile` is the tool
+        -- for finding artifacts nothing points at.
+        FOREIGN KEY (scan_run_id) REFERENCES scan_runs(id) ON DELETE SET NULL
     );
     CREATE INDEX IF NOT EXISTS idx_acq_scan_run ON acquisitions(scan_run_id);
     CREATE INDEX IF NOT EXISTS idx_acq_complete ON acquisitions(complete_sha256);

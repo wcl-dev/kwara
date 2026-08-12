@@ -47,6 +47,11 @@ def export_case(conn: sqlite3.Connection, case_id: int) -> str:
     ts       = datetime.now(tz=timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     zip_name = f"case_{case_id}_{ts}.zip"
     zip_path = os.path.join(_exports_dir(), zip_name)
+    # Built under a temporary name and renamed only on success. Export fails
+    # closed on a missing or altered body, and a half-written ZIP left at the
+    # real name is exactly the artifact someone later mistakes for a complete
+    # pack.
+    tmp_path = zip_path + ".partial"
 
     manifest = {}   # arcname -> sha256
 
@@ -54,7 +59,7 @@ def export_case(conn: sqlite3.Connection, case_id: int) -> str:
         zf.writestr(arcname, data)
         manifest[arcname] = _sha256(data)
 
-    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+    with zipfile.ZipFile(tmp_path, "w", zipfile.ZIP_DEFLATED) as zf:
 
         # ── messages.csv ────────────────────────────────────────────────
         messages = conn.execute(
@@ -123,7 +128,12 @@ def export_case(conn: sqlite3.Connection, case_id: int) -> str:
                       sr.ip_address, sr.asn, sr.as_org, sr.as_country,
                       sr.domain_enriched_at, sr.intel_risk_tags,
                       sr.tls_info_json, sr.final_response_headers_json,
-                      sr.corroboration_json, sr.cloaking_signal_json
+                      sr.corroboration_json, sr.cloaking_signal_json,
+                      -- Without this the pack carries the ads.txt BYTES but
+                      -- not the derived record naming their hash and
+                      -- acquisition, so a restored database cannot reproduce
+                      -- the template clustering the pack was meant to support.
+                      sr.ads_txt_json
                FROM scan_runs sr
                JOIN url_artifacts ua ON ua.id = sr.url_artifact_id
                WHERE ua.case_id = ?
@@ -137,7 +147,7 @@ def export_case(conn: sqlite3.Connection, case_id: int) -> str:
             "ip_address", "asn", "as_org", "as_country",
             "domain_enriched_at", "intel_risk_tags",
             "tls_info_json", "final_response_headers_json",
-            "corroboration_json", "cloaking_signal_json",
+            "corroboration_json", "cloaking_signal_json", "ads_txt_json",
         ]
         add(zf, "urls/scan_runs.csv",
             _csv_bytes([dict(r) for r in scan_runs_full], sr_fields))
@@ -541,6 +551,11 @@ CROSS-REFERENCE
                 "note": "Verify with: hmac.new(key, manifest_json_bytes, 'sha256').hexdigest()",
             }, indent=2).encode("utf-8")
             zf.writestr("manifest.sig", sig_payload)
+
+    # Only now does the pack get its real name. Anything that raised above —
+    # a body no longer on disk, a body that no longer matches its hash — left
+    # a .partial behind, which nobody will mistake for a deliverable.
+    os.replace(tmp_path, zip_path)
 
     # Write export_runs record
     manifest_json = json.dumps({"zip_name": zip_name, "file_count": len(manifest)})

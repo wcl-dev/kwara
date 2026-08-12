@@ -89,3 +89,42 @@ def _isolate_reference_prevalence(monkeypatch):
     from kwara import prevalence
     monkeypatch.setattr(prevalence, "ADS_TXT_PREVALENCE_PATH",
                         "/nonexistent/kwara-test-prevalence.json")
+
+
+# ---------------------------------------------------------------------------
+# The live evidence store must be exactly as we found it
+# ---------------------------------------------------------------------------
+#
+# The suite could write into the analyst's real case store, and for months it
+# did — 1,300 fabricated captures, including 14-byte files named screenshot.png
+# containing the string PLAYWRIGHT_PNG. The per-test redirects below are a
+# convention, and this codebase keeps discovering conventions it had quietly
+# broken. So the store is measured before and after the whole session.
+#
+# Session-scoped rather than a test, because a test only runs where it is
+# collected; a fixture finaliser runs after everything.
+
+@pytest.fixture(scope="session")
+def live_store_baseline():
+    from test_live_store_untouched import _snapshot_state
+    return _snapshot_state()
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _fail_if_the_live_store_moves():
+    from test_live_store_untouched import _real_paths, _snapshot_state
+
+    paths = _real_paths()
+    if not os.path.isfile(paths["db"]):
+        yield                      # nothing to protect on this machine
+        return
+    before = _snapshot_state()
+    yield
+    after = _snapshot_state()
+    drifted = [k for k in after if before[k] != after[k]]
+    if drifted:
+        raise AssertionError(
+            "THE TEST SUITE MODIFIED THE LIVE EVIDENCE STORE: "
+            + ", ".join(drifted)
+            + f"\nPaths: {paths}\n"
+            "Some test wrote outside its tmp_path. Find it before committing.")

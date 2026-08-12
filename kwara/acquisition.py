@@ -53,6 +53,10 @@ from . import config
 # body is without consulting the database.
 KIND_ADS_TXT = "ads_txt"
 
+# `kind` becomes a path component, so it is an allow-list rather than free
+# text: a caller-supplied "../.." would otherwise write outside the store.
+KINDS = frozenset({KIND_ADS_TXT})
+
 # Recorded on every row so a later reader knows which code produced it.
 try:
     from . import __version__ as TOOL_VERSION
@@ -75,6 +79,9 @@ def write_body(data: bytes, *, kind: str = KIND_ADS_TXT) -> tuple[str, str]:
     Returns (path, sha256 of what was written). Exclusive creation: a
     collision raises rather than overwriting bytes an earlier row points at.
     """
+    if kind not in KINDS:
+        raise ValueError(f"unknown acquisition kind {kind!r}; "
+                         f"add it to acquisition.KINDS deliberately")
     day = datetime.now(tz=timezone.utc).strftime("%Y%m%d")
     parent = os.path.join(acquisition_root(), kind, day)
     os.makedirs(parent, exist_ok=True)
@@ -90,6 +97,26 @@ def write_body(data: bytes, *, kind: str = KIND_ADS_TXT) -> tuple[str, str]:
             fh.write(data)
         return path, hashlib.sha256(data).hexdigest()
     raise RuntimeError(f"could not allocate an acquisition body under {parent}")
+
+
+def read_back(path: str) -> bytes:
+    """Re-open a persisted artifact and return its bytes, refusing symlinks.
+
+    Handing the same in-memory object to `write()` and to the parser
+    establishes intent, not that the parse used what was persisted. Reading it
+    back closes that gap: after this, `captured_sha256` is literally the hash
+    of the artifact on disk, and the records were derived from those bytes.
+    """
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    try:
+        with os.fdopen(fd, "rb") as fh:
+            return fh.read()
+    except BaseException:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        raise
 
 
 def sha256_file(path: str) -> str | None:
@@ -185,40 +212,73 @@ LEGACY_UNVERIFIABLE = "legacy_unverifiable"
 BODY_MISSING = "body_missing"
 BODY_MISMATCH = "body_mismatch"
 TRUNCATED = "truncated"
+WRONG_KIND = "wrong_kind"
+WRONG_SCAN_RUN = "wrong_scan_run"
+HASH_DISAGREES = "hash_disagrees"
 
 
-def verify(conn: sqlite3.Connection, acquisition_id: int) -> str:
-    """Does the stored body still hash to what was recorded?
+def verify(conn: sqlite3.Connection, acquisition_id: int, *,
+           expect_kind: str | None = None,
+           expect_scan_run_id: int | None = None,
+           expect_sha256: str | None = None) -> str:
+    """Does this acquisition support the claim being made ON it?
 
-    This is what lets downstream call a template match "verified" rather than
-    "recorded". A row with no body is `legacy_unverifiable` — accessible, but
-    it cannot support an identity claim.
+    THE CALLER MUST SAY WHAT IT IS CLAIMING. Checking only that a body still
+    hashes to its own recorded value answers a question nobody asked: it
+    establishes that some bytes are intact, not that they are the bytes the
+    finding rests on. A review on 2026-08-12 demonstrated the gap — an
+    `ads_txt_json` claiming sha `aaaa…` was reported `verified` on the
+    strength of a retained body hashing to `2ecabb0f`, because nothing
+    compared the two.
+
+    So a caller passes what it believes: the kind of artifact, the scan_run it
+    belongs to, and the hash the derived record claims. Any disagreement is
+    its own verdict, never a pass.
     """
     row = conn.execute(
-        "SELECT body_path, captured_sha256, complete_sha256, truncated "
-        "FROM acquisitions WHERE id = ?", (acquisition_id,)).fetchone()
+        "SELECT kind, scan_run_id, body_path, captured_sha256, "
+        "complete_sha256, truncated FROM acquisitions WHERE id = ?",
+        (acquisition_id,)).fetchone()
     if row is None:
         return BODY_MISSING
+
+    if expect_kind is not None and row["kind"] != expect_kind:
+        return WRONG_KIND
+    # A row belonging to a different scan_run may be a perfectly good
+    # acquisition of something else entirely.
+    if (expect_scan_run_id is not None
+            and row["scan_run_id"] != expect_scan_run_id):
+        return WRONG_SCAN_RUN
+
     path, captured, complete, truncated = (
         row["body_path"], row["captured_sha256"], row["complete_sha256"],
         row["truncated"])
     if not path:
         return LEGACY_UNVERIFIABLE
-    if not os.path.isfile(path):
+    if os.path.islink(path) or not os.path.isfile(path):
+        # A link where a body should be is not a body: it points somewhere the
+        # acquisition never wrote.
         return BODY_MISSING
     if sha256_file(path) != captured:
         return BODY_MISMATCH
     # The bytes are intact, but a prefix cannot establish identity.
-    return TRUNCATED if (truncated or not complete) else VERIFIED
+    if truncated or not complete:
+        return TRUNCATED
+    if expect_sha256 is not None and complete != expect_sha256:
+        # The bytes are fine and they are not the ones being claimed.
+        return HASH_DISAGREES
+    return VERIFIED
 
 
-def identity_hash(conn: sqlite3.Connection, acquisition_id: int) -> str | None:
+def identity_hash(conn: sqlite3.Connection, acquisition_id: int, **expect
+                  ) -> str | None:
     """The only hash that may be compared for byte-identity, or None.
 
     None means "cannot support an identity claim" — truncated, body gone,
-    body altered, or a legacy row that never had one.
+    body altered, wrong kind, wrong scan_run, disagreeing with the derived
+    record, or a legacy row that never had a body.
     """
-    if verify(conn, acquisition_id) != VERIFIED:
+    if verify(conn, acquisition_id, **expect) != VERIFIED:
         return None
     row = conn.execute("SELECT complete_sha256 FROM acquisitions WHERE id = ?",
                        (acquisition_id,)).fetchone()

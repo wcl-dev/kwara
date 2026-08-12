@@ -93,8 +93,8 @@ def restore(export_dir, case_title="Restored case"):
                     whois_registrar, whois_creation_date, ip_address, asn, as_org, as_country,
                     intel_risk_tags, domain_enriched_at,
                     tls_info_json, final_response_headers_json,
-                    corroboration_json, cloaking_signal_json)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    corroboration_json, cloaking_signal_json, ads_txt_json)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (sr["id"], sr["url_artifact_id"],
                  sr.get("run_at", "") or first_ts,
                  sr.get("final_url", ""), sr.get("hop_count", ""),
@@ -106,7 +106,11 @@ def restore(export_dir, case_title="Restored case"):
                  sr.get("tls_info_json", "") or None,
                  sr.get("final_response_headers_json", "") or None,
                  sr.get("corroboration_json", "") or None,
-                 sr.get("cloaking_signal_json", "") or None),
+                 sr.get("cloaking_signal_json", "") or None,
+                 # Carries raw_sha256 and acquisition_id: without it a restored
+                 # database has the ads.txt bytes but no record naming them, so
+                 # re-running the analysis cannot reproduce the clustering.
+                 sr.get("ads_txt_json", "") or None),
             )
         print(f"  scan_runs: {len(scan_runs)}")
     else:
@@ -122,8 +126,8 @@ def restore(export_dir, case_title="Restored case"):
                     whois_registrar, whois_creation_date, ip_address, asn, as_org, as_country,
                     intel_risk_tags, domain_enriched_at,
                     tls_info_json, final_response_headers_json,
-                    corroboration_json, cloaking_signal_json)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    corroboration_json, cloaking_signal_json, ads_txt_json)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (sr_id, u["id"], first_ts,
                  u.get("final_url", ""), u.get("hop_count", ""),
                  u.get("scan_status", ""), "",

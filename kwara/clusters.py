@@ -37,6 +37,7 @@ from .clustering_infra import (
 )
 from .header_analysis import cross_domain_shared_template, detect_fake_versions
 from .insights import _count_cloaking_suspects
+from . import acquisition as _acq
 from .opsec import compute_opsec_profile
 from .sql import browser_capture_exists
 
@@ -142,6 +143,18 @@ def _hard_signals(conn: sqlite3.Connection, case_id: int) -> list[dict]:
         })
     ads = shared_ad_accounts(conn, case_id)
     for c in ads.get("by_template", []):
+        # Only a cluster whose every member's response bytes are still on disk
+        # AND still hash to what the derived record claims may merge operator
+        # groups. Anything else stays visible — it is real historical evidence
+        # — but as a non-binding observation, because byte-identity is the
+        # whole claim and we cannot currently show the bytes were identical.
+        #
+        # Before 2026-08-12 this labelling existed and nothing read it: every
+        # by_template row became a hard edge regardless, so an altered or
+        # never-retained observation merged groups exactly as a verified one
+        # did.
+        if c.get("verification") != _acq.VERIFIED:
+            continue
         out.append({
             "type": "ads_template", "label": "ads.txt 模板",
             "value": c.get("sha256_short") or (c.get("sha256", "")[:12]),

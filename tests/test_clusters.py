@@ -3,6 +3,7 @@
 Locks the core guarantee: hard signals partition domains into groups, and
 nothing (weak header templates, generic values) silently merges them.
 """
+import hashlib
 import json
 import os
 import tempfile
@@ -198,8 +199,45 @@ def test_grouping_works_without_tracking_ids_via_cert():
     assert any(s["type"] == "cert" for s in g["signals"])
 
 
-def test_grouping_works_via_ads_txt_template():
-    # Non-tracking path: byte-identical ads.txt (same raw_sha256) groups.
+def test_grouping_works_via_ads_txt_template(tmp_path, monkeypatch):
+    """Non-tracking path: byte-identical ads.txt groups the domains — but ONLY
+    when the response bytes are retained and still hash to what the derived
+    record claims. Byte-identity is the entire claim, so a cluster that cannot
+    show the bytes cannot make it."""
+    from kwara import acquisition as acq
+    from kwara import config
+
+    monkeypatch.setattr(config, "DATA_DIR", str(tmp_path / "data"))
+    conn = _make_db()
+    cid = _make_case(conn)
+    body = b"google.com, pub-1, DIRECT\n"
+    sha = hashlib.sha256(body).hexdigest()
+    ads = {"status": "ok", "raw_sha256": sha,
+           "records": [{"adsystem": "google.com", "seller_id": "pub-1",
+                        "relationship": "DIRECT"}]}
+    for host in ("a.com", "b.com"):
+        _add(conn, cid, f"https://{host}/", host, tracking_ids=None, ads=ads)
+        sr = conn.execute("SELECT id FROM scan_runs ORDER BY id DESC "
+                          "LIMIT 1").fetchone()["id"]
+        aid = acq.record_fetch(conn, scan_run_id=sr,
+                               requested_url=f"https://{host}/ads.txt",
+                               status="ok", status_code=200, body=body)
+        conn.execute("UPDATE scan_runs SET ads_txt_json=? WHERE id=?",
+                     (json.dumps({**ads, "acquisition_id": aid}), sr))
+    conn.commit()
+
+    m = case_clusters(conn, cid)
+    assert len(m["groups"]) == 1
+    assert any(s["type"] == "ads_template" for s in m["groups"][0]["signals"])
+
+
+def test_an_unretained_template_does_not_bind_a_group(tmp_path, monkeypatch):
+    """Everything fetched before 2026-08-12 is in this state. The observation
+    is still real and still reported; it just cannot merge operator groups,
+    because nobody can now show the two files were byte-identical."""
+    from kwara import config
+
+    monkeypatch.setattr(config, "DATA_DIR", str(tmp_path / "data"))
     conn = _make_db()
     cid = _make_case(conn)
     ads = {"status": "ok", "raw_sha256": "deadbeefcafe0001",
@@ -207,9 +245,17 @@ def test_grouping_works_via_ads_txt_template():
                         "relationship": "DIRECT"}]}
     _add(conn, cid, "https://a.com/", "a.com", tracking_ids=None, ads=ads)
     _add(conn, cid, "https://b.com/", "b.com", tracking_ids=None, ads=ads)
+
     m = case_clusters(conn, cid)
-    assert len(m["groups"]) == 1
-    assert any(s["type"] == "ads_template" for s in m["groups"][0]["signals"])
+    assert not any(s["type"] == "ads_template"
+                   for g in m["groups"] for s in g["signals"]), \
+        "an unverifiable template merged an operator group"
+
+    # ...but it is not hidden. The observation survives with its verdict.
+    from kwara.clustering_infra import shared_ad_accounts
+    t = shared_ad_accounts(conn, cid)["by_template"][0]
+    assert t["domain_count"] == 2
+    assert t["verification"] == "legacy_unverifiable"
 
 
 def test_completeness_flags_missing_ads_txt():

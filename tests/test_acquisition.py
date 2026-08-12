@@ -309,8 +309,18 @@ def test_a_forced_refetch_keeps_both_observations(db, site):
 
 # ── what downstream is allowed to call "verified" ─────────────────────────
 
-def _domain_with_ads(conn, url, ads):
+def _domain_with_ads(conn, url, ads, *, body=None):
+    """Seed a scanned domain, optionally with the response bytes retained.
+
+    `record_fetch` is given the scan_run: verification checks that the
+    acquisition belongs to the scan_run making the claim, so an acquisition
+    floating free of one cannot vouch for it.
+    """
     sr = _scan_run(conn, url)
+    if body is not None:
+        ads = {**ads, "acquisition_id": acq.record_fetch(
+            conn, scan_run_id=sr, requested_url=url + "ads.txt",
+            status="ok", status_code=200, body=body)}
     conn.execute("UPDATE scan_runs SET ads_txt_json=? WHERE id=?",
                  (json.dumps(ads), sr))
     conn.commit()
@@ -337,12 +347,8 @@ def _template(conn):
 def test_a_template_match_is_verified_only_when_both_bodies_re_hash(db):
     body = b"clickforce.com.tw, pub-873, DIRECT\n"
     sha = hashlib.sha256(body).hexdigest()
-    ids = []
     for host in ("a.test", "b.test"):
-        ids.append(acq.record_fetch(db, requested_url=f"https://{host}/ads.txt",
-                                    status="ok", status_code=200, body=body))
-    for host, aid in zip(("a.test", "b.test"), ids):
-        _domain_with_ads(db, f"https://{host}/", _ads(sha, acquisition_id=aid))
+        _domain_with_ads(db, f"https://{host}/", _ads(sha), body=body)
 
     t = _template(db)
     assert t["domain_count"] == 2
@@ -368,15 +374,11 @@ def test_one_altered_body_downgrades_the_whole_cluster(db):
     claim about BOTH files."""
     body = b"clickforce.com.tw, pub-873, DIRECT\n"
     sha = hashlib.sha256(body).hexdigest()
-    ids = []
     for host in ("a.test", "b.test"):
-        ids.append(acq.record_fetch(db, requested_url=f"https://{host}/ads.txt",
-                                    status="ok", status_code=200, body=body))
-    for host, aid in zip(("a.test", "b.test"), ids):
-        _domain_with_ads(db, f"https://{host}/", _ads(sha, acquisition_id=aid))
+        _domain_with_ads(db, f"https://{host}/", _ads(sha), body=body)
 
-    path = db.execute("SELECT body_path FROM acquisitions WHERE id=?",
-                      (ids[1],)).fetchone()["body_path"]
+    path = db.execute("SELECT body_path FROM acquisitions ORDER BY id DESC "
+                      "LIMIT 1").fetchone()["body_path"]
     with open(path, "wb") as fh:
         fh.write(b"tampered\n")
 
@@ -391,9 +393,7 @@ def test_a_half_retained_cluster_is_not_verified(db):
     fetched before retention, one after."""
     body = b"clickforce.com.tw, pub-873, DIRECT\n"
     sha = hashlib.sha256(body).hexdigest()
-    aid = acq.record_fetch(db, requested_url="https://a.test/ads.txt",
-                           status="ok", status_code=200, body=body)
-    _domain_with_ads(db, "https://a.test/", _ads(sha, acquisition_id=aid))
+    _domain_with_ads(db, "https://a.test/", _ads(sha), body=body)
     _domain_with_ads(db, "https://b.test/", _ads(sha))
 
     t = _template(db)
@@ -520,7 +520,10 @@ def test_omitting_a_bank_still_banks(tmp_path, monkeypatch):
     path = discovery.open_run(None)
     assert path.startswith(str(tmp_path / "data" / "discovery-runs"))
     assert path.endswith(".jsonl")
-    assert not os.path.exists(path), "allocation must not create the file yet"
+    # Creating the file IS the reservation. Returning a name that does not
+    # exist yet leaves a window in which something else can take it — or
+    # replace it with a symlink the sweep would then write through.
+    assert os.path.isfile(path) and os.path.getsize(path) == 0
 
 
 def test_two_auto_named_runs_never_collide(tmp_path, monkeypatch):
@@ -528,8 +531,22 @@ def test_two_auto_named_runs_never_collide(tmp_path, monkeypatch):
 
     monkeypatch.setattr(config, "DATA_DIR", str(tmp_path / "data"))
     first = discovery.open_run(None)
-    open(first, "w").close()
     assert discovery.open_run(None) != first
+
+
+def test_a_symlink_at_the_bank_path_is_refused(tmp_path, monkeypatch):
+    """The check-then-open version could be pointed at anything: plant a link
+    after the existence check and the sweep writes through it."""
+    from kwara import discovery
+
+    target = tmp_path / "precious.txt"
+    target.write_text("do not overwrite", encoding="utf-8")
+    link = tmp_path / "bank.jsonl"
+    os.symlink(str(target), str(link))
+
+    with pytest.raises(ValueError, match="already exists"):
+        discovery.open_run(str(link))
+    assert target.read_text(encoding="utf-8") == "do not overwrite"
 
 
 def test_an_interrupted_sweep_keeps_what_it_paid_for(tmp_path, monkeypatch, site):
@@ -625,3 +642,117 @@ def test_the_sweep_retains_the_bodies_it_screened(tmp_path, monkeypatch, site):
     assert hashlib.sha256(data).hexdigest() == row["body_sha256"]
     assert row["body_sha256"] == row["raw_sha256"], \
         "the identity hash and the retained bytes disagree"
+
+
+# ── verification must check the CLAIM, not just the bytes ─────────────────
+
+def test_a_retained_body_cannot_vouch_for_a_different_hash(db):
+    """Reproduced by review on 2026-08-12: an ads_txt_json claiming sha
+    `aaaa…` was reported `verified` because a retained body hashed to its own
+    recorded value and nothing compared the two. Checking that some bytes are
+    intact answers a question nobody asked."""
+    body = b"real bytes\n"
+    for host in ("a.test", "b.test"):
+        _domain_with_ads(db, f"https://{host}/", _ads("a" * 64), body=body)
+
+    t = _template(db)
+    assert t["verification"] == acq.HASH_DISAGREES
+    assert hashlib.sha256(body).hexdigest() != "a" * 64
+
+
+def test_an_acquisition_from_another_scan_run_cannot_vouch(db):
+    """Otherwise any retained body anywhere in the database would do."""
+    body = b"clickforce.com.tw, pub-873, DIRECT\n"
+    sha = hashlib.sha256(body).hexdigest()
+    other = _scan_run(db, "https://unrelated.test/")
+    stray = acq.record_fetch(db, scan_run_id=other,
+                             requested_url="https://unrelated.test/ads.txt",
+                             status="ok", status_code=200, body=body)
+
+    for host in ("a.test", "b.test"):
+        _domain_with_ads(db, f"https://{host}/",
+                         _ads(sha, acquisition_id=stray))
+
+    assert _template(db)["verification"] == acq.WRONG_SCAN_RUN
+
+
+def test_the_wrong_kind_of_artifact_cannot_vouch(db):
+    sr = _scan_run(db, "https://a.test/")
+    aid = acq.record_fetch(db, scan_run_id=sr, requested_url="https://a.test/x",
+                           status="ok", status_code=200, body=b"x")
+    db.execute("UPDATE acquisitions SET kind='screenshot' WHERE id=?", (aid,))
+    db.commit()
+    assert acq.verify(db, aid, expect_kind=acq.KIND_ADS_TXT) == acq.WRONG_KIND
+
+
+def test_a_body_replaced_by_a_symlink_is_not_followed(db, tmp_path):
+    """Same defect the corpus manifest had: isfile() then open() both follow
+    links, so an edit could hide behind the target."""
+    body = b"original\n"
+    aid = acq.record_fetch(db, requested_url="https://a.test/ads.txt",
+                           status="ok", status_code=200, body=body)
+    path = db.execute("SELECT body_path FROM acquisitions WHERE id=?",
+                      (aid,)).fetchone()["body_path"]
+    decoy = tmp_path / "decoy.body"
+    decoy.write_bytes(body)                       # identical content
+    os.remove(path)
+    os.symlink(str(decoy), path)
+
+    assert acq.verify(db, aid) == acq.BODY_MISSING
+
+
+def test_an_unknown_kind_is_refused_before_it_becomes_a_path(db):
+    """`kind` is a path component. Free text there is a traversal."""
+    with pytest.raises(ValueError, match="unknown acquisition kind"):
+        acq.write_body(b"x", kind="../../escape")
+
+
+def test_the_records_come_from_the_persisted_artifact(db, site, monkeypatch):
+    """"We parsed what we kept" has to be a fact, not an intention. Handing the
+    same in-memory object to write() and to the parser proves neither. The
+    proof: corrupt the artifact between write and read-back and the parse must
+    follow the artifact, not the memory copy."""
+    from kwara import acquisition, adstxt
+
+    site.route("/ads.txt", body=b"clickforce.com.tw, pub-873, DIRECT\n")
+    sr = _scan_run(db, site.url + "/")
+
+    real_read = acquisition.read_back
+    seen = {}
+
+    def read_and_swap(path):
+        seen["path"] = path
+        data = real_read(path)
+        assert data == b"clickforce.com.tw, pub-873, DIRECT\n"
+        return b"someone.else.com, pub-999, DIRECT\n"
+
+    monkeypatch.setattr(adstxt, "read_back", read_and_swap, raising=False)
+    monkeypatch.setattr(acquisition, "read_back", read_and_swap)
+
+    result = adstxt.fetch_and_store_ads_txt(db, sr)
+    assert seen["path"], "the artifact was never read back"
+    assert result["records"][0]["seller_id"] == "pub-999", \
+        "the parse used the in-memory copy, not the persisted artifact"
+
+
+def test_read_back_refuses_a_symlink(tmp_path):
+    from kwara.acquisition import read_back
+
+    real = tmp_path / "real.body"
+    real.write_bytes(b"payload")
+    link = tmp_path / "link.body"
+    os.symlink(str(real), str(link))
+
+    assert read_back(str(real)) == b"payload"
+    with pytest.raises(OSError):
+        read_back(str(link))
+
+
+def test_an_off_site_redirect_body_is_retained(tmp_path, monkeypatch, site):
+    """A farm parking its ads.txt request on someone else's domain is doing
+    something worth keeping the evidence of. The early return dropped it."""
+    from kwara import discovery
+
+    site.route("/ads.txt", body=b"redirected content\n")
+    ads = discovery.fetch_for_screening(site.url)
+    assert "_body" in ads

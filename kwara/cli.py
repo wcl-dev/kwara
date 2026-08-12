@@ -794,7 +794,10 @@ def cmd_discover_screen(args):
     # interrupted has still spent its outbound requests, and those responses
     # are the part that cannot be recreated cheaply.
     obs = []
-    with open(bank, "w", encoding="utf-8") as fh:
+    # Append, never truncate: open_run already created this file as the
+    # reservation, and "w" on a path is the mode that destroyed an earlier
+    # sweep's record when a destination was reused.
+    with open(bank, "a", encoding="utf-8") as fh:
         def progress(r):
             done[0] += 1
             body = r.pop("_body", None)

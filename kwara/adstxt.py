@@ -184,14 +184,23 @@ def _fetch_ads_txt(final_url: str, timeout: int) -> dict[str, Any]:
         out["record_count"] = 0
         return out
 
-    text = body_bytes.decode("utf-8", errors="replace")
-    records, variables = parse_ads_txt(text)
+    # Deliberately NOT parsed here. The records must come from the bytes that
+    # were actually persisted, not from a sibling copy in memory — otherwise
+    # "we parsed what we kept" is an intention rather than a fact. The caller
+    # writes the body, reads it back, and calls parse_body() on that.
     out["status"] = "ok"
-    out["records"] = records
-    out["record_count"] = len(records)
-    out["owner_domain"] = variables.get("owner_domain")
-    out["manager_domain"] = variables.get("manager_domain")
+    out["records"] = []
+    out["record_count"] = 0
+    out["_needs_parse"] = True
     return out
+
+
+def parse_body(body: bytes) -> dict[str, Any]:
+    """Parse ads.txt bytes into the derived record fields."""
+    records, variables = parse_ads_txt(body.decode("utf-8", errors="replace"))
+    return {"records": records, "record_count": len(records),
+            "owner_domain": variables.get("owner_domain"),
+            "manager_domain": variables.get("manager_domain")}
 
 
 def fetch_and_store_ads_txt(
@@ -227,16 +236,28 @@ def fetch_and_store_ads_txt(
     # the derived record. A forced re-fetch inserts a new acquisition; the
     # previous body and its row are never touched, so an earlier observation
     # stays checkable after the site changes or starts refusing.
-    from .acquisition import record_fetch
+    from .acquisition import read_back, record_fetch
     acq = result.pop("_acquisition", None)
+    needs_parse = result.pop("_needs_parse", False)
     if acq is not None:
         try:
-            result["acquisition_id"] = record_fetch(
-                conn, scan_run_id=scan_run_id, **acq)
+            aid = record_fetch(conn, scan_run_id=scan_run_id, **acq)
+            result["acquisition_id"] = aid
+            if needs_parse:
+                # Read the artifact back and parse THAT. After this the
+                # records demonstrably came from the bytes on disk, and
+                # captured_sha256 is literally that file's hash.
+                path = conn.execute(
+                    "SELECT body_path FROM acquisitions WHERE id = ?",
+                    (aid,)).fetchone()["body_path"]
+                result.update(parse_body(read_back(path)))
         except (OSError, RuntimeError) as exc:
             # Retention failing must not lose the analysis, but it must be
             # visible: an unrecorded fetch cannot support an identity claim.
             result["acquisition_error"] = str(exc)[:300]
+            if needs_parse and acq.get("body") is not None:
+                result.update(parse_body(acq["body"]))
+                result["parsed_from"] = "memory (artifact unavailable)"
 
     conn.execute(
         "UPDATE scan_runs SET ads_txt_json = ? WHERE id = ?",

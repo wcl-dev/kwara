@@ -253,6 +253,12 @@ def fetch_for_screening(domain: str, *,
     landed_apex = extract_domain_from_url(resp.url or "")
     if candidate_apex and landed_apex and landed_apex != candidate_apex:
         return {"status": "off_site_redirect", "url": url,
+                # Retained like any other response. A farm parking its ads.txt
+                # request on someone else's domain is doing something worth
+                # keeping the evidence of, and the body is what shows what it
+                # served.
+                "_body": bytes(body) if body else b"",
+                "_final_url": getattr(resp, "url", url),
                 "landed_on": resp.url, "records": [], "record_count": 0,
                 "fetched_at": now}
 
@@ -373,10 +379,18 @@ def open_run(bank: str | None = None) -> str:
         parent = os.path.dirname(os.path.abspath(bank))
         if parent:
             os.makedirs(parent, exist_ok=True)
-        if os.path.exists(bank):
+        try:
+            # Creating the file IS the reservation. Checking existence and then
+            # opening leaves a window in which the file can appear — or be
+            # replaced by a symlink pointing at something the sweep would then
+            # overwrite. O_EXCL|O_NOFOLLOW closes both.
+            os.close(os.open(bank, os.O_WRONLY | os.O_CREAT | os.O_EXCL
+                             | getattr(os, "O_NOFOLLOW", 0), 0o644))
+        except FileExistsError:
             raise ValueError(
                 f"{bank} already exists. A sweep is an immutable record; "
-                f"name a new destination or omit --bank for an auto-named run.")
+                f"name a new destination or omit --bank for an auto-named "
+                f"run.") from None
         return bank
 
     from . import config as _cfg
@@ -385,8 +399,11 @@ def open_run(bank: str | None = None) -> str:
     os.makedirs(root, exist_ok=True)
     for _ in range(8):
         path = os.path.join(root, f"{stamp}-{secrets.token_hex(3)}.jsonl")
-        if not os.path.exists(path):
-            return path
+        try:
+            os.close(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644))
+        except FileExistsError:
+            continue
+        return path
     raise RuntimeError(f"could not allocate a run file under {root}")
 
 

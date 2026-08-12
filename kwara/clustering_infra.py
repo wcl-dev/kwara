@@ -833,7 +833,7 @@ def shared_ad_accounts(conn: sqlite3.Connection, case_id: int) -> dict:
     is the canonical PLATFORM_ADS_TXT_SELLER (contract 1).
     """
     rows = conn.execute(
-        f"""SELECT sr.ads_txt_json, sr.final_url,
+        f"""SELECT sr.ads_txt_json, sr.final_url, sr.id AS scan_run_id,
                   ua.id AS ua_id, me.id AS post_id
            FROM url_artifacts ua
            JOIN message_evidence me ON me.id = ua.message_id
@@ -882,7 +882,10 @@ def shared_ad_accounts(conn: sqlite3.Connection, case_id: int) -> dict:
                 template_data[sha].add(domain)
                 aid = ads.get("acquisition_id")
                 if aid is not None:
-                    template_acq[sha][domain] = aid
+                    # Carry the scan_run and the CLAIMED hash, so verification
+                    # can check the acquisition against what is being claimed
+                    # on it rather than only against itself.
+                    template_acq[sha][domain] = (aid, r["scan_run_id"], sha)
             mgr = (ads.get("manager_domain") or "").strip().lower()
             if mgr:
                 declared_manager[domain] = mgr
@@ -1044,22 +1047,29 @@ def shared_ad_accounts(conn: sqlite3.Connection, case_id: int) -> dict:
         # only as checkable as its weakest side.
         per_domain = {}
         for d in sorted(domains):
-            aid = template_acq.get(sha, {}).get(d)
-            if aid is None:
+            claim = template_acq.get(sha, {}).get(d)
+            if claim is None:
                 per_domain[d] = _acq.LEGACY_UNVERIFIABLE
             else:
-                per_domain[d] = _acq.verify(conn, aid)
+                aid, srid, claimed = claim
+                per_domain[d] = _acq.verify(
+                    conn, aid, expect_kind=_acq.KIND_ADS_TXT,
+                    expect_scan_run_id=srid, expect_sha256=claimed)
         states = set(per_domain.values())
         if states == {_acq.VERIFIED}:
             verification = _acq.VERIFIED
-        elif _acq.BODY_MISMATCH in states:
-            verification = _acq.BODY_MISMATCH
-        elif _acq.BODY_MISSING in states:
-            verification = _acq.BODY_MISSING
-        elif _acq.TRUNCATED in states:
-            verification = _acq.TRUNCATED
         else:
-            verification = _acq.LEGACY_UNVERIFIABLE
+            # Report the worst thing wrong with the cluster. Order matters:
+            # bytes disagreeing with the claim is a different problem from
+            # bytes never having been kept, and the reader needs to know which.
+            for worst in (_acq.HASH_DISAGREES, _acq.BODY_MISMATCH,
+                          _acq.WRONG_SCAN_RUN, _acq.WRONG_KIND,
+                          _acq.BODY_MISSING, _acq.TRUNCATED):
+                if worst in states:
+                    verification = worst
+                    break
+            else:
+                verification = _acq.LEGACY_UNVERIFIABLE
         by_template.append({
             "sha256":       sha,
             "sha256_short": sha[:12],
