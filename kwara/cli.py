@@ -778,29 +778,48 @@ def cmd_discover_screen(args):
         doms = [l.strip() for l in fh if l.strip() and not l.startswith("#")]
     if args.limit:
         doms = doms[:args.limit]
+
+    # Allocate the run BEFORE contacting anything. Naming a destination that
+    # already exists must cost zero outbound requests to refuse — a sweep is
+    # an immutable record and the old code opened it with mode "w".
+    bank = discovery.open_run(args.bank)
+
     if not args.quiet:
         _err(f"screening {len(doms)} candidates against {len(known)} known "
              f"templates — this contacts each one directly")
+        _err(f"banking to {bank}")
     done = [0]
 
-    def progress(_r):
-        done[0] += 1
-        if not args.quiet and done[0] % 250 == 0:
-            _err(f"  {done[0]}/{len(doms)}")
+    # Written as each candidate completes, not at the end: a sweep that is
+    # interrupted has still spent its outbound requests, and those responses
+    # are the part that cannot be recreated cheaply.
+    obs = []
+    with open(bank, "w", encoding="utf-8") as fh:
+        def progress(r):
+            done[0] += 1
+            body = r.pop("_body", None)
+            if body is not None:
+                # Retain the response beside the run. The 2026-08-05 sweep
+                # hashed and dropped these; blockedsite.example's file is the one that
+                # can no longer be reacquired because of it.
+                try:
+                    rel, digest = discovery.bank_body(bank, r["domain"], body)
+                    r["body_file"], r["body_sha256"] = rel, digest
+                except OSError as exc:
+                    r["body_error"] = str(exc)[:200]
+            obs.append(r)
+            fh.write(json.dumps(r, ensure_ascii=False) + "\n")
+            fh.flush()
+            if not args.quiet and done[0] % 250 == 0:
+                _err(f"  {done[0]}/{len(doms)}")
 
-    from .config import DISCOVERY_WORKERS
-    obs = discovery.screen_domains(doms, known,
-                                   workers=args.workers or DISCOVERY_WORKERS,
-                                   on_result=progress)
-    # Banking is the default, not a flag to remember: the sweep pays for this
-    # data anyway and it is the reference population plus the clustering input.
-    if args.bank:
-        with open(args.bank, "w", encoding="utf-8") as fh:
-            for o in obs:
-                fh.write(json.dumps(o, ensure_ascii=False) + "\n")
+        from .config import DISCOVERY_WORKERS
+        discovery.screen_domains(doms, known,
+                                 workers=args.workers or DISCOVERY_WORKERS,
+                                 on_result=progress)
     from collections import Counter
     hits = [o for o in obs if o["verdict"] == discovery.VERDICT_TEMPLATE_MATCH]
-    return {"screened": len(obs), "banked_to": args.bank,
+    return {"screened": len(obs), "banked_to": bank,
             "verdicts": dict(Counter(o["verdict"] for o in obs)),
             "hits": [{"domain": h["domain"], "matched": h["matched_domains"]}
                      for h in hits]}
@@ -988,8 +1007,11 @@ def build_parser() -> argparse.ArgumentParser:
     d_scr = _leaf(dis, "screen",
                   help="fetch each candidate's /ads.txt and match known templates")
     d_scr.add_argument("--domains", required=True, help="one domain per line")
-    d_scr.add_argument("--bank", help="write the observations here (JSONL) — "
-                                      "the reference population and clustering input")
+    d_scr.add_argument("--bank",
+                       help="write the observations here (JSONL). Omit for an "
+                            "auto-named run under KWARA_DATA_DIR/discovery-runs/. "
+                            "Banking always happens; an existing path is "
+                            "refused before any request goes out.")
     d_scr.add_argument("--limit", type=int)
     d_scr.add_argument("--workers", type=int, default=None)
     d_scr.set_defaults(fn=cmd_discover_screen)

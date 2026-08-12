@@ -235,6 +235,39 @@ def init_db(conn: sqlite3.Connection) -> None:
         manifest_json TEXT
     );
 
+    -- Acquisition records: the response bytes an analysis was derived from.
+    -- APPEND ONLY. A forced re-fetch inserts; nothing updates or deletes a
+    -- row here, because a record describes one moment and a later moment is a
+    -- different record. See kwara/acquisition.py.
+    CREATE TABLE IF NOT EXISTS acquisitions (
+        id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+        kind                  TEXT NOT NULL,
+        scan_run_id           INTEGER,
+        requested_url         TEXT NOT NULL,
+        final_url             TEXT,
+        redirect_chain_json   TEXT,
+        status                TEXT NOT NULL,
+        status_code           INTEGER,
+        fetched_at            TEXT NOT NULL,
+        -- [[name, value], ...] not a dict: a response may repeat a header and
+        -- a mapping silently keeps only the last one.
+        response_headers_json TEXT,
+        user_agent            TEXT,
+        tool_version          TEXT,
+        truncated             INTEGER NOT NULL DEFAULT 0,
+        captured_bytes        INTEGER NOT NULL DEFAULT 0,
+        body_path             TEXT,
+        -- Over the bytes actually written.
+        captured_sha256       TEXT,
+        -- Over the WHOLE response; NULL when truncated. Only this one may be
+        -- compared for byte-identity.
+        complete_sha256       TEXT,
+        error                 TEXT,
+        FOREIGN KEY (scan_run_id) REFERENCES scan_runs(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_acq_scan_run ON acquisitions(scan_run_id);
+    CREATE INDEX IF NOT EXISTS idx_acq_complete ON acquisitions(complete_sha256);
+
     CREATE TABLE IF NOT EXISTS audit_log (
         id        INTEGER PRIMARY KEY AUTOINCREMENT,
         case_id   INTEGER,

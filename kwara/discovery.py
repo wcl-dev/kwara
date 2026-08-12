@@ -46,6 +46,9 @@ from typing import Any, Iterable
 
 import hashlib
 import json
+import os
+import re
+import secrets
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
@@ -262,7 +265,13 @@ def fetch_for_screening(domain: str, *,
     out: dict[str, Any] = {"url": url, "status_code": resp.status_code,
                            "fetched_at": now, "truncated": truncated,
                            "raw_sha256": (None if truncated
-                                          else hashlib.sha256(body_bytes).hexdigest())}
+                                          else hashlib.sha256(body_bytes).hexdigest()),
+                           # Carried out so the caller can retain it. This is
+                           # the path the blockedsite.example observation came down:
+                           # the bytes were read, hashed, parsed and dropped,
+                           # and the site began refusing requests the next day.
+                           "_body": body_bytes,
+                           "_final_url": getattr(resp, "url", url)}
     if resp.status_code != 200:
         out.update({"status": "non_200", "records": [], "record_count": 0})
         return out
@@ -309,7 +318,76 @@ def screen_domain(domain: str, known: dict[str, list[str]], *,
                        and r.get("adsystem") and r.get("seller_id")})
     return {"domain": domain, **screen_ads_txt(ads or None, known),
             "raw_sha256": ads.get("raw_sha256"),
-            "accounts": [list(a) for a in accounts]}
+            "accounts": [list(a) for a in accounts],
+            "status_code": ads.get("status_code"),
+            "fetched_at": ads.get("fetched_at"),
+            "truncated": bool(ads.get("truncated")),
+            "final_url": ads.get("_final_url"),
+            # Stripped by the banking layer once written to disk; never
+            # serialised into the JSONL.
+            "_body": ads.get("_body")}
+
+
+def bank_body(bank_path: str, domain: str, body: bytes) -> tuple[str, str]:
+    """Write one screened response beside the run's JSONL.
+
+    The bodies live in a sibling directory named for the run, so a run and its
+    evidence move together. Returns (relative path, sha256 of what was
+    written) for recording in the observation.
+    """
+    root = os.path.splitext(bank_path)[0] + ".bodies"
+    os.makedirs(root, exist_ok=True)
+    safe = re.sub(r"[^A-Za-z0-9._-]", "_", domain)[:80] or "candidate"
+    for _ in range(8):
+        name = f"{safe}_{secrets.token_hex(3)}.body"
+        path = os.path.join(root, name)
+        try:
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+        except FileExistsError:
+            continue
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(body)
+        return os.path.join(os.path.basename(root), name), \
+            hashlib.sha256(body).hexdigest()
+    raise RuntimeError(f"could not allocate a body file under {root}")
+
+
+def open_run(bank: str | None = None) -> str:
+    """Allocate the directory a sweep writes into, BEFORE any request goes out.
+
+    Two properties, both learned the hard way:
+
+    * BANKING IS NOT OPTIONAL. `--bank` was documented as the default and was
+      not one: omit it and the sweep's raw hashes and account lists were gone,
+      leaving the clustering stage nothing to work with. The historical proof
+      is on disk — `screen_results.jsonl` carries no `raw_sha256`, so
+      clustering it today returns nothing, and round 1's 54 clusters survive
+      only because a second file happened to be written separately.
+    * A RUN IS IMMUTABLE. The old path opened the destination with mode "w",
+      so pointing a second sweep at the same file silently destroyed the
+      first. Naming a destination that already exists is now refused here, at
+      allocation time — before a single candidate has been contacted, so the
+      refusal costs no outbound requests.
+    """
+    if bank:
+        parent = os.path.dirname(os.path.abspath(bank))
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        if os.path.exists(bank):
+            raise ValueError(
+                f"{bank} already exists. A sweep is an immutable record; "
+                f"name a new destination or omit --bank for an auto-named run.")
+        return bank
+
+    from . import config as _cfg
+    stamp = datetime.now(tz=timezone.utc).strftime("%Y%m%dT%H%M%S")
+    root = os.path.join(_cfg.DATA_DIR, "discovery-runs")
+    os.makedirs(root, exist_ok=True)
+    for _ in range(8):
+        path = os.path.join(root, f"{stamp}-{secrets.token_hex(3)}.jsonl")
+        if not os.path.exists(path):
+            return path
+    raise RuntimeError(f"could not allocate a run file under {root}")
 
 
 def screen_domains(domains: Iterable[str], known: dict[str, list[str]], *,

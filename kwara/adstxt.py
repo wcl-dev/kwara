@@ -142,7 +142,12 @@ def _fetch_ads_txt(final_url: str, timeout: int) -> dict[str, Any]:
             body.extend(chunk[:remaining])
     except requests.exceptions.RequestException as exc:
         return {"status": "error", "error": str(exc)[:300],
-                "url": url, "fetched_at": now}
+                "url": url, "fetched_at": now,
+                # A network error is a real acquisition outcome with no body.
+                # Recorded, not dropped — see kwara/acquisition.py.
+                "_acquisition": {"requested_url": url, "status": "error",
+                                 "error": str(exc)[:300], "fetched_at": now,
+                                 "user_agent": SCANNER_USER_AGENT}}
 
     body_bytes = bytes(body)
     out: dict[str, Any] = {
@@ -155,6 +160,23 @@ def _fetch_ads_txt(final_url: str, timeout: int) -> dict[str, Any]:
         "raw_sha256":  (None if truncated
                         else hashlib.sha256(body_bytes).hexdigest()),
     }
+    # The bytes are handed on so the caller can persist them. A 403 challenge
+    # page and a 302 are bodies too, and they are exactly the ones worth
+    # keeping — they record what the site served an investigator.
+    from .acquisition import headers_as_pairs
+    out["_acquisition"] = {
+        "requested_url": url,
+        "final_url": url,                      # allow_redirects=False here
+        "status": "non_200" if resp.status_code != 200 else "ok",
+        "status_code": resp.status_code,
+        "fetched_at": now,
+        "response_headers": headers_as_pairs(
+            getattr(getattr(resp, "raw", None), "headers", None) or resp.headers),
+        "user_agent": SCANNER_USER_AGENT,
+        "truncated": truncated,
+        "body": body_bytes,
+    }
+
     if resp.status_code != 200:
         # 403 / 3xx / 404 etc. — record status, no records to parse.
         out["status"] = "non_200"
@@ -200,6 +222,22 @@ def fetch_and_store_ads_txt(
         return None
 
     result = _fetch_ads_txt(row["final_url"], timeout=timeout)
+
+    # Persist the response BEFORE the derived JSON, and carry the row id on
+    # the derived record. A forced re-fetch inserts a new acquisition; the
+    # previous body and its row are never touched, so an earlier observation
+    # stays checkable after the site changes or starts refusing.
+    from .acquisition import record_fetch
+    acq = result.pop("_acquisition", None)
+    if acq is not None:
+        try:
+            result["acquisition_id"] = record_fetch(
+                conn, scan_run_id=scan_run_id, **acq)
+        except (OSError, RuntimeError) as exc:
+            # Retention failing must not lose the analysis, but it must be
+            # visible: an unrecorded fetch cannot support an identity claim.
+            result["acquisition_error"] = str(exc)[:300]
+
     conn.execute(
         "UPDATE scan_runs SET ads_txt_json = ? WHERE id = ?",
         (json.dumps(result, ensure_ascii=False), scan_run_id),

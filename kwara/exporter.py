@@ -247,6 +247,64 @@ def export_case(conn: sqlite3.Connection, case_id: int) -> str:
             add(zf, "snapshots/snapshots.csv",
                 _csv_bytes(snap_meta, snap_fields))
 
+        # ── acquisitions: the bytes the ads.txt findings came from ──────
+        #
+        # Until 2026-08-12 an export pack carried no ads.txt evidence at all —
+        # not the bodies, not even the derived ads_txt_json. So the tool's
+        # strongest binding signal, two domains serving a byte-identical file,
+        # arrived as a number the recipient had to trust. Now the response
+        # bytes travel with the pack and the recipient re-hashes them.
+        acq_rows = conn.execute(
+            """SELECT a.* FROM acquisitions a
+                 JOIN scan_runs sr ON sr.id = a.scan_run_id
+                 JOIN url_artifacts ua ON ua.id = sr.url_artifact_id
+                WHERE ua.case_id = ? ORDER BY a.id""",
+            (case_id,),
+        ).fetchall()
+
+        acq_meta = []
+        for a in acq_rows:
+            arc = ""
+            if a["body_path"]:
+                if not os.path.isfile(a["body_path"]):
+                    # FAIL CLOSED. A pack that silently omits the bytes a
+                    # finding rests on is worse than no pack: it looks
+                    # complete. The analyst has to know before it ships.
+                    raise ValueError(
+                        f"acquisition {a['id']} references a body that is not "
+                        f"on disk: {a['body_path']}. Export refuses rather "
+                        f"than ship a pack missing the evidence it cites.")
+                with open(a["body_path"], "rb") as fh:
+                    data = fh.read()
+                if _sha256(data) != a["captured_sha256"]:
+                    raise ValueError(
+                        f"acquisition {a['id']} body does not match its "
+                        f"recorded hash ({a['body_path']}). Export refuses.")
+                arc = f"acquisitions/{a['id']}_{os.path.basename(a['body_path'])}"
+                add(zf, arc, data)
+            acq_meta.append({
+                "id": a["id"], "kind": a["kind"],
+                "scan_run_id": a["scan_run_id"],
+                "requested_url": a["requested_url"],
+                "final_url": a["final_url"] or "",
+                "status": a["status"], "status_code": a["status_code"] or "",
+                "fetched_at": a["fetched_at"],
+                "user_agent": a["user_agent"] or "",
+                "tool_version": a["tool_version"] or "",
+                "truncated": a["truncated"],
+                "captured_bytes": a["captured_bytes"],
+                "captured_sha256": a["captured_sha256"] or "",
+                # NULL when truncated. Only this may be compared for identity.
+                "complete_sha256": a["complete_sha256"] or "",
+                "response_headers_json": a["response_headers_json"] or "",
+                "redirect_chain_json": a["redirect_chain_json"] or "",
+                "error": a["error"] or "",
+                "body_file": arc,
+            })
+        if acq_meta:
+            add(zf, "acquisitions/acquisitions.csv",
+                _csv_bytes(acq_meta, list(acq_meta[0].keys())))
+
         # ── audit.csv ───────────────────────────────────────────────────
         audit_rows = conn.execute(
             "SELECT id, case_id, actor, action, at, meta_json FROM audit_log WHERE case_id = ? ORDER BY id",
@@ -372,6 +430,24 @@ audit.csv
   Full action log for this case (ingestion, scans, snapshots, exports).
   Columns: id, case_id, actor, action, at, meta_json
 
+acquisitions/
+  acquisitions.csv plus one file per retained response body.
+
+  This is the ads.txt evidence, and it is here so you do not have to take
+  our word for a template match. Re-hash a body and compare it against
+  `complete_sha256`; two domains whose bodies share that value served a
+  byte-identical file. `complete_sha256` is EMPTY when the capture was
+  truncated — a prefix hash cannot establish identity, and must not be
+  compared as though it could. `captured_sha256` always covers the bytes in
+  this pack.
+
+  Rows with an empty body_file were fetched before kwara retained response
+  bodies (before 2026-08-12) or were network errors with nothing to retain.
+  A template match resting on those is an observation, not a verified fact.
+
+  Export refuses to build a pack whose referenced body is missing or no
+  longer matches its recorded hash.
+
 manifest.json
   SHA-256 hash of every file in this ZIP (excluding the manifest
   files themselves). Use to verify integrity of the evidence pack.
@@ -412,6 +488,9 @@ CROSS-REFERENCE
   urls/        — 所有擷取的 URL、掃描結果、redirect chain
   snapshots/   — 落地頁截圖、HTML、WHOIS/ASN、風險旗標
   audit.csv    — 完整操作紀錄
+  acquisitions/ — ads.txt 回應的原始位元組與取得中繼資料。
+                  重算雜湊與 complete_sha256 比對即可自行驗證模板相符；
+                  該欄為空代表擷取被截斷或未保留內文，不可當作已驗證
   manifest.json — 所有檔案的 SHA-256 雜湊值（驗證完整性）
   manifest.sig  — HMAC 簽章（若有設定密鑰）
 

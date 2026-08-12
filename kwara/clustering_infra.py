@@ -72,6 +72,7 @@ from .param_attribution import (
     identify_param,
     merge_risk_tags,
 )
+from . import acquisition as _acq
 from .sql import LATEST_DONE_SCAN_RUN, usable_snapshots
 
 
@@ -847,6 +848,11 @@ def shared_ad_accounts(conn: sqlite3.Connection, case_id: int) -> dict:
     account_data: dict[tuple[str, str], dict] = {}
     # raw_sha256 → {domains}
     template_data: dict[str, set] = defaultdict(set)
+    # raw_sha256 → {domain: acquisition_id}. A template match is only
+    # "verified" when the response bytes are still on disk and still hash to
+    # what was recorded; otherwise it is a claim the reader has to take on
+    # trust. Rows fetched before retention existed have no acquisition at all.
+    template_acq: dict[str, dict] = defaultdict(dict)
     # distinct domains with a parseable ads.txt (breadth denominator)
     case_domains: set[str] = set()
     # domain → the MANAGERDOMAIN it declares, when it declares one. ads.txt's
@@ -874,6 +880,9 @@ def shared_ad_accounts(conn: sqlite3.Connection, case_id: int) -> dict:
             sha = ads.get("raw_sha256")
             if sha:
                 template_data[sha].add(domain)
+                aid = ads.get("acquisition_id")
+                if aid is not None:
+                    template_acq[sha][domain] = aid
             mgr = (ads.get("manager_domain") or "").strip().lower()
             if mgr:
                 declared_manager[domain] = mgr
@@ -1030,11 +1039,34 @@ def shared_ad_accounts(conn: sqlite3.Connection, case_id: int) -> dict:
     for sha, domains in template_data.items():
         if len(domains) < 2:
             continue
+        # Byte-identity is the claim; the bytes have to be there to support it.
+        # Every member must re-hash to the recorded value, because a cluster is
+        # only as checkable as its weakest side.
+        per_domain = {}
+        for d in sorted(domains):
+            aid = template_acq.get(sha, {}).get(d)
+            if aid is None:
+                per_domain[d] = _acq.LEGACY_UNVERIFIABLE
+            else:
+                per_domain[d] = _acq.verify(conn, aid)
+        states = set(per_domain.values())
+        if states == {_acq.VERIFIED}:
+            verification = _acq.VERIFIED
+        elif _acq.BODY_MISMATCH in states:
+            verification = _acq.BODY_MISMATCH
+        elif _acq.BODY_MISSING in states:
+            verification = _acq.BODY_MISSING
+        elif _acq.TRUNCATED in states:
+            verification = _acq.TRUNCATED
+        else:
+            verification = _acq.LEGACY_UNVERIFIABLE
         by_template.append({
             "sha256":       sha,
             "sha256_short": sha[:12],
             "domains":      sorted(domains),
             "domain_count": len(domains),
+            "verification": verification,
+            "verification_by_domain": per_domain,
         })
     by_template.sort(key=lambda x: (-x["domain_count"], x["sha256"]))
 

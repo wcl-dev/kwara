@@ -9,6 +9,7 @@ kwara/data/kwara.db, plus copies snapshot files into kwara/data/snapshots/.
 """
 import csv
 import os
+import hashlib
 import shutil
 import sqlite3
 import sys
@@ -224,6 +225,61 @@ def restore(export_dir, case_title="Restored case"):
              s.get("capture_method", "") or None),
         )
     print(f"  snapshots: {len(snaps)}")
+
+    # --- 5b. acquisitions: the ads.txt response bytes ---
+    # Restored so the recipient can re-derive a template match rather than
+    # trust the number we shipped. Bodies land beside the database and each
+    # row's path is rewritten to point there; a body whose hash no longer
+    # matches is reported and the row is kept with its path cleared, because
+    # a row pointing at wrong bytes is worse than a row pointing at none.
+    acq_csv = os.path.join(export_dir, "acquisitions", "acquisitions.csv")
+    if os.path.isfile(acq_csv):
+        acq_dst = os.path.join(os.path.dirname(DB_PATH), "acquisitions",
+                               "restored")
+        os.makedirs(acq_dst, exist_ok=True)
+        rows = read_csv(acq_csv)
+        restored = mismatched = 0
+        for a in rows:
+            body_path = None
+            arc = (a.get("body_file") or "").strip()
+            if arc:
+                src = os.path.join(export_dir, arc)
+                if os.path.isfile(src):
+                    with open(src, "rb") as fh:
+                        data = fh.read()
+                    if hashlib.sha256(data).hexdigest() == a.get("captured_sha256"):
+                        dst = os.path.join(acq_dst, os.path.basename(arc))
+                        with open(dst, "wb") as fh:
+                            fh.write(data)
+                        body_path = dst
+                        restored += 1
+                    else:
+                        mismatched += 1
+                        print(f"  ! acquisition {a['id']}: body hash mismatch, "
+                              f"path left empty")
+                else:
+                    mismatched += 1
+                    print(f"  ! acquisition {a['id']}: body missing from pack")
+            conn.execute(
+                """INSERT INTO acquisitions
+                     (id, kind, scan_run_id, requested_url, final_url,
+                      redirect_chain_json, status, status_code, fetched_at,
+                      response_headers_json, user_agent, tool_version,
+                      truncated, captured_bytes, body_path, captured_sha256,
+                      complete_sha256, error)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (a["id"], a.get("kind", "ads_txt"), a.get("scan_run_id") or None,
+                 a.get("requested_url", ""), a.get("final_url") or None,
+                 a.get("redirect_chain_json") or None, a.get("status", ""),
+                 a.get("status_code") or None, a.get("fetched_at", ""),
+                 a.get("response_headers_json") or None,
+                 a.get("user_agent") or None, a.get("tool_version") or None,
+                 int(a.get("truncated") or 0), int(a.get("captured_bytes") or 0),
+                 body_path, a.get("captured_sha256") or None,
+                 a.get("complete_sha256") or None, a.get("error") or None),
+            )
+        print(f"  acquisitions: {len(rows)} ({restored} bodies verified"
+              + (f", {mismatched} UNUSABLE" if mismatched else "") + ")")
 
     # --- 6. audit_log ---
     audit_csv = os.path.join(export_dir, "audit.csv")
