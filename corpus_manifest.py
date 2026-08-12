@@ -15,10 +15,16 @@ two of the open cases. It is gitignored, correctly — it is other people's data
 and does not belong in a public repository — but "gitignored" had come to mean
 "unversioned, unhashed, and backed up nowhere".
 
-The design is that THE HASHES GO IN GIT AND THE DATA DOES NOT. A commit is a
-timestamp nobody can quietly move, so a reviewer can establish that a corpus
-file is byte-for-byte what it was on the date the manifest was committed —
+The design is that THE HASHES GO IN GIT AND THE DATA DOES NOT: a reviewer can
+establish that a corpus file is byte-for-byte the one the manifest records,
 without the repository ever carrying the third-party data itself.
+
+WHAT ESTABLISHES *WHEN*, AND WHAT DOES NOT. A commit hash binds content once
+that content is independently known. A commit DATE does not establish time —
+it is self-asserted, and local history can be rewritten. Time has to come from
+outside the repository: pushing to a remote nobody controls alone, an RFC 3161
+timestamp over the manifest, or an organisational append-only record. Until
+one of those exists, this manifest proves integrity, not age.
 
 THE LIMITATION THIS MANIFEST RECORDS, AND DOES NOT FIX
 
@@ -38,7 +44,10 @@ following day.
 
 This manifest makes the DERIVED artifacts tamper-evident. It does not turn
 them into independently verifiable evidence, because the bytes they were
-derived from no longer exist. Retaining response bytes at acquisition is a
+derived from no longer exist. And note the ceiling even after retention: two
+identical ads.txt bodies prove identical captured bytes, not a common
+operator — platform-generated templates are common, which the clustering code
+already guards against. Retaining response bytes at acquisition is a
 change to the collection path, not something a hashing script can supply after
 the fact. Until that lands, an ads.txt template match should be reported as an
 observation with a stated provenance limitation.
@@ -63,8 +72,9 @@ PROVENANCE_LIMITATIONS = [
     "raw_sha256 and parsed records only.",
     "A template match therefore cannot be re-verified from this corpus. The "
     "hashes here establish that the DERIVED observations have not changed "
-    "since this manifest was committed; they cannot establish that the "
-    "original fetch was hashed or attributed correctly.",
+    "since this manifest was written; they cannot establish that the "
+    "original fetch was hashed or attributed correctly, nor WHEN the "
+    "observation was made — the manifest proves integrity, not age.",
     "The evidence exporter does not include ads_txt_json, so an export pack "
     "carries no ads.txt evidence at all.",
     "reference_prevalence.json declares all 8 SSPs in its source field, but "
@@ -95,7 +105,7 @@ def _walk(root: str) -> list[str]:
     return out
 
 
-def build(root: str) -> dict:
+def build(root: str, limitations: list | None = None) -> dict:
     files = []
     total = 0
     for full in _walk(root):
@@ -105,7 +115,9 @@ def build(root: str) -> dict:
             "path": os.path.relpath(full, root),
             "bytes": size,
             "sha256": _sha256(full),
-            "modified": datetime.fromtimestamp(
+            # Filesystem mtime: self-reported, trivially settable, and NOT
+            # the time of acquisition. Informational only.
+            "fs_mtime_informational": datetime.fromtimestamp(
                 os.path.getmtime(full), tz=timezone.utc
             ).strftime("%Y-%m-%d %H:%M:%S UTC"),
         })
@@ -116,12 +128,13 @@ def build(root: str) -> dict:
         "root": os.path.basename(os.path.abspath(root)),
         "file_count": len(files),
         "total_bytes": total,
-        "provenance_limitations": PROVENANCE_LIMITATIONS,
+        "provenance_limitations": (
+            PROVENANCE_LIMITATIONS if limitations is None else limitations),
         "files": files,
     }
 
 
-def verify(root: str, manifest_path: str) -> int:
+def verify(root: str, manifest_path: str, *, allow_added: bool = False) -> int:
     try:
         with open(manifest_path, encoding="utf-8") as fh:
             manifest = json.load(fh)
@@ -130,15 +143,17 @@ def verify(root: str, manifest_path: str) -> int:
         return 2
 
     recorded = {f["path"]: f for f in manifest.get("files", [])}
+    # _walk already refuses symlinks. Membership in THAT set is the test, not
+    # os.path.isfile — which follows a link, so a recorded file replaced by a
+    # symlink would otherwise be hashed through to wherever it now points.
     on_disk = {os.path.relpath(p, root) for p in _walk(root)}
 
     changed, missing, added = [], [], sorted(on_disk - set(recorded))
     for rel, entry in sorted(recorded.items()):
-        full = os.path.join(root, rel)
-        if not os.path.isfile(full):
+        if rel not in on_disk:
             missing.append(rel)
             continue
-        if _sha256(full) != entry["sha256"]:
+        if _sha256(os.path.join(root, rel)) != entry["sha256"]:
             changed.append(rel)
 
     print(f"manifest  {manifest.get('generated_at')}  "
@@ -150,7 +165,10 @@ def verify(root: str, manifest_path: str) -> int:
             print(f"{label:<9} {len(rows)}")
             for r in rows[:20]:
                 print(f"    {r}")
-    return 1 if (changed or missing) else 0
+    # An untracked file means the corpus is not the snapshot that was
+    # committed. Returning success while printing UNTRACKED tells a human one
+    # thing and automation another.
+    return 1 if (changed or missing or (added and not allow_added)) else 0
 
 
 def main() -> int:
@@ -159,6 +177,9 @@ def main() -> int:
                     help="corpus directory (default: discovery)")
     ap.add_argument("--verify", action="store_true",
                     help="re-hash and compare against the existing manifest")
+    ap.add_argument("--allow-added", action="store_true",
+                    help="with --verify, treat new files as acceptable rather "
+                         "than as a mismatch (they still print)")
     args = ap.parse_args()
 
     root = os.path.abspath(args.dir)
@@ -168,9 +189,18 @@ def main() -> int:
     manifest_path = os.path.join(root, MANIFEST_NAME)
 
     if args.verify:
-        return verify(root, manifest_path)
+        return verify(root, manifest_path, allow_added=args.allow_added)
 
-    manifest = build(root)
+    # PROVENANCE_LIMITATIONS are claims about the DISCOVERY corpus specifically.
+    # Generating a manifest for some other directory must not inherit them —
+    # that would stamp another corpus with a history it does not have.
+    is_discovery = os.path.basename(root) == "discovery"
+    manifest = build(root, None if is_discovery else [])
+    if not is_discovery:
+        print(f"note: {root} is not the discovery corpus, so no provenance "
+              f"limitations were recorded. Supply them yourself if it has any.")
+
+
     with open(manifest_path, "w", encoding="utf-8") as fh:
         json.dump(manifest, fh, ensure_ascii=False, indent=1)
     print(f"{manifest['file_count']} files, "

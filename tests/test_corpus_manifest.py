@@ -3,7 +3,9 @@
 `discovery/` holds sweep results that cannot be rebuilt and is gitignored,
 correctly: it is other people's data. But gitignored had come to mean
 unversioned, unhashed and backed up nowhere. The manifest goes in git and the
-data does not, so a commit date anchors the hashes.
+data does not. Note what that buys: INTEGRITY, not age — a commit date is
+self-asserted and local history is rewritable, so *when* has to come from
+outside the repo.
 
 These tests exist because a verifier that cannot fail is not a verifier — the
 same lesson the `reconcile` source scan taught on 2026-08-11, where a
@@ -105,14 +107,35 @@ def test_a_deleted_file_is_caught(corpus, capsys):
     assert "MISSING" in capsys.readouterr().out
 
 
-def test_an_added_file_is_reported_but_is_not_a_failure(corpus, capsys):
-    """New sweep output is normal; silently absorbing it is not. It is named
-    so the analyst knows to regenerate, and it does not fail the check."""
+def test_an_added_file_fails_verification_by_default(corpus, capsys):
+    """A new file means the corpus is not the snapshot that was recorded.
+    Printing UNTRACKED while returning success tells a human one thing and any
+    automation the opposite."""
     path = _write(corpus)
     (corpus / "data" / "round3.jsonl").write_text("{}\n", encoding="utf-8")
 
-    assert cm.verify(str(corpus), path) == 0
+    assert cm.verify(str(corpus), path) == 1
     assert "UNTRACKED" in capsys.readouterr().out
+
+    # New sweep output IS normal — it just has to be asked for explicitly.
+    assert cm.verify(str(corpus), path, allow_added=True) == 0
+
+
+def test_a_recorded_file_swapped_for_a_symlink_is_not_followed(corpus, tmp_path):
+    """_walk refuses symlinks, but verify used os.path.isfile and then opened
+    the path — both follow links. A recorded file replaced by a link would
+    have been hashed through to wherever it now points, so an edit could hide
+    behind the target."""
+    path = _write(corpus)
+    decoy = tmp_path / "decoy.md"
+    decoy.write_text("# record\n", encoding="utf-8")     # identical content
+
+    target = corpus / "FINDINGS.md"
+    target.unlink()
+    os.symlink(str(decoy), str(target))
+
+    assert cm.verify(str(corpus), path) == 1, \
+        "a symlink stood in for a recorded file and verification passed"
 
 
 def test_a_missing_manifest_is_an_error_not_a_pass(corpus, capsys):
@@ -134,23 +157,46 @@ REAL = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                     "discovery")
 
 
-@pytest.mark.skipif(not os.path.isdir(REAL), reason="no discovery corpus here")
+# The tracked manifest CREATES discovery/ on a fresh clone, so os.path.isdir is
+# true there while all 20 corpus files are absent — the check would fail for
+# everyone who has never run a sweep. Gate on the corpus data actually being
+# present, not on the directory the manifest brings with it.
+_HAS_CORPUS = os.path.isfile(os.path.join(REAL, "data",
+                                          "reference_adstxt.jsonl.gz"))
+
+
+@pytest.mark.skipif(not _HAS_CORPUS, reason="discovery corpus not on this machine")
 def test_the_committed_manifest_still_matches_the_corpus():
     """Runs against the analyst's actual corpus when it is present. A red here
-    means a file that cannot be rebuilt has changed since it was committed."""
+    means a file that cannot be rebuilt has changed since it was recorded."""
     path = os.path.join(REAL, cm.MANIFEST_NAME)
     if not os.path.isfile(path):
         pytest.skip("manifest not generated yet")
     assert cm.verify(REAL, path) == 0
 
 
-@pytest.mark.skipif(not os.path.isdir(REAL), reason="no discovery corpus here")
 def test_git_tracks_the_manifest_and_nothing_else_in_there():
-    """The whole design in one assertion: hashes in, data out."""
+    """The whole design in one assertion: hashes in, data out.
+
+    Asked of git directly rather than by parsing `git add -An` output, whose
+    wording is not a stable interface.
+    """
     repo = os.path.dirname(REAL)
-    out = subprocess.run(["git", "add", "-An", "discovery/"], cwd=repo,
-                         capture_output=True, text=True)
-    if out.returncode != 0:
+    if not os.path.isdir(os.path.join(repo, ".git")):
         pytest.skip("not a git checkout")
-    tracked = [ln.split("'")[1] for ln in out.stdout.splitlines() if "'" in ln]
-    assert tracked == [f"discovery/{cm.MANIFEST_NAME}"], tracked
+
+    listed = subprocess.run(["git", "ls-files", "discovery/"], cwd=repo,
+                            capture_output=True, text=True)
+    assert listed.returncode == 0
+    assert listed.stdout.split() == [f"discovery/{cm.MANIFEST_NAME}"]
+
+    # And the corpus itself must still be ignored. check-ignore exits 0 when
+    # the path IS ignored, 1 when it is not.
+    for rel in ("discovery/FINDINGS.md",
+                "discovery/data/reference_adstxt.jsonl.gz"):
+        r = subprocess.run(["git", "check-ignore", "-q", rel], cwd=repo)
+        assert r.returncode == 0, f"{rel} is no longer ignored"
+
+    r = subprocess.run(["git", "check-ignore", "-q",
+                        f"discovery/{cm.MANIFEST_NAME}"], cwd=repo)
+    assert r.returncode == 1, "the manifest is ignored and cannot be committed"
