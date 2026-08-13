@@ -175,11 +175,12 @@ def test_the_committed_manifest_still_matches_the_corpus():
     assert cm.verify(REAL, path) == 0
 
 
-def test_git_tracks_the_manifest_and_nothing_else_in_there():
-    """The whole design in one assertion: hashes in, data out.
-
-    Asked of git directly rather than by parsing `git add -An` output, whose
-    wording is not a stable interface.
+def test_nothing_from_the_corpus_is_tracked_at_all():
+    """The manifest was briefly tracked on the argument that hashes carry no
+    domains. The analyst's position is narrower and simpler: nothing connected
+    to an investigation goes in a public repository, and a manifest OF an
+    investigation corpus is connected to one. It is generated and verified
+    locally instead.
     """
     repo = os.path.dirname(REAL)
     if not os.path.isdir(os.path.join(repo, ".git")):
@@ -188,15 +189,10 @@ def test_git_tracks_the_manifest_and_nothing_else_in_there():
     listed = subprocess.run(["git", "ls-files", "discovery/"], cwd=repo,
                             capture_output=True, text=True)
     assert listed.returncode == 0
-    assert listed.stdout.split() == [f"discovery/{cm.MANIFEST_NAME}"]
+    assert listed.stdout.split() == [], listed.stdout
 
-    # And the corpus itself must still be ignored. check-ignore exits 0 when
-    # the path IS ignored, 1 when it is not.
     for rel in ("discovery/FINDINGS.md",
-                "discovery/data/reference_adstxt.jsonl.gz"):
+                "discovery/data/reference_adstxt.jsonl.gz",
+                f"discovery/{cm.MANIFEST_NAME}"):
         r = subprocess.run(["git", "check-ignore", "-q", rel], cwd=repo)
-        assert r.returncode == 0, f"{rel} is no longer ignored"
-
-    r = subprocess.run(["git", "check-ignore", "-q",
-                        f"discovery/{cm.MANIFEST_NAME}"], cwd=repo)
-    assert r.returncode == 1, "the manifest is ignored and cannot be committed"
+        assert r.returncode == 0, f"{rel} is not ignored"

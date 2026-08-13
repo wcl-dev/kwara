@@ -479,7 +479,7 @@ _EN: dict[str, str] = {
     "clusters.legend_table": _LEGEND_EN,
     "clusters.destinations": "Scanned Destinations",
     "clusters.wrappers": "Wrapper Domains",
-    "clusters.wrappers_caption": "Pairs of (original_domain → final_domain) where the redirect chain crossed domains. The 'wrapper' is what posters share; the 'final' is where the click actually lands. Picread → visitorlanding is the canonical example: many short URLs on crawler-landing.example that all resolve to visitor-landing.example after a 2-hop redirect.",
+    "clusters.wrappers_caption": "Pairs of (original_domain → final_domain) where the redirect chain crossed domains. The 'wrapper' is what posters share; the 'final' is where the click actually lands. crawlerlanding → visitorlanding is the canonical example: many short URLs on crawler-landing.example that all resolve to visitor-landing.example after a 2-hop redirect.",
     "clusters.no_wrappers": "No wrapper relationships found. Scan URLs in the Scan tab to populate.",
     "clusters.info_unresolved": "**{n} URL(s) excluded from destination analysis:** the scan stopped at the shortlink service itself ({names}) and did not reach the real destination. Re-scan those URLs or check them manually.",
     "clusters.no_data": "No data yet. Scan URLs in the Scan tab first.",

@@ -67,13 +67,10 @@ reports/
 # FINDINGS.md 是研究紀錄，data/ 的參照母體無法從 repo 或 DB 重建，
 # 兩者都只存在本機，勿刪。
 /discovery/
-# ...except the integrity manifest. The hashes belong in git precisely because
-# the data does not: a commit is a timestamp nobody can quietly move, so a
-# reviewer can establish that a corpus file is what it was on that date without
-# the repo ever carrying the third-party data. See corpus_manifest.py.
-!/discovery/
-/discovery/*
-!/discovery/CORPUS-MANIFEST.json
+# Nothing from discovery/ is committed, the manifest included. Its hashes carry
+# no domains, but a manifest OF an investigation corpus is still connected to
+# an investigation, and nothing connected to one belongs in a public
+# repository. corpus_manifest.py still generates and verifies it locally.
 
 
 # 案件專屬 / 一次性文件（內部，不入公開 repo）

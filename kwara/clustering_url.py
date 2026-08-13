@@ -116,7 +116,7 @@ def wrapper_relationships(conn: sqlite3.Connection, case_id: int) -> list:
 
     A "wrapper" here means: the URL the analyst received in a post landed
     on a *different* domain after the scan resolved its redirect chain.
-    Picread → visitorlanding is the canonical example: posters share
+    crawlerlanding → visitorlanding is the canonical example: posters share
     ``crawler-landing.example/redacted139/X?uid=…`` but every URL ends up on ``visitor-landing.example``
     after a 2-hop redirect, with the ``uid`` parameter renamed to
     ``utm_term``. Without surfacing this, an analyst has to manually
