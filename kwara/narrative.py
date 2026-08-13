@@ -72,6 +72,8 @@ def case_counts(conn: sqlite3.Connection, case_id: int) -> tuple[int, int]:
 
 def signal_summary(conn: sqlite3.Connection, case_id: int) -> dict:
     """The hard-signal counts that drive both the tiles and the narrative."""
+    from .clusters import _is_gtm
+    _tracking = shared_tracking_ids(conn, case_id)
     ads = shared_ad_accounts(conn, case_id)
     ads_operator = len([a for a in ads.get("by_account", [])
                         if a.get("tier") == "operator"])
@@ -87,7 +89,14 @@ def signal_summary(conn: sqlite3.Connection, case_id: int) -> dict:
     ads_template_unverified = len(templates) - ads_template
     return {
         "ads_template_unverified": ads_template_unverified,
-        "tracking":     len(shared_tracking_ids(conn, case_id)),
+        # A shared GTM container is correlated with common operation without
+        # establishing it, so it is not counted among the hard tracking
+        # signals and never described as "same operator". Reported separately
+        # so it is visible without inflating the grouping claim.
+        "tracking":     len([t for t in _tracking
+                             if not _is_gtm(t["platform"])]),
+        "gtm_containers": len([t for t in _tracking
+                               if _is_gtm(t["platform"])]),
         "certs":        len(shared_certificates(conn, case_id).get("by_cert", [])),
         "hdr_tmpl":     len(cross_domain_shared_template(conn, case_id)),
         "cloaking":     _count_cloaking_suspects(conn, case_id),

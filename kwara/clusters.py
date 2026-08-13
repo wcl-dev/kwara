@@ -41,6 +41,36 @@ from . import acquisition as _acq
 from .opsec import compute_opsec_profile
 from .sql import browser_capture_exists
 
+# A Google Tag Manager container is a tracking ID, but it is not the same KIND
+# of claim as a GA4 property or a Meta Page. GA4/AdSense/Meta identify an
+# ACCOUNT the operator holds; a GTM container identifies a tag deployment,
+# which an agency or a CMS vendor can legitimately run across unrelated
+# clients. So sharing one is correlated with common operation without
+# establishing it.
+#
+# The analyst's own published report (UNIFIED_CLUSTER_REPORT_2026-05-08 §3.2)
+# reached that conclusion first and declined to merge α and γ on
+# GTM-T5N9K2Q alone, listing both readings. Measured 2026-08-13 on that case:
+# once commodity adtech (Criteo, Appier, Taboola, OpenX) and one shared
+# commercial vendor (GliaCloud) are set aside, the container is the ONLY
+# non-generic signal the two groups share — α's private hub operatorhub.example is
+# called by nine domains, all α. The tool was the loose end, not the report.
+#
+# This is a judgement, not a measurement: there is no reference population for
+# tracking IDs, so "how rare is it for unrelated sites to share a container"
+# is currently unanswerable. Hence both readings travel with every observation.
+GTM_PLATFORM = "Google Tag Manager"
+
+GTM_READINGS = (
+    "單一操作者以同一容器管理兩條變現線",
+    "不同操作者共用代管或代理商管理的容器",
+)
+
+
+def _is_gtm(platform: str) -> bool:
+    return "tag manager" in (platform or "").lower()
+
+
 # ── Confidence tiers (neutral; from the report) ───────────────────────────
 TIER_CONFIRMED = "確證同群"      # bound by a shared hard identifier
 TIER_RELATED = "相關未證實"      # correlated but not proven same group
@@ -129,6 +159,12 @@ def _hard_signals(conn: sqlite3.Connection, case_id: int) -> list[dict]:
     out: list[dict] = []
 
     for c in shared_tracking_ids(conn, case_id):
+        # A shared container never binds a group — see GTM_PLATFORM above. It
+        # is emitted by _weak_links instead, so it stays visible without
+        # merging anything, and it cannot transitively join two groups that
+        # share nothing else.
+        if _is_gtm(c["platform"]):
+            continue
         out.append({
             "type": "tracking", "label": c["platform"], "value": c["tracking_id"],
             "domains": sorted(set(c["domains"])),
@@ -212,6 +248,38 @@ def _weak_links(conn, case_id, domain_to_group: dict[str, int]) -> list[dict]:
     """
     denom = _case_domain_count(conn, case_id) or 1
     out: list[dict] = []
+
+    # Shared GTM containers. Deliberately NOT subject to the breadth filter
+    # below: that rule drops a value carried by most of a case's domains as
+    # ubiquitous infrastructure, which is right for "server: cloudflare" and
+    # backwards here — a container on every domain in a case is the most
+    # interesting one, not the least. Breadth is reported, never applied.
+    for c in shared_tracking_ids(conn, case_id):
+        if not _is_gtm(c["platform"]):
+            continue
+        domains = sorted(set(c["domains"]))
+        if len(domains) < 2:
+            continue
+        members = [{"domain": d, "group_id": domain_to_group.get(d)}
+                   for d in domains]
+        out.append({
+            "type": "gtm_container", "tier": TIER_RELATED,
+            "platform": GTM_PLATFORM,
+            "container_id": c["tracking_id"],
+            "value": c["tracking_id"],
+            "domains": domains, "domain_count": len(domains),
+            "breadth_ratio": round(len(domains) / denom, 3),
+            # Which confirmed group each side sits in, if any. A GTM-only
+            # relationship between two ungrouped domains still belongs here —
+            # `spans_groups` is empty then, and the link is no less real.
+            "members": members,
+            "spans_groups": sorted({g for g in
+                                    (m["group_id"] for m in members)
+                                    if g is not None}),
+            "channel": _channel("tracking", GTM_PLATFORM),
+            "readings": list(GTM_READINGS),
+        })
+
     for t in cross_domain_shared_template(conn, case_id):
         value = (t.get("value") or "").strip()
         domains = sorted(set(t.get("domains") or []))
@@ -229,7 +297,9 @@ def _weak_links(conn, case_id, domain_to_group: dict[str, int]) -> list[dict]:
             "breadth_ratio": round(breadth, 3),
             "spans_groups": groups,
         })
-    out.sort(key=lambda x: x["breadth_ratio"])   # most distinctive first
+    # Most distinctive first; GTM observations lead, because a container is a
+    # named account somebody controls and a header value is not.
+    out.sort(key=lambda x: (x["type"] != "gtm_container", x["breadth_ratio"]))
     return out
 
 

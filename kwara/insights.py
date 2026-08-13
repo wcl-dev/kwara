@@ -90,7 +90,13 @@ def case_insights(conn: sqlite3.Connection, case_id: int) -> dict[str, Any]:
     param_keys = shared_param_keys(conn, case_id)
     asn_data = asn_clusters(conn, case_id)
     certs = shared_certificates(conn, case_id)
-    tracking_ids = shared_tracking_ids(conn, case_id)
+    # GTM containers are separated out: sharing one is correlated with common
+    # operation without establishing it, and the tracking-ID findings here are
+    # phrased as grouping evidence. See clusters.GTM_PLATFORM.
+    from .clusters import _is_gtm
+    _all_tracking = shared_tracking_ids(conn, case_id)
+    tracking_ids = [t for t in _all_tracking if not _is_gtm(t["platform"])]
+    gtm_containers = [t for t in _all_tracking if _is_gtm(t["platform"])]
     endpoints = shared_endpoints(conn, case_id)
 
     # ── Phase 4 OPSEC-forensics signals (cloaking / headers / opsec) ──

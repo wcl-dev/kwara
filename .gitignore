@@ -20,6 +20,12 @@ kwara/data/*.db
 kwara/data/*.db-*
 kwara/data/snapshots/
 kwara/data/exports/
+# 取得紀錄：真實網站回應的原始位元組（ads.txt 等）。這是別人的資料、也是
+# 案件證據，絕不進版本庫。acquisitions/ 是 2026-08-12 新增的目錄，原本沒被
+# 上面的規則涵蓋，導致 3 個內文檔一度被提交（已於推送前移除）。
+kwara/data/acquisitions/
+# 掃描 run 的觀察紀錄與其內文（discovery.reserve_run 的預設落點）
+kwara/data/discovery-runs/
 
 # 本機匯入／暫存資料（範例請放在版本庫根目錄，例如 test_data_*.csv）
 kwara/*.csv

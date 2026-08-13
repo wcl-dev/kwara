@@ -83,6 +83,12 @@ SIGNAL_ADS_TXT_OWNER   = "ads_txt_owner"     # OWNERDOMAIN — declared site own
 SIGNAL_ADS_TXT_MANAGER = "ads_txt_manager"   # MANAGERDOMAIN — declared monetiser
 SIGNAL_HAR_ENDPOINT    = "har_endpoint"      # third party a landing page called
 SIGNAL_HEADER_VALUE    = "header_value"      # a response header that identifies a deployment
+# A GTM container is a tracking ID, but recurrence wording for `tracking_id`
+# reads as "the same operator resurfaced", and a container does not establish
+# that — an agency or CMS vendor can run one across unrelated clients. Kept as
+# its own type so it stays indexed as a LEAD without inheriting that sentence.
+# See clusters.GTM_PLATFORM for the full reasoning and the measurement.
+SIGNAL_GTM_CONTAINER   = "gtm_container"     # GTM-XXXXXXX — correlated, not binding
 
 # Every type this module emits. Kept complete because `index lookup --type`
 # validates against it — a typo there used to return an empty result set that
@@ -90,6 +96,7 @@ SIGNAL_HEADER_VALUE    = "header_value"      # a response header that identifies
 # question about whether evidence exists.
 ALL_SIGNAL_TYPES = frozenset({
     SIGNAL_TRACKING_ID,
+    SIGNAL_GTM_CONTAINER,
     SIGNAL_CERT_SERIAL,
     SIGNAL_REGISTRAR,
     SIGNAL_ASN,
@@ -145,6 +152,35 @@ def _init_index(conn: sqlite3.Connection) -> None:
         ON signals(source_db, case_id);
     """)
     conn.commit()
+    _retype_legacy_gtm(conn)
+
+
+def _retype_legacy_gtm(conn: sqlite3.Connection) -> None:
+    """Move GTM containers out of `tracking_id` into `gtm_container`.
+
+    Rows written before 2026-08-13 filed containers under `tracking_id`, whose
+    recurrence wording reads as "the same operator resurfaced" — a sentence a
+    shared container does not support. Retyped in place rather than requiring
+    the analyst to rebuild, because an index that silently mixes the two makes
+    every later lookup ambiguous, and a rebuild they have to remember is a
+    rebuild that does not happen.
+
+    Identified by `platform`, which extraction has always set from the
+    fingerprint table, so this is a rename of the type and nothing else: the
+    value, provenance, scan_run, domain and timestamp are untouched. Only rows
+    whose platform actually says Tag Manager move, and running it twice
+    changes nothing.
+    """
+    try:
+        conn.execute(
+            "UPDATE signals SET signal_type = ? "
+            " WHERE signal_type = ? AND LOWER(platform) LIKE '%tag manager%'",
+            (SIGNAL_GTM_CONTAINER, SIGNAL_TRACKING_ID))
+        conn.commit()
+    except sqlite3.Error:
+        # An index from a future version, or one being written by another
+        # process. Reading it is still safe; the retype can wait.
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -244,8 +280,11 @@ def extract_case_signals(
         for platform, ids in ids_by_platform.items():
             if not isinstance(ids, list):
                 continue
+            stype = (SIGNAL_GTM_CONTAINER
+                     if "tag manager" in (platform or "").lower()
+                     else SIGNAL_TRACKING_ID)
             for ident in ids:
-                _emit(SIGNAL_TRACKING_ID, ident, platform=platform,
+                _emit(stype, ident, platform=platform,
                       scan_run_id=r["scan_run_id"], final_domain=domain,
                       observed_at=r["run_at"])
 
