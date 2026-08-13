@@ -791,7 +791,8 @@ def test_a_pack_survives_restore_and_reproduces_the_analysis(db, tmp_path,
                 for t in shared_ad_accounts(db, 1)["by_template"]}
     assert before_t[kept_sha] == acq.VERIFIED
     assert before_t[lost_sha] == acq.LEGACY_UNVERIFIABLE
-    before_groups = {tuple(sorted(g["domains"])) for g in case_clusters(db, 1)["groups"]}
+    before = case_clusters(db, 1)
+    before_groups = {tuple(sorted(g["domains"])) for g in before["groups"]}
     assert before_groups == {("g1.test", "g2.test")}
 
     monkeypatch.setattr(config, "EXPORTS_DIR", str(tmp_path / "exports"))
@@ -825,7 +826,27 @@ def test_a_pack_survives_restore_and_reproduces_the_analysis(db, tmp_path,
     assert after_t[lost_sha] == acq.LEGACY_UNVERIFIABLE, \
         "an unverifiable cluster came back verified"
 
+    # "Identical" means identical: the same groups bound by the same named
+    # signals, and the same unverified observations with the same verdicts and
+    # remedies. Comparing domain tuples alone would pass a restore that lost
+    # every signal and kept the shape.
+    def shape(r):
+        return (
+            sorted(
+                (tuple(sorted(g["domains"])),
+                 sorted((s["type"], s["value"], tuple(sorted(s["domains"])))
+                        for s in g["signals"]))
+                for g in r["groups"]),
+            sorted(
+                (u["claimed_sha256"], tuple(sorted(u["domains"])),
+                 u["verification"], u["why"], u["action"],
+                 tuple(sorted(u["verification_by_domain"].items())))
+                for u in r["unverified_templates"]),
+        )
+
     after = case_clusters(rdb, 1)
+    assert shape(after) == shape(before), \
+        "the restored analysis is not the analysis the pack was built from"
     assert {tuple(sorted(g["domains"])) for g in after["groups"]} == before_groups
     assert [u["claimed_sha256"] for u in after["unverified_templates"]] == [lost_sha]
 
