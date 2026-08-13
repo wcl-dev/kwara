@@ -38,8 +38,8 @@ records; there is no `raw` field. The evidence exporter does not export
 So kwara's strongest binding signal — two domains serving a byte-identical
 ads.txt — is, today, a claim a recipient must take on trust. They cannot
 re-hash either file. Where the site has since started refusing requests, they
-cannot re-fetch it either: blockedsite.example was observed on 2026-08-05 serving sha
-3bb8f682471e (278 accounts, identical to siblingsite.example) and returned HTTP 403 the
+cannot re-fetch it either: blocked-site.example was observed on 2026-08-05 serving sha
+3bb8f682471e (278 accounts, identical to sibling-site.example) and returned HTTP 403 the
 following day.
 
 This manifest makes the DERIVED artifacts tamper-evident. It does not turn

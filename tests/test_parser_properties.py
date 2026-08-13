@@ -102,7 +102,7 @@ def test_hosting_tenants_stay_distinct():
 
 @pytest.mark.parametrize("host,expected", [
     ("www.foo.com", "foo.com"),
-    ("statics.hubsite.example", "hubsite.example"),
+    ("static.cdn-host.com", "cdn-host.com"),
     ("FOO.COM", "foo.com"),
     ("foo.com.", "foo.com"),
     ("a.b.c.foo.com", "foo.com"),

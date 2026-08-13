@@ -403,7 +403,7 @@ def extract_case_signals(
                 continue
             ep = extract_domain_from_url(host)
             # Self-reference by APEX — the hostname test in shared_endpoints
-            # misses statics.hubsite.example when the landing is www.hubsite.example.
+            # misses statics.hub-site.example when the landing is www.hub-site.example.
             if not ep or ep == landing_apex:
                 continue
             _emit(SIGNAL_HAR_ENDPOINT, ep, platform=None,
@@ -543,9 +543,9 @@ def operator_cross_links(index_conn: sqlite3.Connection) -> list[dict]:
     that is itself a domain under investigation, the two are wired together,
     whatever either one's ads.txt says.
 
-    Found on the first run, from captures taken in May 2026: hubsite.example,
-    satellitesite.example and satellite2site.example (QSH) all load from statics.privatecdn.example and
-    s1.privatecdn2.example — the 01-family cluster's private CDN. That link had been in
+    Found on the first run, from captures taken in May 2026: hub-site.example,
+    satellite-site.example and satellite2-site.example (QSH) all load from statics.private-cdn.example and
+    s1.private-cdn2.example — the 01-family cluster's private CDN. That link had been in
     the HAR for three months and contradicted a conclusion drawn from ads.txt
     account overlap, which was correct about the account layer and wrong to be
     read as "no link at all".

@@ -1,7 +1,7 @@
 """Phase 4.2B — header analysis over redirect_hops.response_headers_json.
 
 QSH 2026-04-28 patterns are the positive controls:
-  - crawlerlanding.example leaks `x-server-hosted: Malaysia Cloud Pte Ltd`
+  - crawler-landing.example leaks `x-server-hosted: Malaysia Cloud Pte Ltd`
     consistently across hops (per-domain constant)
   - all three operator domains share fake `x-powered-by: Apache/2.5.1
     ... OpenSSL/1.1.2e PHP/8` (cross-domain template + fake versions)
@@ -83,21 +83,21 @@ def _seed_hop(conn, case_id: int, url: str, headers: list[list[str]]) -> int:
 # ---------------------------------------------------------------------------
 
 def test_per_domain_constants_returns_stable_value_across_hops():
-    """crawlerlanding.example seen 3x with the same x-server-hosted = constant."""
+    """crawler-landing.example seen 3x with the same x-server-hosted = constant."""
     conn = _fresh_db()
     case_id = _seed_case(conn)
     for _ in range(3):
-        _seed_hop(conn, case_id, "http://crawlerlanding.example/redacted139/x", [
+        _seed_hop(conn, case_id, "http://crawler-landing.example/redacted139/x", [
             ["Server", "nginx"],
             ["x-server-hosted", "Malaysia Cloud Pte Ltd"],
             ["Date", "Tue, 30 Mar 2026 12:00:00 GMT"],  # volatile, must skip
         ])
     out = per_domain_constants(conn, case_id)
-    assert "crawlerlanding.example" in out
-    assert out["crawlerlanding.example"]["server"] == "nginx"
-    assert out["crawlerlanding.example"]["x-server-hosted"] == "Malaysia Cloud Pte Ltd"
+    assert "crawler-landing.example" in out
+    assert out["crawler-landing.example"]["server"] == "nginx"
+    assert out["crawler-landing.example"]["x-server-hosted"] == "Malaysia Cloud Pte Ltd"
     # Volatile headers (Date) excluded
-    assert "date" not in out["crawlerlanding.example"]
+    assert "date" not in out["crawler-landing.example"]
 
 
 def test_per_domain_constants_drops_headers_with_changing_values():
@@ -130,7 +130,7 @@ def test_cross_domain_shared_template_picks_up_shared_x_powered_by():
     conn = _fresh_db()
     case_id = _seed_case(conn)
     fake = "Apache/2.5.1 (Win64) OpenSSL/1.1.2e PHP/8"
-    for d in ("hubsite.example", "satellitesite.example", "visitorlanding.example"):
+    for d in ("hub-site.example", "satellite-site.example", "visitor-landing.example"):
         _seed_hop(conn, case_id, f"http://{d}/redacted139", [
             ["Server", "Apache"],
             ["x-powered-by", fake],
@@ -138,7 +138,7 @@ def test_cross_domain_shared_template_picks_up_shared_x_powered_by():
     out = cross_domain_shared_template(conn, case_id, min_domains=2)
     matches = [r for r in out if r["header"] == "x-powered-by" and r["value"] == fake]
     assert len(matches) == 1
-    assert set(matches[0]["domains"]) == {"hubsite.example", "satellitesite.example", "visitorlanding.example"}
+    assert set(matches[0]["domains"]) == {"hub-site.example", "satellite-site.example", "visitor-landing.example"}
 
 
 def test_cross_domain_shared_template_below_min_domains_not_returned():
@@ -158,7 +158,7 @@ def test_detect_fake_apache_25_and_openssl_112():
     confirmed-impossible versions."""
     conn = _fresh_db()
     case_id = _seed_case(conn)
-    _seed_hop(conn, case_id, "http://crawlerlanding.example/", [
+    _seed_hop(conn, case_id, "http://crawler-landing.example/", [
         ["Server", "Apache/2.5.1 (Win64)"],
         ["x-powered-by", "OpenSSL/1.1.2e PHP/8"],
     ])
@@ -175,7 +175,7 @@ def test_detect_fake_apache_in_x_powered_by():
     previously tied to Server-only and missed it entirely."""
     conn = _fresh_db()
     case_id = _seed_case(conn)
-    _seed_hop(conn, case_id, "http://crawlerlanding.example/", [
+    _seed_hop(conn, case_id, "http://crawler-landing.example/", [
         ["Server", "cloudflare"],
         ["x-powered-by", "Apache/2.5.1 (Win64) OpenSSL/1.1.2e PHP/8"],
     ])
@@ -209,13 +209,13 @@ def test_detect_fake_versions_real_versions_not_flagged():
 def test_cookie_origin_leak_when_domain_attr_differs():
     conn = _fresh_db()
     case_id = _seed_case(conn)
-    _seed_hop(conn, case_id, "http://crawlerlanding.example/redacted139/x", [
+    _seed_hop(conn, case_id, "http://crawler-landing.example/redacted139/x", [
         ["Set-Cookie",
          "sid=abc; Domain=.realorigin.example; Path=/; HttpOnly; SameSite=Lax"],
     ])
     out = cookie_origin_signals(conn, case_id)
     assert any(
-        r["response_domain"] == "crawlerlanding.example" and r["cookie_domain"] == "realorigin.example"
+        r["response_domain"] == "crawler-landing.example" and r["cookie_domain"] == "realorigin.example"
         for r in out["origin_leaks"]
     )
 
@@ -236,7 +236,7 @@ def test_cookie_shared_template_across_domains():
     """Same cookie attribute combination on >=2 domains = same-operator signal."""
     conn = _fresh_db()
     case_id = _seed_case(conn)
-    for d in ("hubsite.example", "satellitesite.example"):
+    for d in ("hub-site.example", "satellite-site.example"):
         _seed_hop(conn, case_id, f"http://{d}/", [
             ["Set-Cookie", "sid=x; Path=/; HttpOnly; SameSite=Lax"],
         ])
@@ -245,7 +245,7 @@ def test_cookie_shared_template_across_domains():
                if t["path"] == "/" and t["httponly"] is True
                and t["samesite"] == "lax"]
     assert len(sharing) == 1
-    assert set(sharing[0]["domains"]) == {"hubsite.example", "satellitesite.example"}
+    assert set(sharing[0]["domains"]) == {"hub-site.example", "satellite-site.example"}
 
 
 def test_cookie_signals_handle_missing_response_headers_json():

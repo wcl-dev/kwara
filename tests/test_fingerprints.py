@@ -359,11 +359,11 @@ def test_adsense_extracted_from_data_ad_client_attribute():
     """The most common AdSense placement — an <ins> ad slot."""
     html = (
         '<ins class="adsbygoogle" style="display:block" '
-        'data-ad-client="REDACTEDID160" '
+        'data-ad-client="ca-pub-1000000000000005" '
         'data-ad-slot="1234567890"></ins>'
     )
     out = extract_tracking_ids(html)
-    assert out == {"Google AdSense": ["REDACTEDID160"]}
+    assert out == {"Google AdSense": ["ca-pub-1000000000000005"]}
 
 
 def test_adsense_extracted_from_js_config_object():
@@ -393,11 +393,11 @@ def test_adsense_extracted_from_loader_url_client_param():
 def test_adsense_dedupes_same_id_across_contexts_within_one_page():
     html = (
         '<script src="https://pagead2.googlesyndication.com/pagead/js/'
-        'adsbygoogle.js?client=REDACTEDID160"></script>'
-        '<ins class="adsbygoogle" data-ad-client="REDACTEDID160"></ins>'
+        'adsbygoogle.js?client=ca-pub-1000000000000005"></script>'
+        '<ins class="adsbygoogle" data-ad-client="ca-pub-1000000000000005"></ins>'
     )
     out = extract_tracking_ids(html)
-    assert out == {"Google AdSense": ["REDACTEDID160"]}
+    assert out == {"Google AdSense": ["ca-pub-1000000000000005"]}
 
 
 def test_adsense_does_not_match_bare_ca_pub_string():
@@ -436,7 +436,7 @@ def test_fb_pages_comma_separated_multiple_ids():
     )
     out = extract_tracking_ids(html)
     assert out == {"Meta Facebook Page": [
-        "1234567890123456", "1000000000000001", "9988776655443322",
+        "1000000000000001", "1234567890123456", "9988776655443322",
     ]}
 
 

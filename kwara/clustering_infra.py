@@ -763,7 +763,7 @@ def _account_apex_footprint(conn: sqlite3.Connection) -> dict[tuple[str, str], s
     Deliberately case-independent: this is the denominator-free rarity measure
     that `tier` leans on, and it must not change when the analyst loads more
     URLs into the case under review. Apexes, not hostnames, so that
-    redacted139.operatorhub.example + operatorhub.example counts once.
+    redacted139.operator-hub.example + operator-hub.example counts once.
     """
     footprint: dict[tuple[str, str], set] = defaultdict(set)
     rows = conn.execute(

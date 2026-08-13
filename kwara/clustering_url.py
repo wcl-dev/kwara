@@ -117,7 +117,7 @@ def wrapper_relationships(conn: sqlite3.Connection, case_id: int) -> list:
     A "wrapper" here means: the URL the analyst received in a post landed
     on a *different* domain after the scan resolved its redirect chain.
     Picread → visitorlanding is the canonical example: posters share
-    ``crawlerlanding.example/redacted139/X?uid=…`` but every URL ends up on ``visitorlanding.example``
+    ``crawler-landing.example/redacted139/X?uid=…`` but every URL ends up on ``visitor-landing.example``
     after a 2-hop redirect, with the ``uid`` parameter renamed to
     ``utm_term``. Without surfacing this, an analyst has to manually
     correlate ``url_artifacts.original_url`` against
@@ -127,8 +127,8 @@ def wrapper_relationships(conn: sqlite3.Connection, case_id: int) -> list:
 
     Returns list sorted by url_count desc, then post_count desc:
       [{
-        "original_domain": "crawlerlanding.example",
-        "final_domain":    "visitorlanding.example",
+        "original_domain": "crawler-landing.example",
+        "final_domain":    "visitor-landing.example",
         "url_count":       21,        # distinct url_artifacts
         "post_count":      21,        # distinct messages
         "min_hops":        2,

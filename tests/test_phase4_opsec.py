@@ -1,9 +1,9 @@
 """Phase 4.3 — OPSEC profile (lightweight vs Playwright success-rate diff).
 
 QSH 2026-04-28 patterns:
-  visitorlanding.example    100% lw / 100% pw  → low
-  hubsite.example    16% lw / 100% pw  → strong (UA gate)
-  satellitesite.example   0% lw / 100% pw  → strong (UA gate, samples sparse)
+  visitor-landing.example    100% lw / 100% pw  → low
+  hub-site.example    16% lw / 100% pw  → strong (UA gate)
+  satellite-site.example   0% lw / 100% pw  → strong (UA gate, samples sparse)
 """
 from __future__ import annotations
 
@@ -85,10 +85,10 @@ def test_strong_ua_gate_when_playwright_succeeds_lightweight_fails():
     case_id = _seed_case(conn)
     # 10 Playwright captures all OK, 10 lightweight all error
     for _ in range(10):
-        _add_snapshot(conn, case_id, "hubsite.example", "playwright", "ok")
-        _add_snapshot(conn, case_id, "hubsite.example", "http_only", "error")
+        _add_snapshot(conn, case_id, "hub-site.example", "playwright", "ok")
+        _add_snapshot(conn, case_id, "hub-site.example", "http_only", "error")
     out = compute_opsec_profile(conn, case_id)
-    row = _row_for(out, "hubsite.example")
+    row = _row_for(out, "hub-site.example")
     assert row["pw_ok"] == 10 and row["pw_total"] == 10
     assert row["lw_ok"] == 0 and row["lw_total"] == 10
     assert row["level"] == "strong"
@@ -96,14 +96,14 @@ def test_strong_ua_gate_when_playwright_succeeds_lightweight_fails():
 
 
 def test_low_when_both_paths_succeed():
-    """visitorlanding.example pattern: site doesn't gate UA at all."""
+    """visitor-landing.example pattern: site doesn't gate UA at all."""
     conn = _fresh_db()
     case_id = _seed_case(conn)
     for _ in range(5):
-        _add_snapshot(conn, case_id, "visitorlanding.example", "playwright", "ok")
-        _add_snapshot(conn, case_id, "visitorlanding.example", "http_only", "ok")
+        _add_snapshot(conn, case_id, "visitor-landing.example", "playwright", "ok")
+        _add_snapshot(conn, case_id, "visitor-landing.example", "http_only", "ok")
     out = compute_opsec_profile(conn, case_id)
-    row = _row_for(out, "visitorlanding.example")
+    row = _row_for(out, "visitor-landing.example")
     assert row["level"] == "low"
     assert row["diff_above_50"] is False
 

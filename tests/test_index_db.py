@@ -103,8 +103,8 @@ def _seed_scanned_url(conn, case_id, url, *, final_url=None, final_domain=None,
 def test_extract_pulls_all_signal_types():
     conn, path = _fresh_case_db()
     cid = _seed_case(conn, "case-A")
-    _seed_scanned_url(conn, cid, "https://hubsite.example/a",
-                      final_domain="hubsite.example",
+    _seed_scanned_url(conn, cid, "https://hub-site.example/a",
+                      final_domain="hub-site.example",
                       tracking_ids={"Google Analytics 4": ["G-T5N9K2Q7W3"]},
                       cert_serial="0A1B2C", cert_issuer="Google Trust Services",
                       registrar="NameSilo", asn="13335", as_org="Cloudflare")
@@ -140,7 +140,7 @@ def test_extract_skips_failed_snapshot_tracking_ids():
 def test_index_and_lookup_round_trip():
     conn, path = _fresh_case_db()
     cid = _seed_case(conn, "case-A")
-    _seed_scanned_url(conn, cid, "https://hubsite.example/a",
+    _seed_scanned_url(conn, cid, "https://hub-site.example/a",
                       tracking_ids={"Google Analytics 4": ["G-T5N9K2Q7W3"]})
     idx = _fresh_index()
     n = index_case(idx, conn, path, cid, "case-A")
@@ -171,9 +171,9 @@ def test_recurring_signal_across_two_cases_same_db():
     conn, path = _fresh_case_db()
     a = _seed_case(conn, "case-A")
     b = _seed_case(conn, "case-B")
-    _seed_scanned_url(conn, a, "https://hubsite.example/x",
+    _seed_scanned_url(conn, a, "https://hub-site.example/x",
                       tracking_ids={"Google Analytics 4": ["G-SHARED"]})
-    _seed_scanned_url(conn, b, "https://satellitesite.example/y",
+    _seed_scanned_url(conn, b, "https://satellite-site.example/y",
                       tracking_ids={"Google Analytics 4": ["G-SHARED"]})
     idx = _fresh_index()
     index_case(idx, conn, path, a, "case-A")
@@ -295,7 +295,7 @@ def test_har_endpoints_are_indexed_as_apexes_not_hostnames():
 
 def test_har_endpoint_skips_the_landing_domain_itself():
     """Self-reference by APEX: the hostname test elsewhere misses
-    statics.hubsite.example when the landing is www.hubsite.example."""
+    statics.hub-site.example when the landing is www.hub-site.example."""
     conn, _ = _fresh_case_db()
     cid = _seed_case(conn)
     _seed_snapshot_with_hosts(conn, cid, "www.farm.com",
@@ -319,7 +319,7 @@ def test_har_endpoint_drops_whitelisted_noise():
 
 def test_operator_cross_links_finds_an_endpoint_that_is_also_a_landing():
     """The one endpoint read that needs no threshold. Found on the real index:
-    three QSH landings load from statics.privatecdn.example and s1.privatecdn2.example, the
+    three QSH landings load from statics.private-cdn.example and s1.private-cdn2.example, the
     01-family cluster's private CDN — a link that had sat in the HAR for three
     months and contradicted a conclusion drawn from ads.txt alone."""
     from kwara.index_db import operator_cross_links

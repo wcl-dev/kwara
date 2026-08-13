@@ -55,13 +55,13 @@ def usable_snapshots(non_null_col: str) -> str:
 
     2026-08-11, measured on the live database: for 252 of 469 scan_runs the
     visitor-facing capture and the crawler-facing one land on DIFFERENT
-    DOMAINS — the same URL sends a browser to visitorlanding.example and a crawler to
-    crawlerlanding.example. Both domains are assets of the same operation, and the Meta
+    DOMAINS — the same URL sends a browser to visitor-landing.example and a crawler to
+    crawler-landing.example. Both domains are assets of the same operation, and the Meta
     Page ID binding them appears under both personas. Picking either persona
     alone silently discards half the operation: preferring the crawler (which
     `ORDER BY id DESC` did, since the alt capture is always written last)
     missed 756 tracking-ID observations, and preferring the visitor dropped
-    crawlerlanding.example/.org out of the case entirely. Cloaking means the personas
+    both crawler-facing landings out of the case entirely. Cloaking means the personas
     differ *by design*, so attribution has to read all of them.
 
     Scope is one scan_run, which `LATEST_DONE_SCAN_RUN` has already pinned to

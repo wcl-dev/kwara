@@ -16,7 +16,7 @@ WHAT ACTUALLY DISCRIMINATES (measured 2026-08-05, 31 apexes in the case DB)
   Exact template match works, and nothing else does yet:
 
     - byte-identical ads.txt clustered 14 of 31 apexes into 5 sibling groups
-      (visitorlanding/crawlerlanding.example/crawlerlanding2.example; family1/family2/family3; triplet1{,2,3};
+      (visitorlanding/crawler-landing.example/crawler-landing2.example; family1/family2/family3; triplet1{,2,3};
       farm2/farm5/farm6; farm3/farm4). Same bytes = same
       deployer, which is the one ads.txt signal clusters.py trusts to bind an
       operator group.
@@ -178,8 +178,21 @@ def cluster_by_template(observations: Iterable[dict[str, Any]]) -> list[dict]:
         if not sha or not domain or o.get("status") != "ok":
             continue
         by_sha[sha].add(domain)
-        recs = o.get("records")
-        n = len(recs) if recs is not None else (o.get("record_count") or 0)
+        # DIRECT ACCOUNTS, not total records. The platform guard below is
+        # documented as counting accounts, and `screen_domain` banks
+        # `accounts` (DIRECT only) alongside `record_count` (every line,
+        # RESELLER included). Reading record_count made the 300 threshold fire
+        # on files with far fewer accounts: measured on the 5,232-observation
+        # sweep, `--portfolio-only` returned 28 clusters / 73 domains where the
+        # documented rule gives 54 / 188. It silently discarded 115 domains.
+        accs = o.get("accounts")
+        if accs is not None:
+            n = len(accs)
+        else:
+            recs = o.get("records")
+            n = (len([r for r in recs
+                      if (r.get("relationship") or "").upper() == "DIRECT"])
+                 if recs is not None else (o.get("record_count") or 0))
         accounts[sha] = max(accounts.get(sha, 0), n)
 
     out: list[dict] = []
@@ -273,7 +286,7 @@ def fetch_for_screening(domain: str, *,
                            "raw_sha256": (None if truncated
                                           else hashlib.sha256(body_bytes).hexdigest()),
                            # Carried out so the caller can retain it. This is
-                           # the path the blockedsite.example observation came down:
+                           # the path the blocked-site.example observation came down:
                            # the bytes were read, hashed, parsed and dropped,
                            # and the site began refusing requests the next day.
                            "_body": body_bytes,

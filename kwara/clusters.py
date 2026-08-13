@@ -53,7 +53,7 @@ from .sql import browser_capture_exists
 # GTM-T5N9K2Q alone, listing both readings. Measured 2026-08-13 on that case:
 # once commodity adtech (Criteo, Appier, Taboola, OpenX) and one shared
 # commercial vendor (GliaCloud) are set aside, the container is the ONLY
-# non-generic signal the two groups share — α's private hub operatorhub.example is
+# non-generic signal the two groups share — α's private hub operator-hub.example is
 # called by nine domains, all α. The tool was the loose end, not the report.
 #
 # This is a judgement, not a measurement: there is no reference population for

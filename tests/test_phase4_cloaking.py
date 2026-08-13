@@ -1,6 +1,6 @@
 """Phase 4.1 — cloaking detection.
 
-crawlerlanding.example case from QSH 2026-04-28: ?uid=638 → 302 to visitorlanding.example;
+crawler-landing.example case from QSH 2026-04-28: ?uid=638 → 302 to visitor-landing.example;
 no uid → 200 with 25KB real redacted139. Tool now compares the two and
 flags the gating logic.
 """
@@ -80,9 +80,9 @@ def _resp(body: bytes, status_code: int = 200, final_url: str | None = None):
 # ---------------------------------------------------------------------------
 
 def test_strip_removes_known_tracking_params():
-    url = "http://crawlerlanding.example/redacted139/277290?uid=638&page=1"
+    url = "http://crawler-landing.example/redacted139/277290?uid=638&page=1"
     stripped, keys = _strip_tracking_params(url)
-    assert stripped == "http://crawlerlanding.example/redacted139/277290?page=1"
+    assert stripped == "http://crawler-landing.example/redacted139/277290?page=1"
     assert keys == ["uid"]
 
 
@@ -115,19 +115,19 @@ def test_detect_crawlerlanding_style_redirect_cloaking(mock_get):
     """The QSH 2026-04-28 case: ?uid → 302 to visitorlanding, no uid → 200 redacted139."""
     def fake(url, **_):
         if "uid=" in url:
-            return _resp(b"", status_code=302, final_url="https://visitorlanding.example/redacted139/x")
+            return _resp(b"", status_code=302, final_url="https://visitor-landing.example/redacted139/x")
         return _resp(b"<html>Real redacted139 content " + b"x" * 20000 + b"</html>",
                      status_code=200, final_url=url)
     mock_get.side_effect = fake
 
-    out = detect_cloaking("http://crawlerlanding.example/redacted139/277290?uid=638")
+    out = detect_cloaking("http://crawler-landing.example/redacted139/277290?uid=638")
     assert out["verdict"] == "cloaking_suspect"
     assert "status_code" in out["diffs"]
     assert "final_domain" in out["diffs"]
     assert out["with_params"]["status_code"] == 302
-    assert out["with_params"]["final_domain"] == "visitorlanding.example"
+    assert out["with_params"]["final_domain"] == "visitor-landing.example"
     assert out["without_params"]["status_code"] == 200
-    assert out["without_params"]["final_domain"] == "crawlerlanding.example"
+    assert out["without_params"]["final_domain"] == "crawler-landing.example"
 
 
 @patch("kwara.cloaking.requests.get")
@@ -263,25 +263,25 @@ def test_cloaking_suspect_creates_alt_snapshot_with_extracted_pixels(mock_get):
         if "uid=" in url:
             # with-uid: 302 to visitorlanding (mock final body, different domain)
             return _resp(b"<html>visitorlanding landing " + b"x" * 5000 + b"</html>",
-                         status_code=200, final_url="https://visitorlanding.example/redacted139/x")
+                         status_code=200, final_url="https://visitor-landing.example/redacted139/x")
         # without-uid: crawlerlanding serves a real redacted139 that happens to load
         # a Meta Pixel — exactly the operator-attribution evidence the
         # alt-snapshot path is meant to surface.
         return _resp(
             b"<html><script>fbq('init', '1234567890123456');</script>"
             b"<p>real redacted139 body" + b"x" * 12000 + b"</p></html>",
-            status_code=200, final_url="https://crawlerlanding.example/redacted139/x",
+            status_code=200, final_url="https://crawler-landing.example/redacted139/x",
         )
     mock_get.side_effect = fake
 
     conn = _fresh_db()
-    sr_id = _seed_scan_run(conn, "http://crawlerlanding.example/redacted139/x?uid=638")
+    sr_id = _seed_scan_run(conn, "http://crawler-landing.example/redacted139/x?uid=638")
 
     result = detect_and_store_cloaking(conn, sr_id)
     assert result["verdict"] == "cloaking_suspect"
 
     # Alt snapshot row exists, anchored to the same scan_run, carrying
-    # crawlerlanding.example (the without-params final domain).
+    # crawler-landing.example (the without-params final domain).
     snap = conn.execute(
         """SELECT final_url, final_domain, html_path, capture_method,
                   capture_status, tracking_ids_json
@@ -290,7 +290,7 @@ def test_cloaking_suspect_creates_alt_snapshot_with_extracted_pixels(mock_get):
     ).fetchone()
     assert snap is not None
     assert snap["capture_status"] == "ok"
-    assert snap["final_domain"] == "crawlerlanding.example"
+    assert snap["final_domain"] == "crawler-landing.example"
     assert snap["html_path"] and os.path.isfile(snap["html_path"])
     # Fingerprint extraction picked up the Meta Pixel from the crawlerlanding body
     ids = json.loads(snap["tracking_ids_json"])
@@ -322,12 +322,12 @@ def test_alt_snapshot_is_idempotent_across_repeated_runs(mock_get):
     def fake(url, **_):
         if "uid=" in url:
             return _resp(b"<html>large" + b"x" * 5000 + b"</html>",
-                         status_code=200, final_url="https://visitorlanding.example/")
+                         status_code=200, final_url="https://visitor-landing.example/")
         return _resp(b"<html>small</html>", status_code=200,
-                     final_url="https://crawlerlanding.example/")
+                     final_url="https://crawler-landing.example/")
     mock_get.side_effect = fake
     conn = _fresh_db()
-    sr_id = _seed_scan_run(conn, "http://crawlerlanding.example/?uid=1")
+    sr_id = _seed_scan_run(conn, "http://crawler-landing.example/?uid=1")
 
     detect_and_store_cloaking(conn, sr_id)
     detect_and_store_cloaking(conn, sr_id)  # already-populated → skip
@@ -346,15 +346,15 @@ def test_alt_snapshot_force_updates_existing_row_no_duplicate(mock_get):
     def fake(url, **_):
         if "uid=" in url:
             return _resp(b"<html>large" + b"x" * 5000 + b"</html>",
-                         status_code=200, final_url="https://visitorlanding.example/")
+                         status_code=200, final_url="https://visitor-landing.example/")
         return _resp(
             b"<script>fbq('init','9999999999999999');</script>"
             b"<p>" + b"x" * 12000 + b"</p>",
-            status_code=200, final_url="https://crawlerlanding.example/",
+            status_code=200, final_url="https://crawler-landing.example/",
         )
     mock_get.side_effect = fake
     conn = _fresh_db()
-    sr_id = _seed_scan_run(conn, "http://crawlerlanding.example/?uid=1")
+    sr_id = _seed_scan_run(conn, "http://crawler-landing.example/?uid=1")
 
     detect_and_store_cloaking(conn, sr_id)
     first_id = conn.execute(

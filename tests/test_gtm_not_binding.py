@@ -134,7 +134,7 @@ def test_a_container_is_corroboration_when_something_hard_already_binds(db):
 
 @pytest.mark.parametrize("platform,value", [
     ("Google Analytics 4", "G-B2C3D4E5F6"),
-    ("Google AdSense", "REDACTEDID162"),
+    ("Google AdSense", "ca-pub-1000000000000001"),
     ("Meta Facebook Page", "1000000000000001"),
     ("Google Analytics (UA)", "UA-10000001-1"),
 ])
@@ -248,14 +248,14 @@ def test_the_alpha_gamma_case_stays_two_groups(db):
     accounts, γ by its Meta Page; the only thing they share is GTM-T5N9K2Q.
     Before this change the tool merged them into one 13-domain group and
     claimed more than the published report was willing to."""
-    alpha = ["redacted139.farm1.example", "operatorhub.example", "farm4.example",
+    alpha = ["redacted139.farm1.example", "operator-hub.example", "farm4.example",
              "farm5.example", "farm6.example", "farm7.example",
              "farm8.example", "www.farm2.example", "www.farm3.example",
              "www.farm9.example"]
-    gamma = ["visitorlanding.example", "crawlerlanding.example", "crawlerlanding2.example"]
+    gamma = ["visitor-landing.example", "crawler-landing.example", "crawler-landing2.example"]
 
     for d in alpha:
-        _site(db, d, {"Google AdSense": ["REDACTEDID162"],
+        _site(db, d, {"Google AdSense": ["ca-pub-1000000000000001"],
                       "Google Analytics (UA)": ["UA-10000001-1"],
                       "Google Tag Manager": ["GTM-T5N9K2Q"]})
     for d in gamma:

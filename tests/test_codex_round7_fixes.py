@@ -29,7 +29,7 @@ def test_hosting_tenants_are_not_collapsed_into_one_asset():
         extract_domain_from_url("b.blogspot.com")
     # ordinary sites are unaffected
     assert extract_domain_from_url("www.foo.com") == "foo.com"
-    assert extract_domain_from_url("statics.hubsite.example") == "hubsite.example"
+    assert extract_domain_from_url("static.cdn-host.com") == "cdn-host.com"
 
 
 def test_unicode_and_punycode_forms_are_one_host():
@@ -45,7 +45,7 @@ def test_truncated_body_cannot_claim_byte_identity():
     """Template matching treats an equal sha256 as byte-identity — the
     strongest claim this tool makes. A hash over a 256 KB prefix is not the
     file's hash, so a truncated read reports no hash rather than a wrong one."""
-    known = {"SHA_FARM": ["visitorlanding.example"]}
+    known = {"SHA_FARM": ["visitor-landing.example"]}
     truncated = {"status": "ok", "raw_sha256": None, "truncated": True,
                  "status_code": 200, "records": [{"a": 1}]}
     assert screen_ads_txt(truncated, known)["verdict"] != VERDICT_TEMPLATE_MATCH

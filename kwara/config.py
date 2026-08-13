@@ -248,7 +248,7 @@ ADS_TXT_TEMPLATE_PAIR_RATIO: float = float(
 # carrying 19 apexes DB-wide, including unrelated mainstream farms. Tier is
 # therefore decided on the account's footprint across EVERY case in the DB,
 # counted in registrable domains so that subdomains of one apex
-# (redacted139.operatorhub.example + operatorhub.example) cannot inflate it.
+# (redacted139.operator-hub.example + operator-hub.example) cannot inflate it.
 #
 # NOTE these are absolute counts, not ratios, and deliberately so: a ratio
 # needs a reference population of *normal* sites, and an investigation corpus

@@ -221,8 +221,8 @@ def test_db_wide_footprint_overrides_narrow_case_rarity():
 
 
 def test_footprint_counts_apexes_not_hostnames():
-    """Subdomains of one apex must not inflate the footprint: redacted139.operatorhub.example
-    + operatorhub.example is one operator asset, not two."""
+    """Subdomains of one apex must not inflate the footprint: redacted139.operator-hub.example
+    + operator-hub.example is one operator asset, not two."""
     conn = _make_db()
     cid = _make_case(conn)
     acct = ("clickforce.com.tw", "pub-SUBS")

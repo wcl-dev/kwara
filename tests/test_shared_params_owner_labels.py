@@ -67,8 +67,8 @@ def _row_for(results, key):
 def test_generic_table_hit_marked_generic_kind():
     conn = _make_db()
     case_id = _make_case(conn)
-    _add_post(conn, case_id, "https://crawlerlanding.example/redacted139/1?uid=638")
-    _add_post(conn, case_id, "https://crawlerlanding.example/redacted139/2?uid=638")
+    _add_post(conn, case_id, "https://crawler-landing.example/redacted139/1?uid=638")
+    _add_post(conn, case_id, "https://crawler-landing.example/redacted139/2?uid=638")
     r = _row_for(shared_params(conn, case_id), "uid")
     assert r is not None
     assert r["owner_kind"] == OWNER_KIND_GENERIC

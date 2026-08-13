@@ -2,7 +2,7 @@
 
 Compares the response a URL gives 'with tracking params' vs 'without
 tracking params'. Operators that gate behaviour on a tracking parameter
-(crawlerlanding.example's ?uid case from QSH-2026-04-28) leak their conditional
+(crawler-landing.example's ?uid case from QSH-2026-04-28) leak their conditional
 logic via:
 
   - status_code differs   (e.g. 302 with uid → 200 without)

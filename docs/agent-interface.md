@@ -363,7 +363,7 @@ endpoint 索引裡多數是網頁碰巧載入的廣告科技，而「稀有」�
 
 不需要任何門檻。MCP 對應工具 `operator_cross_links`。
 
-實際產出（2026-08-06）：QSH 的 `hubsite.example`／`satellitesite.example`／`satellite2site.example` 都從 `statics.privatecdn.example` 與 `s1.privatecdn2.example` 載入靜態資源——那是 01 家族叢集的私有 CDN。這條連結在 HAR 裡躺了三個月，而且推翻了先前依 ads.txt 帳號得出的「兩案無關聯」判斷。
+實際產出（2026-08-06）：QSH 的 `hub-site.example`／`satellite-site.example`／`satellite2-site.example` 都從 `statics.private-cdn.example` 與 `s1.private-cdn2.example` 載入靜態資源——那是 01 家族叢集的私有 CDN。這條連結在 HAR 裡躺了三個月，而且推翻了先前依 ads.txt 帳號得出的「兩案無關聯」判斷。
 
 ### `evidence list` — 證據在哪
 
@@ -378,7 +378,7 @@ kwara/data/snapshots/7/20260505T081730971984_9fd1/screenshot.png
 
 ```bash
 # 這個網域的證據在哪（跨所有案件）
-python -m kwara.cli evidence list --domain visitorlanding.example
+python -m kwara.cli evidence list --domain visitor-landing.example
 
 # 這個案件有哪些證據
 python -m kwara.cli evidence list --case 3
@@ -410,7 +410,7 @@ python -m kwara.cli evidence browse --out ~/evidence-area --case 3
 ```
 
 ```
-~/evidence-area/visitorlanding.example/2026-05-05T0817_playwright -> 真正的擷取目錄
+~/evidence-area/visitor-landing.example/2026-05-05T0817_playwright -> 真正的擷取目錄
 ```
 
 符號連結，證據不複製也不會分岔；隨時可重建，庫才是真相。**它會拒絕寫入不是自己建立的目錄**——重建前會清空樹，指錯路徑會毀掉別人的東西。

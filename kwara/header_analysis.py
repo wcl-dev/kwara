@@ -4,7 +4,7 @@ Four orthogonal lenses on the per-hop header set, all read-only over
 the data captured by scanner.py. They feed the Headers sub-tab in the
 Analyze view; QSH 2026-04-28 is the positive control:
 
-  per_domain_constants    crawlerlanding.example consistently exposes
+  per_domain_constants    crawler-landing.example consistently exposes
                           x-server-hosted: Malaysia Cloud Pte Ltd —
                           the origin behind Cloudflare.
   cross_domain_template   hubsite / satellitesite / visitorlanding sharing the

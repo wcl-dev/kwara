@@ -4,8 +4,8 @@ kwara read an ads.txt response, hashed it, parsed the DIRECT accounts and
 discarded the bytes. So its strongest binding signal — two domains serving a
 byte-identical ads.txt — was a claim a recipient had to take on trust: they
 could not recompute either hash, and where the site had since started refusing
-requests they could not re-fetch it. blockedsite.example was recorded on 2026-08-05
-serving sha 3bb8f682471e, 278 accounts, identical to siblingsite.example, and returned
+requests they could not re-fetch it. blocked-site.example was recorded on 2026-08-05
+serving sha 3bb8f682471e, 278 accounts, identical to sibling-site.example, and returned
 HTTP 403 the following day.
 
 Each test here pins one property that makes a recorded fetch re-checkable.
@@ -110,7 +110,7 @@ def test_a_network_error_records_metadata_and_no_body(db):
 
 def test_a_non_200_body_is_kept(db):
     """A 403 challenge page is what the site served an investigator. It is
-    among the most useful things to keep, and the reason blockedsite.example's
+    among the most useful things to keep, and the reason blocked-site.example's
     2026-08-05 observation cannot be reacquired."""
     challenge = b"<html><body>Just a moment...</body></html>"
     aid = acq.record_fetch(db, requested_url="https://w.test/ads.txt",
@@ -614,7 +614,7 @@ def test_a_banked_observation_carries_what_clustering_needs(tmp_path,
 
 def test_the_sweep_retains_the_bodies_it_screened(tmp_path, monkeypatch, site):
     """The gap that produced the whole problem. The 2026-08-05 sweep hashed
-    each ads.txt and dropped it, so blockedsite.example's file — which the site began
+    each ads.txt and dropped it, so blocked-site.example's file — which the site began
     refusing the next day — exists nowhere."""
     from kwara.cli import build_parser
 

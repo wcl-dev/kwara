@@ -65,7 +65,7 @@ PLATFORM_HOTJAR            = "hotjar"
 PLATFORM_LINE_TAG          = "line_tag"
 # Phase 4 follow-up — surfaced by 2026-04-29 new-case E2E. Picread.net's
 # SEO persona (now captured via cloaking_alt) embedded these two and
-# shared the same IDs with visitorlanding.example, the cross-domain attribution
+# shared the same IDs with visitor-landing.example, the cross-domain attribution
 # evidence kwara was missing.
 PLATFORM_GOOGLE_ADSENSE         = "google_adsense"
 PLATFORM_META_FACEBOOK_PAGE     = "meta_facebook_page"

@@ -414,7 +414,7 @@ def cmd_evidence_browse(args):
     folders you cannot walk. This projects a second view over the same bytes,
     named the way an analyst thinks:
 
-        <out>/visitorlanding.example/20260505T081730_playwright -> the real capture dir
+        <out>/visitor-landing.example/20260505T081730_playwright -> the real capture dir
 
     Symlinks, so the evidence is never copied and never diverges. Regenerate
     whenever; the tree is disposable and the store is the truth.
@@ -803,7 +803,7 @@ def cmd_discover_screen(args):
             body = r.pop("_body", None)
             if body is not None:
                 # Retain the response beside the run. The 2026-08-05 sweep
-                # hashed and dropped these; blockedsite.example's file is the one that
+                # hashed and dropped these; blocked-site.example's file is the one that
                 # can no longer be reacquired because of it.
                 try:
                     rel, digest = discovery.bank_body(bank, r["domain"], body)

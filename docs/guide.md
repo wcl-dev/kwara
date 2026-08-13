@@ -129,7 +129,7 @@ The capture store is keyed by `scan_run_id`, so the filesystem alone cannot say
 which domain a directory holds.
 
 ```bash
-kwara evidence list --domain visitorlanding.example       # every capture for a site, across cases
+kwara evidence list --domain visitor-landing.example       # every capture for a site, across cases
 kwara evidence describe                       # write a capture.json caption into each directory
 kwara evidence browse --out ~/evidence-area --case 1
 ```

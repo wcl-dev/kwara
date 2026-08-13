@@ -53,7 +53,7 @@
 兩個貼文帶到 `?utm_term=145` 同樣的值——這是**同一支 campaign**。
 
 實作要點：
-- 同時看 `original_url`（短連結）與 `final_url`（落地頁），因為 wrapper redirect 會改 key 名稱（已驗證 `crawlerlanding.example/?uid=` → `visitorlanding.example/?utm_term=`）。
+- 同時看 `original_url`（短連結）與 `final_url`（落地頁），因為 wrapper redirect 會改 key 名稱（已驗證 `crawler-landing.example/?uid=` → `visitor-landing.example/?utm_term=`）。
 - 過長的 value（base64 token、JWT、affiliate 加密 ID）改用 SHA-256 prefix 比對——同一支不透明 token 仍能聚合，但表格顯示 hash 而非原值（`_normalize_param_value`，門檻在 [config.py](../kwara/config.py)）。
 - 至少跨 2 篇貼文才入列；單篇出現的不算 cluster。
 
@@ -74,7 +74,7 @@
 
 ## 三、Wrapper 關係層 — 跨域 redirect 結構
 
-`wrapper_relationships()` 把 `(original_domain → final_domain)` 落到不同網域的 redirect 對自動聚合出來。crawlerlanding → visitorlanding 是教科書範例：分析師收到 `crawlerlanding.example/redacted139/X?uid=…`，但 scan 解完後全部落到 `visitorlanding.example`，且 `uid` 在跳轉中被改名為 `utm_term`。
+`wrapper_relationships()` 把 `(original_domain → final_domain)` 落到不同網域的 redirect 對自動聚合出來。crawlerlanding → visitorlanding 是教科書範例：分析師收到 `crawler-landing.example/redacted139/X?uid=…`，但 scan 解完後全部落到 `visitor-landing.example`，且 `uid` 在跳轉中被改名為 `utm_term`。
 
 每個 wrapper 對都帶：
 - `url_count` / `post_count`
@@ -97,7 +97,7 @@
 
 不同 cert，但 `notBefore` 在 24 小時內。實作上先把全部 cert 依 `notBefore` 排序，貪婪地把間隔不超過 24 小時的併成一群——**同一群 cert 涵蓋 ≥ 2 個落地網域才入列**（避免「同一網域連續換證」誤判）。
 
-OPSEC 解讀：操作者很可能用同一個自動化部署 pipeline 同步上線多個域，但每域一張獨立 cert——`by_cert` 抓不到、`by_issuance` 抓得到。QSH 100 筆驗證裡 visitorlanding.example 與 satellitesite.example 在 5 小時內由 Google Trust Services WE1 連簽 4 張，正是這個訊號。
+OPSEC 解讀：操作者很可能用同一個自動化部署 pipeline 同步上線多個域，但每域一張獨立 cert——`by_cert` 抓不到、`by_issuance` 抓得到。QSH 100 筆驗證裡 visitor-landing.example 與 satellite-site.example 在 5 小時內由 Google Trust Services WE1 連簽 4 張，正是這個訊號。
 
 `certificate_authorities()` 是補充視角：列出哪些 CA 涉案、各自蓋多少網域——做 accountability mapping 用，不是 cluster。
 
@@ -180,7 +180,7 @@ OPSEC 解讀：操作者很可能用同一個自動化部署 pipeline 同步上�
 
 ### `per_domain_constants` — origin host 揭露
 
-某網域的多次掃描裡，**永遠出現**且值穩定的 header（排除 `date`、`age`、`set-cookie`、`cf-ray`、`x-amz-cf-id` 等天然會變的）。QSH 命中：crawlerlanding.example 持續吐 `x-server-hosted: Malaysia Cloud Pte Ltd`——揭露 Cloudflare 後面的真實 origin。
+某網域的多次掃描裡，**永遠出現**且值穩定的 header（排除 `date`、`age`、`set-cookie`、`cf-ray`、`x-amz-cf-id` 等天然會變的）。QSH 命中：crawler-landing.example 持續吐 `x-server-hosted: Malaysia Cloud Pte Ltd`——揭露 Cloudflare 後面的真實 origin。
 
 ### `cross_domain_shared_template` — 同操作者 server 模板
 
@@ -219,9 +219,9 @@ verdict 落到 `scan_runs.cloaking_signal_json`，四種值：`no_tracking_param
 
 ```
               lightweight     playwright    OPSEC level
-visitorlanding.example    23/23 (100%)   23/23 (100%)   low (no gate)
-hubsite.example   12/73 ( 16%)   73/73 (100%)   strong (UA gate)
-satellitesite.example  0/4 (  0%)     4/4 (100%)    strong (UA gate)
+visitor-landing.example    23/23 (100%)   23/23 (100%)   low (no gate)
+hub-site.example   12/73 ( 16%)   73/73 (100%)   strong (UA gate)
+satellite-site.example  0/4 (  0%)     4/4 (100%)    strong (UA gate)
 ```
 
 OPSEC level 規則（刻意粗略，分析師最終判讀）：
@@ -264,7 +264,7 @@ OPSEC level 規則（刻意粗略，分析師最終判讀）：
 - 語料窄 → 帳號的真實廣度被藏住。`aralego|par-8A22…` 在只有 QSH 域名的案件裡看起來只涵蓋 8 個域、判為 operator；但它在同一個資料庫裡實際橫跨 **18 個 apex**，包含 bigpublisher2、family1 這些毫無關聯的主流農場
 - 語料寬且同質 → 真正無所不在的中介反而掉到門檻以下。`kargo|8955` 涵蓋 23 個域、breadth 0.719 < 0.8，被判為 operator
 
-同一個帳號、同一個世界，換個案件組成就換一種判定。所以 tier 改為以**全資料庫足跡**（`global_apex_count`）決定，並且用**可註冊域（apex）**計數——`redacted139.operatorhub.example` 與 `operatorhub.example` 是同一項資產，算一個。
+同一個帳號、同一個世界，換個案件組成就換一種判定。所以 tier 改為以**全資料庫足跡**（`global_apex_count`）決定，並且用**可註冊域（apex）**計數——`redacted139.operator-hub.example` 與 `operator-hub.example` 是同一項資產，算一個。
 
 | tier | 條件 | 解讀 |
 |---|---|---|
@@ -329,16 +329,16 @@ OPSEC level 規則（刻意粗略，分析師最終判讀）：
 
 原本的做法是挑一份：`ORDER BY id DESC LIMIT 1`。問題在於 `cloaking_alt`（給爬蟲看的那份）永遠是最後寫入的，所以永遠贏。
 
-2026-08-11 在實際資料庫上量到：**469 個 scan_run 有 372 個是拿爬蟲人格在做歸因**，其中 252 個兩種人格的追蹤碼不同。更關鍵的是那 252 個**落在不同的網域**——同一個 URL 把瀏覽器送去 `visitorlanding.example`、把爬蟲送去 `crawlerlanding.example`。
+2026-08-11 在實際資料庫上量到：**469 個 scan_run 有 372 個是拿爬蟲人格在做歸因**，其中 252 個兩種人格的追蹤碼不同。更關鍵的是那 252 個**落在不同的網域**——同一個 URL 把瀏覽器送去 `visitor-landing.example`、把爬蟲送去 `crawler-landing.example`。
 
-改成挑訪客人格也不對，那只是把盲點換一邊：救回 756 筆追蹤碼觀察，卻讓 `crawlerlanding.example`／`.org` 整組退出案件。
+改成挑訪客人格也不對，那只是把盲點換一邊：救回 756 筆追蹤碼觀察，卻讓 `crawler-landing.example`／`.org` 整組退出案件。
 
 **兩個網域都是同一個操作的資產。** cloaking 的定義就是「對不同對象送不同東西」，所以歸因必須讀全部：
 
 - 範圍是**單一 scan_run**——`LATEST_DONE_SCAN_RUN` 已經把它釘在單一時刻，所以聯集只跨人格與重試，不會跨到別天的觀察。
 - 仍然排除失敗的擷取（契約 6）。Cloudflare 攔截頁不是網站送出的東西。
 
-實測結果：操作者群組涵蓋的網域 77 → 79，一個都沒少；案件 3 的 `visitorlanding.example` 同時帶著 `GTM-T5N9K2Q` 與 Meta Page `1000000000000001`，把 10 站網絡與 crawlerlanding 接成同一個操作者。
+實測結果：操作者群組涵蓋的網域 77 → 79，一個都沒少；案件 3 的 `visitor-landing.example` 同時帶著 `GTM-T5N9K2Q` 與 Meta Page `1000000000000001`，把 10 站網絡與 crawlerlanding 接成同一個操作者。
 
 ### 「已擷取」則只認訪客人格 — `sql.browser_capture_exists`
 

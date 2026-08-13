@@ -43,8 +43,8 @@ def test_components_empty():
 
 def test_node_id_stable_and_safe():
     # Reproducible across calls (unlike Python hash()), DOT-safe.
-    a = node_id("dom", "hubsite.example")
-    b = node_id("dom", "hubsite.example")
+    a = node_id("dom", "hub-site.example")
+    b = node_id("dom", "hub-site.example")
     assert a == b
     assert a.startswith("dom_")
     assert node_id("dom", "x.com") != node_id("dom", "y.com")

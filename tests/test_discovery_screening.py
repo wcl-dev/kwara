@@ -33,11 +33,11 @@ def _ads(sha, *, status="ok", n=3):
 # ── screen_ads_txt ────────────────────────────────────────────────────────
 
 def test_exact_template_match_promotes_and_names_the_siblings():
-    known = {"SHA_FARM": ["visitorlanding.example", "crawlerlanding.example"]}
+    known = {"SHA_FARM": ["visitor-landing.example", "crawler-landing.example"]}
     out = screen_ads_txt(_ads("SHA_FARM"), known)
     assert out["verdict"] == VERDICT_TEMPLATE_MATCH
     assert out["matched_sha"] == "SHA_FARM"
-    assert out["matched_domains"] == ["visitorlanding.example", "crawlerlanding.example"]
+    assert out["matched_domains"] == ["visitor-landing.example", "crawler-landing.example"]
 
 
 def test_unknown_template_is_no_match_not_clean():

@@ -8,9 +8,9 @@ deliberately deployed UA-discrimination — a same-operator clustering
 signal independent of GA4 / TLS / parameter analysis. QSH 2026-04-28:
 
       lightweight     playwright    OPSEC level
-  visitorlanding.example     23/23 (100%)    23/23 (100%)   low (no gate)
-  hubsite.example   12/73 ( 16%)    73/73 (100%)   strong (UA gate)
-  satellitesite.example  0/4 (  0%)      4/4 (100%)    strong (UA gate)
+  visitor-landing.example     23/23 (100%)    23/23 (100%)   low (no gate)
+  hub-site.example   12/73 ( 16%)    73/73 (100%)   strong (UA gate)
+  satellite-site.example  0/4 (  0%)      4/4 (100%)    strong (UA gate)
 
 Read-only over `snapshots.capture_method` + `capture_status`. No schema
 change.

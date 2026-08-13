@@ -263,7 +263,7 @@ def test_attribution_reads_every_persona_the_site_served(db):
     cloaking_alt row is always written last it picked the CRAWLER-facing page
     on 372 of 469 live scan_runs. Preferring the visitor instead just moved
     the blind spot: measured on the live database, that recovered 756
-    tracking-ID observations but dropped crawlerlanding.example/.org out of the case.
+    tracking-ID observations but dropped both crawler-facing landings out of the case.
     A cloaker serves different personas different pages on purpose, so both
     are evidence and attribution reads both."""
     sr = _scan_run(db)
@@ -277,22 +277,22 @@ def test_attribution_reads_every_persona_the_site_served(db):
 
 def test_both_landing_domains_of_a_cloaked_url_survive(db):
     """Why picking one persona loses a whole site. On 252 live scan_runs the
-    two personas land on DIFFERENT domains — a browser reaches visitorlanding.example and
-    a crawler reaches crawlerlanding.example from the same URL. Both belong to the
+    two personas land on DIFFERENT domains — a browser reaches visitor-landing.example and
+    a crawler reaches crawler-landing.example from the same URL. Both belong to the
     operation; keeping only one erases the other from every cluster."""
     sr = _scan_run(db)
     db.execute("INSERT INTO snapshots (scan_run_id, capture_method, "
                "capture_status, final_domain, tracking_ids_json) "
-               "VALUES (?, 'playwright', 'ok', 'visitorlanding.example', ?)",
+               "VALUES (?, 'playwright', 'ok', 'visitor-landing.example', ?)",
                (sr, json.dumps(["1000000000000001"])))
     db.execute("INSERT INTO snapshots (scan_run_id, capture_method, "
                "capture_status, final_domain, tracking_ids_json) "
-               "VALUES (?, 'cloaking_alt', 'ok', 'crawlerlanding.example', ?)",
+               "VALUES (?, 'cloaking_alt', 'ok', 'crawler-landing.example', ?)",
                (sr, json.dumps(["1000000000000001"])))
     db.commit()
 
     _, ids, domains = _read(db, sr)
-    assert domains == {"visitorlanding.example", "crawlerlanding.example"}
+    assert domains == {"visitor-landing.example", "crawler-landing.example"}
     assert ids == {"1000000000000001"}, \
         "the ID binding the two domains must be readable from either"
 

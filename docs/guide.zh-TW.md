@@ -102,7 +102,7 @@ kwara index crosslinks                        # 第三方 endpoint 本身也是�
 擷取庫用 `scan_run_id` 當目錄名，所以檔案系統本身看不出哪個目錄屬於哪個網域。
 
 ```bash
-kwara evidence list --domain visitorlanding.example       # 跨案件找這個網域的證據
+kwara evidence list --domain visitor-landing.example       # 跨案件找這個網域的證據
 kwara evidence describe                       # 每個目錄放一份 capture.json 說明
 kwara evidence browse --out ~/evidence-area --case 1
 ```

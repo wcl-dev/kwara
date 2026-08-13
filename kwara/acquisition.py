@@ -8,8 +8,8 @@ ads.txt at all.
 That made the tool's strongest binding signal — two domains serving a
 byte-identical ads.txt — a claim a recipient had to take on trust. They could
 not recompute either hash. Where the site had since started refusing requests
-they could not re-fetch it either: blockedsite.example was recorded on 2026-08-05
-serving sha 3bb8f682471e, 278 accounts, identical to siblingsite.example, and returned
+they could not re-fetch it either: blocked-site.example was recorded on 2026-08-05
+serving sha 3bb8f682471e, 278 accounts, identical to sibling-site.example, and returned
 HTTP 403 the next day. That binding is now unobtainable by probing, and
 un-recheckable from what was kept.
 

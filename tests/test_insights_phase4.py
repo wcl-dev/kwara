@@ -74,8 +74,8 @@ def _seed_scan(conn, case_id, url, *, final_url=None,
 def test_cloaking_suspect_surfaces_in_bullets():
     conn = _fresh_db()
     cid = _seed_case(conn)
-    _seed_scan(conn, cid, "https://crawlerlanding.example/a?uid=1",
-               final_url="https://visitorlanding.example/a",
+    _seed_scan(conn, cid, "https://crawler-landing.example/a?uid=1",
+               final_url="https://visitor-landing.example/a",
                cloaking={"verdict": "cloaking_suspect", "diffs": ["final_domain"]})
     out = case_insights(conn, cid)
     blob = " ".join(out["bullets"])
