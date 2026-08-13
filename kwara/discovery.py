@@ -358,6 +358,20 @@ def bank_body(bank_path: str, domain: str, body: bytes) -> tuple[str, str]:
     raise RuntimeError(f"could not allocate a body file under {root}")
 
 
+def reserve_run(bank: str | None = None):
+    """Reserve a run file and RETURN THE OPEN HANDLE.
+
+    `open_run` closes its exclusive descriptor and hands back a pathname, so a
+    caller reopening that name races anything that swaps a symlink in between.
+    Keeping the descriptor removes the window entirely: the writer holds the
+    file it reserved, whatever later happens to the name.
+    """
+    path = open_run(bank)
+    fd = os.open(path, os.O_WRONLY | os.O_APPEND
+                 | getattr(os, "O_NOFOLLOW", 0))
+    return path, os.fdopen(fd, "w", encoding="utf-8")
+
+
 def open_run(bank: str | None = None) -> str:
     """Allocate the directory a sweep writes into, BEFORE any request goes out.
 

@@ -75,8 +75,18 @@ def signal_summary(conn: sqlite3.Connection, case_id: int) -> dict:
     ads = shared_ad_accounts(conn, case_id)
     ads_operator = len([a for a in ads.get("by_account", [])
                         if a.get("tier") == "operator"])
-    ads_template = len(ads.get("by_template", []))
+    # Only a template whose response bytes are still on disk AND still hash to
+    # what the derived record claims counts as strong. Byte-identity is the
+    # entire claim; without the bytes the narrative would assert 一字不差 for
+    # something nobody can now check. The observation is not lost — it is
+    # reported separately as unverified.
+    from . import acquisition as _acq
+    templates = ads.get("by_template", [])
+    ads_template = len([t for t in templates
+                        if t.get("verification") == _acq.VERIFIED])
+    ads_template_unverified = len(templates) - ads_template
     return {
+        "ads_template_unverified": ads_template_unverified,
         "tracking":     len(shared_tracking_ids(conn, case_id)),
         "certs":        len(shared_certificates(conn, case_id).get("by_cert", [])),
         "hdr_tmpl":     len(cross_domain_shared_template(conn, case_id)),

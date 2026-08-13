@@ -399,9 +399,13 @@ def test_index_skips_accounts_of_a_full_programmatic_carrier():
                if s["signal_type"] == SIGNAL_ADS_TXT_SELLER}
     assert not any(d == "bigpublisher.com" for _, d in sellers)
     assert ("pub-FARM", "smallfarm.com") in sellers
-    # the fat carrier still contributes its template hash
-    assert any(s["final_domain"] == "bigpublisher.com" for s in signals
-               if s["signal_type"] == SIGNAL_ADS_TXT_TEMPLATE)
+    # The carrier's ACCOUNTS are skipped; its template hash is a separate
+    # question, and since 2026-08-12 it is emitted only when the response
+    # bytes were retained. This fixture keeps none, so neither appears —
+    # asserted so the reason is visible rather than looking like the floor
+    # suppressed it.
+    assert not [s for s in signals
+                if s["signal_type"] == SIGNAL_ADS_TXT_TEMPLATE]
 
 
 def test_index_still_records_a_shared_account_from_its_small_carrier():
@@ -424,17 +428,54 @@ def test_index_still_records_a_shared_account_from_its_small_carrier():
     assert ("pub-SHARED", "bigpublisher.com") not in sellers
 
 
-def test_index_emits_template_hashes():
+def test_index_emits_template_hashes(tmp_path, monkeypatch):
+    """One signal per domain — cross-case match fodder for the discovery
+    funnel. Only for templates whose response bytes are retained and still
+    hash to the claim: a hash in this index screens every future candidate,
+    so an unverifiable one would propagate into every later sweep."""
+    import hashlib as _h
+
+    from kwara import acquisition as _acq
+    from kwara import config as _cfg
+
+    monkeypatch.setattr(_cfg, "DATA_DIR", str(tmp_path / "data"))
     conn = _make_db()
     case_id = _make_case(conn)
-    _add(conn, case_id, "https://a.com/", "a.com",
-         _ads_json([("g.com", "1")], sha="SHA_A"))
-    _add(conn, case_id, "https://b.com/", "b.com",
-         _ads_json([("g.com", "1")], sha="SHA_A"))
+    body = b"g.com, 1, DIRECT\n"
+    sha = _h.sha256(body).hexdigest()
+    for host in ("a.com", "b.com"):
+        _add(conn, case_id, f"https://{host}/", host,
+             _ads_json([("g.com", "1")], sha=sha))
+        sr = conn.execute("SELECT id FROM scan_runs ORDER BY id DESC "
+                          "LIMIT 1").fetchone()["id"]
+        aid = _acq.record_fetch(conn, scan_run_id=sr,
+                                requested_url=f"https://{host}/ads.txt",
+                                status="ok", status_code=200, body=body)
+        ads = json.loads(conn.execute(
+            "SELECT ads_txt_json FROM scan_runs WHERE id=?", (sr,)
+        ).fetchone()["ads_txt_json"])
+        conn.execute("UPDATE scan_runs SET ads_txt_json=? WHERE id=?",
+                     (json.dumps({**ads, "acquisition_id": aid}), sr))
+    conn.commit()
+
     signals = extract_case_signals(conn, case_id, source_db="/tmp/x.db")
     tmpl = [s["signal_value"] for s in signals
             if s["signal_type"] == SIGNAL_ADS_TXT_TEMPLATE]
-    assert tmpl.count("SHA_A") == 2  # one per domain — cross-case match fodder
+    assert tmpl.count(sha) == 2
+
+
+def test_index_refuses_a_template_whose_bytes_were_never_kept():
+    """Everything fetched before 2026-08-12. The claim is real history; it
+    just cannot be the seed a future candidate is promoted against."""
+    conn = _make_db()
+    case_id = _make_case(conn)
+    for host in ("a.com", "b.com"):
+        _add(conn, case_id, f"https://{host}/", host,
+             _ads_json([("g.com", "1")], sha="SHA_A"))
+
+    signals = extract_case_signals(conn, case_id, source_db="/tmp/x.db")
+    assert not [s for s in signals
+                if s["signal_type"] == SIGNAL_ADS_TXT_TEMPLATE]
 
 
 def _ads_with_manager(direct_sellers, manager=None, owner=None, *, raw_text=None):

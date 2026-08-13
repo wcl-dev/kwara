@@ -115,9 +115,9 @@ def _fail_if_the_live_store_moves():
     from test_live_store_untouched import _real_paths, _snapshot_state
 
     paths = _real_paths()
-    if not os.path.isfile(paths["db"]):
-        yield                      # nothing to protect on this machine
-        return
+    # No early return when the database is absent. A test that CREATES a live
+    # store where there was none escapes exactly as badly as one that modifies
+    # an existing one, and skipping here let that through.
     before = _snapshot_state()
     yield
     after = _snapshot_state()

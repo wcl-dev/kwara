@@ -88,8 +88,49 @@ def migrate_db(conn: sqlite3.Connection) -> None:
             conn.execute(f"ALTER TABLE redirect_hops ADD COLUMN {col} {defn}")
         except sqlite3.OperationalError:
             pass
+    _migrate_acquisitions_fk(conn)
     conn.commit()
     _backfill_legacy_capture_status(conn)
+
+
+def _migrate_acquisitions_fk(conn: sqlite3.Connection) -> None:
+    """Rebuild `acquisitions` if it still cascades from scan_runs.
+
+    The table shipped on 2026-08-12 with ON DELETE CASCADE, so `delete_case`
+    — which deletes scan_runs — silently deleted acquisition rows with them.
+    An append-only table that quietly loses rows is not append-only.
+
+    `CREATE TABLE IF NOT EXISTS` does nothing to a table that already exists,
+    so correcting the schema text only fixed databases created afterwards.
+    SQLite cannot alter a foreign key in place; the table has to be rebuilt.
+    """
+    try:
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' "
+            "AND name='acquisitions'").fetchone()
+    except sqlite3.Error:
+        return
+    # Match the CLAUSE, not the word: the corrected schema's own comment says
+    # "NO CASCADE, deliberately", and matching bare "CASCADE" rebuilt the
+    # table on every single migrate_db call.
+    if not row or "ON DELETE CASCADE" not in (row[0] or "").upper():
+        return
+
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(acquisitions)")]
+    names = ", ".join(cols)
+    # Foreign keys must be off for the rename-and-copy, or the drop cascades
+    # the very rows being preserved.
+    conn.commit()
+    conn.execute("PRAGMA foreign_keys = OFF")
+    try:
+        conn.execute("ALTER TABLE acquisitions RENAME TO acquisitions_cascade")
+        init_db(conn)                       # recreates it with SET NULL
+        conn.execute(f"INSERT INTO acquisitions ({names}) "
+                     f"SELECT {names} FROM acquisitions_cascade")
+        conn.execute("DROP TABLE acquisitions_cascade")
+        conn.commit()
+    finally:
+        conn.execute("PRAGMA foreign_keys = ON")
 
 
 # Same signals as _snapshot_worker / snapshots for HTML challenge pages

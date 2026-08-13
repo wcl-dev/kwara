@@ -782,7 +782,7 @@ def cmd_discover_screen(args):
     # Allocate the run BEFORE contacting anything. Naming a destination that
     # already exists must cost zero outbound requests to refuse — a sweep is
     # an immutable record and the old code opened it with mode "w".
-    bank = discovery.open_run(args.bank)
+    bank, bank_fh = discovery.reserve_run(args.bank)
 
     if not args.quiet:
         _err(f"screening {len(doms)} candidates against {len(known)} known "
@@ -794,10 +794,10 @@ def cmd_discover_screen(args):
     # interrupted has still spent its outbound requests, and those responses
     # are the part that cannot be recreated cheaply.
     obs = []
-    # Append, never truncate: open_run already created this file as the
-    # reservation, and "w" on a path is the mode that destroyed an earlier
+    # The handle reserve_run already holds. Reopening by pathname would race
+    # a symlink swap; "w" on a path is also the mode that destroyed an earlier
     # sweep's record when a destination was reused.
-    with open(bank, "a", encoding="utf-8") as fh:
+    with bank_fh as fh:
         def progress(r):
             done[0] += 1
             body = r.pop("_body", None)

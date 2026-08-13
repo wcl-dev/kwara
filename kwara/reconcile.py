@@ -366,6 +366,74 @@ def _dir_timestamp(name: str) -> str | None:
 # The report
 # ---------------------------------------------------------------------------
 
+def acquisition_health(db_paths) -> dict:
+    """Acquisition rows whose evidence is detached, missing or altered.
+
+    The capture store is not the only thing that can lose track of its
+    evidence. `acquisitions` holds the response bytes an ads.txt finding rests
+    on, and three things can go wrong that nothing else looks for:
+
+      * DETACHED — the scan_run it belonged to is gone. The FK is SET NULL
+        rather than CASCADE precisely so the record survives a case deletion,
+        which means these accumulate silently by design.
+      * MISSING — the body file it names is not on disk.
+      * ALTERED — the body is there and no longer hashes to what was recorded.
+
+    Reports only. Nothing here deletes or reattaches: an acquisition is an
+    append-only record of a moment, and deciding what to do about a broken one
+    is the analyst's call.
+    """
+    detached, missing, altered, ok = [], [], [], 0
+    for path in db_paths:
+        if not os.path.isfile(path):
+            continue
+        try:
+            conn = sqlite3.connect(_ro_uri(path), uri=True)
+            conn.row_factory = sqlite3.Row
+        except sqlite3.Error:
+            continue
+        try:
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(acquisitions)")}
+            if not cols:
+                continue
+            for a in conn.execute(
+                    "SELECT id, scan_run_id, kind, requested_url, fetched_at, "
+                    "body_path, captured_sha256 FROM acquisitions"):
+                where = {"database": path, "id": a["id"],
+                         "requested_url": a["requested_url"],
+                         "fetched_at": a["fetched_at"]}
+                if a["scan_run_id"] is None:
+                    detached.append(where)
+                if not a["body_path"]:
+                    continue          # a network error, or a pre-retention row
+                if os.path.islink(a["body_path"]) \
+                        or not os.path.isfile(a["body_path"]):
+                    missing.append({**where, "body_path": a["body_path"]})
+                elif _sha256_file(a["body_path"]) != a["captured_sha256"]:
+                    altered.append({**where, "body_path": a["body_path"]})
+                else:
+                    ok += 1
+        except sqlite3.Error:
+            continue
+        finally:
+            conn.close()
+    return {"verified_bodies": ok, "detached": detached,
+            "missing_bodies": missing, "altered_bodies": altered}
+
+
+def _sha256_file(path: str) -> str | None:
+    import hashlib
+    d = hashlib.sha256()
+    try:
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        with os.fdopen(fd, "rb") as fh:
+            for block in iter(lambda: fh.read(1 << 20), b""):
+                d.update(block)
+    except OSError:
+        return None
+    return d.hexdigest()
+
+
 def _empty_kind() -> dict:
     return {"directories": 0, "bytes": 0, "single_byte_fill": 0,
             "single_byte_fill_bytes": 0,
@@ -413,9 +481,15 @@ def report(root: str, primary_db: str, *, index_db: str | None = None,
                      if os.path.realpath(os.path.dirname(f["path"]))
                      not in referenced and f["path"] not in referenced]
 
+    acq_health = acquisition_health([d["path"] for d in dbs if d["exists"]])
+
     return {
         "root": root,
         "databases": dbs,
+        # The other half of "evidence nothing points at": rows whose bytes are
+        # gone, altered, or whose scan_run has been deleted out from under
+        # them. Reported, never auto-repaired.
+        "acquisitions": acq_health,
         # A registered database we cannot read makes every "orphan" verdict
         # provisional: its rows might be exactly what claims these directories.
         "safe": not missing,

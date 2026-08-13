@@ -286,6 +286,52 @@ def case_counts(conn: sqlite3.Connection, case_id: int) -> tuple[int, int]:
     return url_count, scanned
 
 
+def _unverified_templates(conn: sqlite3.Connection, case_id: int) -> list[dict]:
+    """Template matches that cannot currently support the claim they make.
+
+    NOT returned as a group at a softer tier — that would preserve the same
+    inference under a gentler label, which is the failure mode this whole
+    layer exists to stop. It is returned as an OBSERVATION with the domains,
+    the hash that was claimed, why it cannot be verified, and the action that
+    would settle it.
+
+    Everything fetched before 2026-08-12 is here, because retention did not
+    exist yet. On the analyst's cases that is all 17 clusters.
+    """
+    out = []
+    for c in shared_ad_accounts(conn, case_id).get("by_template", []):
+        verdict = c.get("verification")
+        if verdict == _acq.VERIFIED:
+            continue
+        out.append({
+            "type": "ads_template_unverified",
+            "tier": TIER_RELATED,
+            "label": "ads.txt 模板（未經驗證）",
+            "value": c.get("sha256_short") or (c.get("sha256", "")[:12]),
+            "claimed_sha256": c.get("sha256"),
+            "domains": sorted(set(c["domains"])),
+            "verification": verdict,
+            "verification_by_domain": c.get("verification_by_domain", {}),
+            "why": _WHY_UNVERIFIED.get(verdict, verdict),
+            "action": ("重新抓取這些網域的 /ads.txt 以保存回應位元組；"
+                       "站方若已改檔或開始拒絕請求，此綁定即無法再取得"),
+            "channel": _channel("ads_template"),
+        })
+    out.sort(key=lambda x: (-len(x["domains"]), x["value"]))
+    return out
+
+
+_WHY_UNVERIFIED = {
+    "legacy_unverifiable": "抓取當時未保存回應內文，無法重算雜湊",
+    "body_missing": "留存的回應檔已不在磁碟上",
+    "body_mismatch": "留存的回應檔內容與記錄的雜湊不符",
+    "hash_disagrees": "留存的回應檔雜湊與推導紀錄所宣稱的不同",
+    "wrong_scan_run": "引用的取得紀錄不屬於這次掃描",
+    "wrong_kind": "引用的取得紀錄不是 ads.txt",
+    "truncated": "擷取被截斷，前綴雜湊不能當作整份檔案的同一性",
+}
+
+
 def case_clusters(conn: sqlite3.Connection, case_id: int) -> dict:
     """The group-centric model for a case.
 
@@ -330,6 +376,7 @@ def case_clusters(conn: sqlite3.Connection, case_id: int) -> dict:
         })
 
     weak_links = _weak_links(conn, case_id, domain_to_group)
+    unverified_templates = _unverified_templates(conn, case_id)
 
     behaviour = {
         "cloaking_pending": _count_cloaking_suspects(conn, case_id),
@@ -341,6 +388,11 @@ def case_clusters(conn: sqlite3.Connection, case_id: int) -> dict:
     return {
         "groups": groups,
         "weak_links": weak_links,
+        # Templates that WOULD bind a group if their bytes could be shown.
+        # Surfaced explicitly rather than dropped: the observation is real,
+        # it is just not currently demonstrable, and the analyst needs the
+        # action that would make it so.
+        "unverified_templates": unverified_templates,
         "behaviour": behaviour,
         "completeness": _completeness(conn, case_id, n_urls, scanned),
         "n_urls": n_urls, "scanned": scanned,

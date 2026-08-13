@@ -24,7 +24,12 @@ import sqlite3
 import pytest
 
 TRACKED_TABLES = ("cases", "message_evidence", "url_artifacts", "scan_runs",
-                  "redirect_hops", "snapshots", "audit_log")
+                  "redirect_hops", "snapshots", "audit_log", "acquisitions",
+                  # The cross-case index has none of the above — it holds
+                  # `signals`. Fingerprinting only case tables left every
+                  # index write invisible, which is the store a discovery run
+                  # touches.
+                  "signals")
 
 
 def _real_paths():
@@ -73,16 +78,29 @@ def _db_fingerprint(path: str) -> str:
 
 
 def _tree_fingerprint(root: str) -> str:
-    """Entry count and names, not contents — enough to see a test create,
-    delete or rename anything under the evidence store."""
+    """Names, sizes and mtimes — not contents.
+
+    Names alone missed a file REWRITTEN IN PLACE, which is exactly how the
+    suite's fabricated captures would land: same path, different bytes. Size
+    and mtime catch that at a fraction of the cost of hashing a 7 GB store,
+    and a guard too slow to leave on gets turned off.
+    """
     if not os.path.isdir(root):
         return "absent"
     d = hashlib.sha256()
     n = 0
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames.sort()
-        for name in sorted(dirnames) + sorted(filenames):
+        for name in sorted(dirnames):
             d.update(os.path.join(dirpath, name).encode())
+            n += 1
+        for name in sorted(filenames):
+            full = os.path.join(dirpath, name)
+            try:
+                st = os.lstat(full)
+                d.update(f"{full}|{st.st_size}|{st.st_mtime_ns}".encode())
+            except OSError:
+                d.update(f"{full}|gone".encode())
             n += 1
     return f"{n}:{d.hexdigest()}"
 
@@ -94,6 +112,10 @@ def _snapshot_state() -> dict:
         "index": _db_fingerprint(p["index"]),
         "snapshots": _tree_fingerprint(p["snapshots"]),
         "acquisitions": _tree_fingerprint(p["acquisitions"]),
+        # "absent" is a state to protect too: a test CREATING a live store
+        # where there was none is the same class of escape as one modifying it,
+        # and skipping the guard when the DB is missing let that through.
+        "db_exists": str(os.path.isfile(p["db"])),
     }
 
 
@@ -132,3 +154,35 @@ def test_a_tree_fingerprint_notices_a_new_file(tmp_path):
     before = _tree_fingerprint(str(root))
     (root / "7" / "planted.png").write_bytes(b"x")
     assert _tree_fingerprint(str(root)) != before
+
+
+def test_a_tree_fingerprint_notices_a_file_rewritten_in_place(tmp_path):
+    """Names alone would not: same path, different bytes is exactly how a
+    fabricated capture overwrites a real one."""
+    root = tmp_path / "store"
+    (root / "7").mkdir(parents=True)
+    f = root / "7" / "screenshot.png"
+    f.write_bytes(b"\x89PNG" + b"real" * 100)
+    before = _tree_fingerprint(str(root))
+
+    os.utime(f, (0, 0))                       # force a distinct mtime
+    f.write_bytes(b"PLAYWRIGHT_PNG")
+    assert _tree_fingerprint(str(root)) != before
+
+
+def test_the_index_database_is_watched_too(tmp_path):
+    """~/.kwara/index.db holds `signals` and none of the case tables. Watching
+    only case tables left every discovery-index write invisible."""
+    import sqlite3 as s3
+
+    idx = str(tmp_path / "index.db")
+    conn = s3.connect(idx)
+    conn.execute("CREATE TABLE signals (id INTEGER PRIMARY KEY, "
+                 "signal_type TEXT, signal_value TEXT)")
+    conn.commit()
+    before = _db_fingerprint(idx)
+    conn.execute("INSERT INTO signals (signal_type, signal_value) "
+                 "VALUES ('ads_txt_template', 'deadbeef')")
+    conn.commit()
+    conn.close()
+    assert _db_fingerprint(idx) != before

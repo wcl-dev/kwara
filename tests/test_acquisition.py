@@ -756,3 +756,145 @@ def test_an_off_site_redirect_body_is_retained(tmp_path, monkeypatch, site):
     site.route("/ads.txt", body=b"redirected content\n")
     ads = discovery.fetch_for_screening(site.url)
     assert "_body" in ads
+
+
+# ── export → restore → reanalysis ─────────────────────────────────────────
+
+def test_a_pack_survives_restore_and_reproduces_the_analysis(db, tmp_path,
+                                                             monkeypatch):
+    """The point of carrying the bytes. A recipient must be able to rebuild
+    the database from the pack and get the SAME verification verdicts and the
+    SAME clusters — otherwise the pack proves the bytes exist without proving
+    they support anything.
+
+    Two clusters on purpose: one whose bytes were retained, and one fetched
+    before retention existed. A round trip that only preserved the positive
+    verdict would let the recipient's analysis bind a group ours refused to.
+    """
+    import subprocess
+    import sys
+    import zipfile
+
+    from kwara.clusters import case_clusters
+    from kwara.clustering_infra import shared_ad_accounts
+
+    kept = b"clickforce.com.tw, pub-873, DIRECT\r\n"
+    kept_sha = hashlib.sha256(kept).hexdigest()
+    lost_sha = "e" * 64
+
+    for host in ("g1.test", "g2.test"):
+        _domain_with_ads(db, f"https://{host}/", _ads(kept_sha), body=kept)
+    for host in ("u1.test", "u2.test"):
+        _domain_with_ads(db, f"https://{host}/", _ads(lost_sha))
+
+    before_t = {t["sha256"]: t["verification"]
+                for t in shared_ad_accounts(db, 1)["by_template"]}
+    assert before_t[kept_sha] == acq.VERIFIED
+    assert before_t[lost_sha] == acq.LEGACY_UNVERIFIABLE
+    before_groups = {tuple(sorted(g["domains"])) for g in case_clusters(db, 1)["groups"]}
+    assert before_groups == {("g1.test", "g2.test")}
+
+    monkeypatch.setattr(config, "EXPORTS_DIR", str(tmp_path / "exports"))
+    zip_path = _export(db)
+
+    extracted = tmp_path / "unpacked"
+    with zipfile.ZipFile(zip_path) as zf:
+        zf.extractall(extracted)
+
+    restored_home = tmp_path / "restored"
+    env = {**os.environ, "KWARA_DATA_DIR": str(restored_home),
+           "KWARA_DB_PATH": str(restored_home / "kwara.db")}
+    out = subprocess.run(
+        [sys.executable, "restore_from_export.py", str(extracted)],
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        env=env, capture_output=True, text=True)
+    assert out.returncode == 0, out.stdout + out.stderr
+
+    rdb = get_conn(str(restored_home / "kwara.db"))
+    monkeypatch.setattr(config, "DATA_DIR", str(restored_home))
+
+    # Without ads_txt_json the restored database would hold the bytes and no
+    # record naming their hash, so nothing could be re-derived.
+    assert rdb.execute("SELECT COUNT(*) FROM scan_runs WHERE ads_txt_json "
+                       "IS NOT NULL").fetchone()[0] == 4
+
+    after_t = {t["sha256"]: t["verification"]
+               for t in shared_ad_accounts(rdb, 1)["by_template"]}
+    assert after_t[kept_sha] == acq.VERIFIED, \
+        "a verified cluster did not survive the round trip"
+    assert after_t[lost_sha] == acq.LEGACY_UNVERIFIABLE, \
+        "an unverifiable cluster came back verified"
+
+    after = case_clusters(rdb, 1)
+    assert {tuple(sorted(g["domains"])) for g in after["groups"]} == before_groups
+    assert [u["claimed_sha256"] for u in after["unverified_templates"]] == [lost_sha]
+
+
+def test_a_pack_whose_body_is_altered_after_restore_fails_verification(
+        db, tmp_path, monkeypatch):
+    """The negative half: tampering on the RECIPIENT's side must show up when
+    they re-run the analysis, not pass because we vouched for it."""
+    from kwara.clustering_infra import shared_ad_accounts
+
+    body = b"clickforce.com.tw, pub-873, DIRECT\r\n"
+    sha = hashlib.sha256(body).hexdigest()
+    for host in ("a.test", "b.test"):
+        _domain_with_ads(db, f"https://{host}/", _ads(sha), body=body)
+    assert shared_ad_accounts(db, 1)["by_template"][0]["verification"] \
+        == acq.VERIFIED
+
+    path = db.execute("SELECT body_path FROM acquisitions ORDER BY id DESC "
+                      "LIMIT 1").fetchone()["body_path"]
+    with open(path, "wb") as fh:
+        fh.write(b"different bytes entirely\r\n")
+
+    assert shared_ad_accounts(db, 1)["by_template"][0]["verification"] \
+        == acq.BODY_MISMATCH
+
+
+def test_an_unverifiable_template_is_reported_with_its_remedy(db):
+    """Ruling: do not let it form a group at a softer tier — that keeps the
+    same inference under a gentler label. Return the observation, the domains,
+    the claimed hash, why it cannot be verified, and what would settle it."""
+    from kwara.clusters import case_clusters
+
+    for host in ("a.test", "b.test"):
+        _domain_with_ads(db, f"https://{host}/", _ads("f" * 64))
+
+    r = case_clusters(db, 1)
+    assert not any(s["type"] == "ads_template"
+                   for g in r["groups"] for s in g["signals"])
+    u = r["unverified_templates"]
+    assert len(u) == 1
+    assert sorted(u[0]["domains"]) == ["a.test", "b.test"]
+    assert u[0]["claimed_sha256"] == "f" * 64
+    assert u[0]["verification"] == acq.LEGACY_UNVERIFIABLE
+    assert u[0]["why"] and u[0]["action"]
+
+
+def test_an_unverifiable_template_does_not_seed_the_discovery_index(db,
+                                                                    tmp_path):
+    """The template index screens future candidates. A hash nobody can check
+    would propagate into every later sweep, and every promotion it produced
+    would inherit the same weakness."""
+    from kwara.index_db import SIGNAL_ADS_TXT_TEMPLATE, extract_case_signals
+
+    body = b"clickforce.com.tw, pub-873, DIRECT\r\n"
+    sha = hashlib.sha256(body).hexdigest()
+    _domain_with_ads(db, "https://kept.test/", _ads(sha), body=body)
+    _domain_with_ads(db, "https://lost.test/", _ads("e" * 64))
+
+    seeded = {s["signal_value"] for s in extract_case_signals(db, 1, "db", "t")
+              if s["signal_type"] == SIGNAL_ADS_TXT_TEMPLATE}
+    assert sha in seeded
+    assert "e" * 64 not in seeded, "an unverifiable hash seeded the funnel"
+
+
+def test_the_narrative_does_not_call_an_unverifiable_template_strong(db):
+    from kwara.narrative import signal_summary
+
+    for host in ("a.test", "b.test"):
+        _domain_with_ads(db, f"https://{host}/", _ads("c" * 64))
+    s = signal_summary(db, 1)
+    assert s["ads_template"] == 0
+    assert s["ads_template_unverified"] == 1

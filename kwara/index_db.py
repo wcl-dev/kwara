@@ -64,6 +64,7 @@ from .config import (ADS_TXT_COMMODITY_PREVALENCE,
                     ADS_TXT_INDEX_MAX_CARRIER_ACCOUNTS, ADS_TXT_MANAGER_BREADTH,
                     ADS_TXT_MANAGER_MIN_APEXES, HEADER_VALUE_MIN_LENGTH,
                     HEADER_VALUE_STANDARD_NOISE)
+from . import acquisition as _acq
 from . import prevalence as _prevalence
 from .clustering_infra import (MAJOR_AD_EXCHANGES, _account_apex_footprint,
                               _is_noise_endpoint, shared_ad_accounts)
@@ -431,8 +432,18 @@ def extract_case_signals(
     for srid, run_at, domain, ads in parsed_ads:
         sha = (ads.get("raw_sha256") or "").strip()
         if sha and ads.get("status") == "ok" and (ads.get("records") or []):
-            _emit(SIGNAL_ADS_TXT_TEMPLATE, sha, platform=None,
-                  scan_run_id=srid, final_domain=domain, observed_at=run_at)
+            # The template index is the discovery funnel's knowledge base: a
+            # hash here screens future candidates and promotes matches. A hash
+            # nobody can check against retained bytes must not seed that — an
+            # unverifiable claim would propagate into every later sweep, and
+            # the promotion it produced would inherit the same weakness.
+            aid = ads.get("acquisition_id")
+            usable = aid is not None and _acq.verify(
+                conn, aid, expect_kind=_acq.KIND_ADS_TXT,
+                expect_scan_run_id=srid, expect_sha256=sha) == _acq.VERIFIED
+            if usable:
+                _emit(SIGNAL_ADS_TXT_TEMPLATE, sha, platform=None,
+                      scan_run_id=srid, final_domain=domain, observed_at=run_at)
         for stype, key in ((SIGNAL_ADS_TXT_OWNER, "owner_domain"),
                            (SIGNAL_ADS_TXT_MANAGER, "manager_domain")):
             declared = (ads.get(key) or "").strip().lower()

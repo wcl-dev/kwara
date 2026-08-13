@@ -138,7 +138,11 @@ def restore(export_dir, case_title="Restored case"):
                  u.get("tls_info_json", "") or None,
                  u.get("final_response_headers_json", "") or None,
                  u.get("corroboration_json", "") or None,
-                 u.get("cloaking_signal_json", "") or None),
+                 u.get("cloaking_signal_json", "") or None,
+                 # A legacy pack predates ads.txt retention entirely, so this
+                 # is always absent — but the placeholder count has to match
+                 # or every legacy restore raises.
+                 u.get("ads_txt_json", "") or None),
             )
             legacy_count += 1
         print(f"  scan_runs (legacy flatten): {legacy_count}")
@@ -188,8 +192,11 @@ def restore(export_dir, case_title="Restored case"):
     # per-snapshot dirs, matching the ZIP. Live (non-restored) captures use
     # the per-scan_run/per-capture dir scheme; both layouts coexist fine
     # because each snapshot row stores its absolute path.
+    # A case with no captures produces no snapshots.csv — the exporter writes
+    # it only when there is something to write. Restore crashed on those packs,
+    # which is every ads.txt-only case.
     snap_csv = os.path.join(export_dir, "snapshots", "snapshots.csv")
-    snaps = read_csv(snap_csv)
+    snaps = read_csv(snap_csv) if os.path.isfile(snap_csv) else []
     for s in snaps:
         sr_id = s["scan_run_id"]
         snap_id = s.get("snapshot_id", "") or "legacy"
@@ -304,7 +311,8 @@ def restore(export_dir, case_title="Restored case"):
     # --- 7. Copy snapshot files ---
     snap_src_dir = os.path.join(export_dir, "snapshots")
     copied = 0
-    for entry in os.listdir(snap_src_dir):
+    for entry in (os.listdir(snap_src_dir)
+                  if os.path.isdir(snap_src_dir) else []):
         src_path = os.path.join(snap_src_dir, entry)
         if not os.path.isdir(src_path) or entry == "screenshots":
             continue

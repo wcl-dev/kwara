@@ -284,8 +284,16 @@ def export_case(conn: sqlite3.Connection, case_id: int) -> str:
                         f"acquisition {a['id']} references a body that is not "
                         f"on disk: {a['body_path']}. Export refuses rather "
                         f"than ship a pack missing the evidence it cites.")
-                with open(a["body_path"], "rb") as fh:
-                    data = fh.read()
+                from .acquisition import read_back
+                try:
+                    # Same no-follow read verify() uses. Opening by pathname
+                    # here would let a link planted at the artifact ship
+                    # someone else's bytes under this acquisition's hash.
+                    data = read_back(a["body_path"])
+                except OSError as exc:
+                    raise ValueError(
+                        f"acquisition {a['id']} body could not be read as a "
+                        f"regular file ({exc}). Export refuses.") from None
                 if _sha256(data) != a["captured_sha256"]:
                     raise ValueError(
                         f"acquisition {a['id']} body does not match its "
