@@ -167,6 +167,54 @@ the tool will not invent the connection for you.
 
 `reconcile` never deletes.
 
+## What a finding can prove
+
+Two domains serving a byte-identical ads.txt is the strongest binding this
+tool makes. Until 2026-08-12 it was also a claim a recipient had to take on
+trust: kwara hashed the response, parsed it and discarded the bytes, and the
+export pack carried no ads.txt at all.
+
+Now every response is retained — 200s, 403 challenge pages, redirects alike —
+and travels in the pack, so a recipient re-hashes rather than believes.
+
+Read the `verification` on a template cluster before quoting it:
+
+| Verdict | Means |
+|---|---|
+| `verified` | Every member's bytes are on disk and still hash to what the record claims. This one you can stand behind |
+| `legacy_unverifiable` | Fetched before retention existed. Real history, but nobody can now show the files were identical |
+| `body_missing` / `body_mismatch` | The retained file is gone or has changed since capture |
+| `hash_disagrees` | The bytes are intact and are not the ones the derived record claims |
+| `truncated` | The read hit the size ceiling; a prefix hash cannot establish identity |
+
+**Only `verified` clusters bind an operator group.** Anything else appears
+under `unverified_templates` with the domains, the claimed hash, why it cannot
+be verified, and the re-fetch that would settle it — visible, but not merging
+anything. Re-fetching restores it where the site still serves the same bytes;
+where the site has started refusing requests, that binding is simply gone, and
+saying so is more useful than implying otherwise.
+
+Two limits worth stating to whoever reads your report. Retention makes a hash
+recomputable; it does not establish WHEN the fetch happened, because
+`fetched_at` is this machine's clock. And two identical files prove identical
+captured bytes, not a common operator — platform-generated ads.txt templates
+are common.
+
+## Shared GTM containers
+
+A GA4 property, an AdSense publisher id or a Meta Page identifies an ACCOUNT
+someone holds. A Google Tag Manager container identifies a tag deployment,
+which an agency or a CMS vendor can legitimately run across unrelated clients.
+
+So a shared container never binds an operator group. It appears in
+`weak_links` at tier `相關未證實` with the container id, every domain, which
+group each domain sits in, and both competing readings — one operator running
+two monetisation lines, or two operators sharing a managed container. Which
+one applies is not answerable from the data alone: there is no reference
+population for tracking IDs, so nobody can say how rare a shared container is.
+
+GA4, AdSense, Meta and the rest are unaffected and still bind.
+
 ---
 
 ## Delivery

@@ -199,6 +199,53 @@ unless `--apply` is given, and it refuses far more than it accepts:
 Nothing here deletes. The module contains no deletion primitive at all, and a
 test asserts that against the parsed source.
 
+`acquisitions` in the report covers the other half of "evidence nothing points
+at": rows whose scan_run has been deleted (the foreign key is SET NULL rather
+than CASCADE precisely so the record survives a case deletion, which means
+these accumulate by design), rows whose retained body is missing, and rows
+whose body no longer matches its recorded hash. Reported only.
+
+**Retained response bytes**
+
+Every ads.txt fetch — 200, 403, redirect — writes its body to an immutable
+artifact and records the acquisition beside it: requested and final URL,
+status, headers with duplicates preserved, user agent, tool version, byte
+count, and TWO hashes. `captured_sha256` covers what was written;
+`complete_sha256` covers the whole response and is NULL when the read hit the
+size ceiling. Only `complete_sha256` may be compared for byte-identity — a
+prefix hash matched as identity would bind two files that differ after the
+first 256 KB.
+
+The table is append-only: a forced re-fetch inserts, and no code path updates
+or deletes a row or a body.
+
+`analyze clusters` therefore reports a `verification` on every template
+cluster, and a `verification_by_domain` naming the weakest member:
+
+| Verdict | Means |
+|---|---|
+| `verified` | Bytes present and still hashing to the claim. Only these bind a group |
+| `legacy_unverifiable` | Fetched before retention existed |
+| `body_missing` / `body_mismatch` | The artifact is gone or has changed |
+| `hash_disagrees` | Intact bytes that are not the ones claimed |
+| `wrong_scan_run` / `wrong_kind` | The acquisition cited belongs to something else |
+| `truncated` | A prefix cannot establish identity |
+
+Clusters that are not `verified` appear under `unverified_templates` with the
+claimed hash, the reason, and the re-fetch that would settle it. They are
+never rendered as a group at a softer tier — that would keep the same
+inference under a gentler label.
+
+**Shared GTM containers**
+
+`weak_links` carries `type: "gtm_container"` entries at tier `相關未證實`,
+with `container_id`, `domains`, per-domain `members` giving each domain's
+`group_id` (null when it belongs to no confirmed group), `spans_groups`, and
+both `readings`. A container never contributes a union edge. In the cross-case
+index it has its own `gtm_container` signal type rather than `tracking_id`,
+whose recurrence wording reads as "the same operator resurfaced" — a sentence
+a shared container does not support.
+
 ### Where the evidence actually lives
 
 Captured files are ordinary files, independent of any UI:

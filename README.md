@@ -120,6 +120,8 @@ command reference, the tool list, and the reasoning.
 | `kwara/config.py` | Centralized configuration and environment variable defaults |
 | `kwara/corroboration.py` | Third-party evidence services (Wayback, urlscan, RFC 3161) |
 | `kwara/reconcile.py` | Disk → database reconciliation: captures the database has forgotten |
+| `kwara/acquisition.py` | Response bytes an ads.txt finding rests on: retention, two hashes, verification |
+| `corpus_manifest.py` | Hashes the gitignored discovery corpus so its integrity is checkable |
 | `docs/agent-interface.md` | Full CLI command reference and MCP tool list |
 | `docs/analysis-design.md` | How the analysis layer works and why — algorithms, thresholds, invariants |
 | `docs/guide.md` · `docs/guide.zh-TW.md` | Usage guide, English and Traditional Chinese |
