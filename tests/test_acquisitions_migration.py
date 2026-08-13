@@ -184,3 +184,99 @@ def test_a_stranded_temp_table_from_an_older_build_is_adopted(old_db):
     assert old_db.execute("SELECT COUNT(*) FROM acquisitions").fetchone()[0] == 3
     assert _clause(old_db) == "SET NULL"
     assert _indexes(old_db) == {"idx_acq_scan_run", "idx_acq_complete"}
+
+
+# ── the two states the earlier non-transactional build could strand ───────
+
+def test_a_stranded_temp_beside_an_empty_new_table_is_recovered(old_db):
+    """The dangerous one. The earlier build could die between creating the new
+    table and copying the rows, leaving BOTH tables — and because the new one
+    passes the foreign-key check, a migration that only looked at the FK
+    returned happily and left the rows behind forever."""
+    old_db.execute("PRAGMA foreign_keys = OFF")
+    old_db.execute(f"ALTER TABLE acquisitions RENAME TO {_ACQ_TEMP}")
+    old_db.executescript(_OLD_DDL.replace("ON DELETE CASCADE",
+                                          "ON DELETE SET NULL")
+                         .replace("CREATE INDEX idx_acq_scan_run",
+                                  "CREATE INDEX IF NOT EXISTS idx_x1")
+                         .replace("CREATE INDEX idx_acq_complete",
+                                  "CREATE INDEX IF NOT EXISTS idx_x2"))
+    old_db.commit()
+    old_db.execute("PRAGMA foreign_keys = ON")
+    assert old_db.execute("SELECT COUNT(*) FROM acquisitions").fetchone()[0] == 0
+    assert old_db.execute(
+        f"SELECT COUNT(*) FROM {_ACQ_TEMP}").fetchone()[0] == 3
+
+    migrate_db(old_db)
+
+    tables = {r[0] for r in old_db.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'")}
+    assert _ACQ_TEMP not in tables, "the temp table outlived its rows"
+    assert old_db.execute(
+        "SELECT COUNT(*) FROM acquisitions").fetchone()[0] == 3, \
+        "the stranded rows were not recovered"
+
+
+def test_recovery_merges_a_half_copied_state_without_conflict(old_db):
+    """A copy that got partway through leaves overlapping ids. Recovery must
+    converge rather than raise on the duplicates."""
+    old_db.execute("PRAGMA foreign_keys = OFF")
+    old_db.execute(f"ALTER TABLE acquisitions RENAME TO {_ACQ_TEMP}")
+    old_db.executescript(_OLD_DDL.replace("ON DELETE CASCADE",
+                                          "ON DELETE SET NULL")
+                         .replace("CREATE INDEX idx_acq_scan_run",
+                                  "CREATE INDEX IF NOT EXISTS idx_y1")
+                         .replace("CREATE INDEX idx_acq_complete",
+                                  "CREATE INDEX IF NOT EXISTS idx_y2"))
+    cols = ", ".join(r[1] for r in old_db.execute(
+        "PRAGMA table_info(acquisitions)"))
+    old_db.execute(f"INSERT INTO acquisitions ({cols}) "
+                   f"SELECT {cols} FROM {_ACQ_TEMP} WHERE id = 1")
+    old_db.commit()
+    old_db.execute("PRAGMA foreign_keys = ON")
+
+    migrate_db(old_db)
+
+    rows = old_db.execute("SELECT id FROM acquisitions ORDER BY id").fetchall()
+    assert [r[0] for r in rows] == [1, 2, 3]
+
+
+def test_a_custom_index_survives_the_rebuild(old_db):
+    """The rebuild recreates kwara's two indexes. Anything the analyst added
+    must be replayed rather than quietly dropped."""
+    old_db.execute("CREATE INDEX idx_custom_url ON acquisitions(requested_url)")
+    old_db.commit()
+
+    migrate_db(old_db)
+
+    assert "idx_custom_url" in {r[0] for r in old_db.execute(
+        "SELECT name FROM sqlite_master WHERE type='index' "
+        "AND tbl_name='acquisitions'")}
+
+
+def test_a_failed_begin_reports_its_own_error(old_db, monkeypatch):
+    """An unconditional ROLLBACK replaced the real failure with "cannot
+    rollback - no transaction is active", hiding what actually went wrong."""
+    import kwara.db as dbmod
+
+    other = sqlite3.connect(old_db.execute(
+        "PRAGMA database_list").fetchone()[2], timeout=0)
+    other.execute("BEGIN EXCLUSIVE")
+    try:
+        with pytest.raises(sqlite3.OperationalError) as exc:
+            dbmod._migrate_acquisitions_fk(old_db)
+        assert "cannot rollback" not in str(exc.value).lower(), \
+            f"the real error was masked: {exc.value}"
+    finally:
+        other.execute("ROLLBACK")
+        other.close()
+
+
+def test_the_callers_foreign_key_setting_is_restored(old_db):
+    """The migration turns foreign_keys off to rebuild. It must put back what
+    the caller had, not switch it on unconditionally."""
+    import kwara.db as dbmod
+
+    old_db.execute("PRAGMA foreign_keys = OFF")
+    dbmod._migrate_acquisitions_fk(old_db)
+    assert old_db.execute("PRAGMA foreign_keys").fetchone()[0] == 0

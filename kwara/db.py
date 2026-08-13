@@ -130,6 +130,49 @@ CREATE TABLE acquisitions (
 _ACQ_TEMP = "acquisitions_cascade"
 
 
+def _recover_stranded_acquisitions(conn: sqlite3.Connection, tables: set) -> set:
+    """Finish a rebuild the earlier non-transactional migration left half-done.
+
+    That version could die at two points, and BOTH leave a durable state:
+
+      temp only — it died between the rename and the create. The rows are
+      reachable only under the temp name.
+
+      temp AND a new empty table — it died between the create and the copy.
+      This one is the dangerous state, because the new table passes the
+      foreign-key check, so a migration that only looked at the FK returned
+      happily and left the rows behind in the temp table forever.
+
+    Neither table is dropped before its rows are safe. Rows are merged by id
+    with INSERT OR IGNORE, so a partially-completed copy converges rather than
+    conflicting.
+    """
+    if _ACQ_TEMP not in tables:
+        return tables
+
+    if "acquisitions" not in tables:
+        conn.execute(f"ALTER TABLE {_ACQ_TEMP} RENAME TO acquisitions")
+        conn.commit()
+        return (tables - {_ACQ_TEMP}) | {"acquisitions"}
+
+    cols = ", ".join(r[1] for r in conn.execute(
+        "PRAGMA table_info(acquisitions)"))
+    conn.commit()
+    conn.execute("PRAGMA foreign_keys = OFF")
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute(f"INSERT OR IGNORE INTO acquisitions ({cols}) "
+                     f"SELECT {cols} FROM {_ACQ_TEMP}")
+        conn.execute(f"DROP TABLE {_ACQ_TEMP}")
+        conn.execute("COMMIT")
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+    finally:
+        conn.execute("PRAGMA foreign_keys = ON")
+    return tables - {_ACQ_TEMP}
+
+
 def _migrate_acquisitions_fk(conn: sqlite3.Connection) -> None:
     """Rebuild `acquisitions` if it still cascades from scan_runs.
 
@@ -151,8 +194,12 @@ def _migrate_acquisitions_fk(conn: sqlite3.Connection) -> None:
     them. An earlier build of this migration completed "successfully" and left
     the table with no indexes at all.
 
-    RECOVERABLE. An interrupted run of that earlier build could strand
-    `acquisitions_cascade`; it is adopted rather than ignored.
+    RECOVERABLE. Either state the earlier build could strand is finished
+    first; see `_recover_stranded_acquisitions`.
+
+    Indexes on the old table are carried across by capturing their DDL BEFORE
+    the rename (which rewrites the table name in it) and replaying anything
+    that is not one of kwara's own two.
     """
     try:
         tables = {r[0] for r in conn.execute(
@@ -160,12 +207,7 @@ def _migrate_acquisitions_fk(conn: sqlite3.Connection) -> None:
     except sqlite3.Error:
         return
 
-    if _ACQ_TEMP in tables and "acquisitions" not in tables:
-        # Stranded by an interrupted earlier migration. The temp table holds
-        # the rows; finish the job rather than leaving them unreachable.
-        conn.execute(f"ALTER TABLE {_ACQ_TEMP} RENAME TO acquisitions")
-        conn.commit()
-        tables = (tables - {_ACQ_TEMP}) | {"acquisitions"}
+    tables = _recover_stranded_acquisitions(conn, tables)
 
     if "acquisitions" not in tables:
         return
@@ -180,20 +222,28 @@ def _migrate_acquisitions_fk(conn: sqlite3.Connection) -> None:
 
     cols = ", ".join(r[1] for r in conn.execute(
         "PRAGMA table_info(acquisitions)"))
+    # Captured before the rename, so the DDL still names `acquisitions`.
+    # kwara's own two are in _ACQUISITIONS_DDL; anything else is someone's
+    # index and is replayed rather than quietly dropped.
+    ours = {"idx_acq_scan_run", "idx_acq_complete"}
+    custom = [r[1] for r in conn.execute(
+        "SELECT name, sql FROM sqlite_master WHERE type='index' "
+        "AND tbl_name='acquisitions' AND sql IS NOT NULL").fetchall()
+        if r[0] not in ours]
 
     # foreign_keys is a no-op inside a transaction, so it is set before BEGIN
-    # and restored after. Without it the DROP cascades the very rows being
-    # preserved.
+    # and restored after — to whatever the CALLER had, not unconditionally on.
+    prior_fk = conn.execute("PRAGMA foreign_keys").fetchone()[0]
     conn.commit()
     conn.execute("PRAGMA foreign_keys = OFF")
+    began = False
     try:
         conn.execute("BEGIN IMMEDIATE")
-        conn.execute(f"DROP TABLE IF EXISTS {_ACQ_TEMP}")
+        began = True
         conn.execute(f"ALTER TABLE acquisitions RENAME TO {_ACQ_TEMP}")
         # The rename carries the indexes across but NOT their names, which
         # stay taken — so recreating them raises "already exists". They belong
-        # to the temp table and die with it either way; drop them explicitly
-        # so the new table can claim the names inside this same transaction.
+        # to the temp table and die with it either way.
         for (idx,) in conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='index' "
                 "AND tbl_name = ? AND name NOT LIKE 'sqlite_%'",
@@ -201,15 +251,24 @@ def _migrate_acquisitions_fk(conn: sqlite3.Connection) -> None:
             conn.execute(f"DROP INDEX {idx}")
         for stmt in _ACQUISITIONS_DDL:
             conn.execute(stmt)
+        for stmt in custom:
+            conn.execute(stmt)
         conn.execute(f"INSERT INTO acquisitions ({cols}) "
                      f"SELECT {cols} FROM {_ACQ_TEMP}")
         conn.execute(f"DROP TABLE {_ACQ_TEMP}")
         conn.execute("COMMIT")
     except BaseException:
-        conn.execute("ROLLBACK")
+        # Only if one actually began. A failed BEGIN would otherwise be
+        # replaced by "cannot rollback - no transaction is active", hiding
+        # the real error.
+        if began:
+            try:
+                conn.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
         raise
     finally:
-        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute(f"PRAGMA foreign_keys = {'ON' if prior_fk else 'OFF'}")
 
 
 # Same signals as _snapshot_worker / snapshots for HTML challenge pages
