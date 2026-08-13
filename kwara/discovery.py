@@ -359,17 +359,43 @@ def bank_body(bank_path: str, domain: str, body: bytes) -> tuple[str, str]:
 
 
 def reserve_run(bank: str | None = None):
-    """Reserve a run file and RETURN THE OPEN HANDLE.
+    """Reserve a run file with ONE exclusive open and return that handle.
 
-    `open_run` closes its exclusive descriptor and hands back a pathname, so a
-    caller reopening that name races anything that swaps a symlink in between.
-    Keeping the descriptor removes the window entirely: the writer holds the
-    file it reserved, whatever later happens to the name.
+    The pathname is never reopened. An earlier version created the file, closed
+    the descriptor and handed back a name for the caller to open again — which
+    still raced anything that could replace the file at that name between the
+    two opens. O_NOFOLLOW rejects a symlink, but a regular file swapped in is
+    not a symlink. Holding the descriptor means the writer has the file it
+    reserved regardless of what later happens to the name.
+
+    Returns (path, handle). The path is for reporting only.
     """
-    path = open_run(bank)
-    fd = os.open(path, os.O_WRONLY | os.O_APPEND
-                 | getattr(os, "O_NOFOLLOW", 0))
-    return path, os.fdopen(fd, "w", encoding="utf-8")
+    from . import config as _cfg
+
+    if bank:
+        parent = os.path.dirname(os.path.abspath(bank))
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        try:
+            fd = os.open(bank, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+        except FileExistsError:
+            raise ValueError(
+                f"{bank} already exists. A sweep is an immutable record; "
+                f"name a new destination or omit --bank for an auto-named "
+                f"run.") from None
+        return bank, os.fdopen(fd, "w", encoding="utf-8")
+
+    stamp = datetime.now(tz=timezone.utc).strftime("%Y%m%dT%H%M%S")
+    root = os.path.join(_cfg.DATA_DIR, "discovery-runs")
+    os.makedirs(root, exist_ok=True)
+    for _ in range(8):
+        path = os.path.join(root, f"{stamp}-{secrets.token_hex(3)}.jsonl")
+        try:
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+        except FileExistsError:
+            continue
+        return path, os.fdopen(fd, "w", encoding="utf-8")
+    raise RuntimeError(f"could not allocate a run file under {root}")
 
 
 def open_run(bank: str | None = None) -> str:

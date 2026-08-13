@@ -186,3 +186,43 @@ def test_the_index_database_is_watched_too(tmp_path):
     conn.commit()
     conn.close()
     assert _db_fingerprint(idx) != before
+
+
+def test_an_acquisition_row_write_is_noticed(tmp_path):
+    """acquisitions holds the response bytes a finding rests on. It was not in
+    TRACKED_TABLES, so a test inserting one was invisible."""
+    import sqlite3 as s3
+
+    from kwara.db import get_conn, init_db, migrate_db
+
+    p = str(tmp_path / "k.db")
+    conn = get_conn(p)
+    init_db(conn)
+    migrate_db(conn)
+    conn.commit()
+    before = _db_fingerprint(p)
+
+    conn.execute("INSERT INTO acquisitions (kind, requested_url, status, "
+                 "fetched_at) VALUES ('ads_txt', 'https://a/x', 'ok', '')")
+    conn.commit()
+    assert _db_fingerprint(p) != before
+
+
+def test_creating_a_live_store_where_there_was_none_is_noticed(tmp_path,
+                                                               monkeypatch):
+    """A test that CREATES a store escapes as badly as one that modifies it.
+    The guard used to skip entirely when the database was absent."""
+    monkeypatch.setenv("KWARA_REAL_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("KWARA_REAL_DB_PATH", str(tmp_path / "kwara.db"))
+
+    before = _snapshot_state()
+    assert before["db_exists"] == "False"
+
+    from kwara.db import get_conn, init_db
+    conn = get_conn(str(tmp_path / "kwara.db"))
+    init_db(conn)
+    conn.commit()
+
+    after = _snapshot_state()
+    assert after != before
+    assert after["db_exists"] == "True"

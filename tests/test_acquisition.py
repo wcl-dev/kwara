@@ -898,3 +898,115 @@ def test_the_narrative_does_not_call_an_unverifiable_template_strong(db):
     s = signal_summary(db, 1)
     assert s["ads_template"] == 0
     assert s["ads_template_unverified"] == 1
+
+
+def test_reserve_run_never_reopens_the_pathname(tmp_path, monkeypatch):
+    """One O_CREAT|O_EXCL open, and that descriptor is what gets written.
+    Creating the file, closing it, and reopening the NAME still races anything
+    that can put a different regular file there in between — O_NOFOLLOW only
+    rejects symlinks."""
+    import ast
+    import inspect
+
+    from kwara import discovery
+
+    src = inspect.getsource(discovery.reserve_run)
+    opens = [n for n in ast.walk(ast.parse(src))
+             if isinstance(n, ast.Call)
+             and isinstance(n.func, ast.Attribute) and n.func.attr == "open"]
+    assert len(opens) <= 2, "more than one open path — is the name reopened?"
+    for call in opens:
+        flags = ast.dump(call)
+        assert "O_EXCL" in flags and "O_CREAT" in flags, \
+            "an open without exclusive creation"
+
+    monkeypatch.setattr(config, "DATA_DIR", str(tmp_path / "data"))
+    path, fh = discovery.reserve_run(None)
+    with fh:
+        fh.write("x\n")
+    with open(path, encoding="utf-8") as f:
+        assert f.read() == "x\n"
+
+
+def test_reserve_run_refuses_an_existing_destination(tmp_path):
+    from kwara import discovery
+
+    existing = tmp_path / "round1.jsonl"
+    existing.write_text("prior sweep\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="already exists"):
+        discovery.reserve_run(str(existing))
+    assert existing.read_text(encoding="utf-8") == "prior sweep\n"
+
+
+def test_export_refuses_a_body_that_is_a_symlink(db, tmp_path, monkeypatch):
+    """verify() refuses links; export read by pathname, so a link planted at
+    the artifact would have shipped someone else's bytes under this
+    acquisition's hash."""
+    monkeypatch.setattr(config, "EXPORTS_DIR", str(tmp_path / "exports"))
+    body = b"clickforce.com.tw, pub-873, DIRECT\n"
+    sr = _scan_run(db, "https://a.test/")
+    aid = acq.record_fetch(db, scan_run_id=sr,
+                           requested_url="https://a.test/ads.txt",
+                           status="ok", status_code=200, body=body)
+    path = db.execute("SELECT body_path FROM acquisitions WHERE id=?",
+                      (aid,)).fetchone()["body_path"]
+    decoy = tmp_path / "decoy.body"
+    decoy.write_bytes(body)                      # identical content
+    os.remove(path)
+    os.symlink(str(decoy), path)
+
+    with pytest.raises(ValueError, match="regular file"):
+        _export(db)
+
+
+# ── acquisition health, as reconcile reports it ───────────────────────────
+
+def test_reconcile_reports_detached_missing_and_altered_acquisitions(
+        db, tmp_path):
+    """The other half of "evidence nothing points at". SET NULL makes detached
+    rows accumulate by design, so something has to look for them."""
+    from kwara import reconcile
+
+    sr = _scan_run(db, "https://a.test/")
+    good = acq.record_fetch(db, scan_run_id=sr, requested_url="https://a/1",
+                            status="ok", body=b"intact")
+    gone = acq.record_fetch(db, scan_run_id=sr, requested_url="https://a/2",
+                            status="ok", body=b"will vanish")
+    bent = acq.record_fetch(db, scan_run_id=sr, requested_url="https://a/3",
+                            status="ok", body=b"will change")
+    loose = acq.record_fetch(db, requested_url="https://a/4", status="ok",
+                             body=b"no scan_run")
+
+    os.remove(db.execute("SELECT body_path FROM acquisitions WHERE id=?",
+                         (gone,)).fetchone()["body_path"])
+    with open(db.execute("SELECT body_path FROM acquisitions WHERE id=?",
+                         (bent,)).fetchone()["body_path"], "wb") as fh:
+        fh.write(b"tampered")
+
+    db_path = db.execute("PRAGMA database_list").fetchone()[2]
+    db.commit()
+    h = reconcile.acquisition_health([db_path])
+
+    assert h["verified_bodies"] == 2                      # good + loose
+    assert [d["id"] for d in h["detached"]] == [loose]
+    assert [m["id"] for m in h["missing_bodies"]] == [gone]
+    assert [a["id"] for a in h["altered_bodies"]] == [bent]
+
+
+def test_acquisition_health_only_reports(db):
+    """No auto-delete, no auto-reattach: an acquisition is an append-only
+    record and deciding what to do about a broken one is the analyst's call."""
+    import ast
+    import inspect
+
+    from kwara import reconcile
+
+    src = inspect.getsource(reconcile.acquisition_health)
+    for node in ast.walk(ast.parse(src)):
+        if isinstance(node, ast.Call):
+            fn = node.func
+            name = (fn.attr if isinstance(fn, ast.Attribute)
+                    else fn.id if isinstance(fn, ast.Name) else "")
+            assert name not in {"remove", "unlink", "rmtree", "rename",
+                                "replace"}, name
+    assert "UPDATE" not in src.upper() and "DELETE FROM" not in src.upper()

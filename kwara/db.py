@@ -93,42 +93,121 @@ def migrate_db(conn: sqlite3.Connection) -> None:
     _backfill_legacy_capture_status(conn)
 
 
+# The acquisitions table as it must be. Kept here as one string so the
+# migration rebuilds EXACTLY what init_db creates — calling init_db from the
+# migration is what silently dropped both indexes: the rename carried them to
+# the temp table, `CREATE INDEX IF NOT EXISTS` saw the names still taken and
+# skipped, and the drop then took them away.
+# A TUPLE of statements, not a script: sqlite3.executescript implicitly
+# COMMITs any pending transaction before running, which silently ended the
+# transaction this rebuild depends on and left ROLLBACK with nothing to undo.
+_ACQUISITIONS_DDL = ("""
+CREATE TABLE acquisitions (
+    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind                  TEXT NOT NULL,
+    scan_run_id           INTEGER,
+    requested_url         TEXT NOT NULL,
+    final_url             TEXT,
+    redirect_chain_json   TEXT,
+    status                TEXT NOT NULL,
+    status_code           INTEGER,
+    fetched_at            TEXT NOT NULL,
+    response_headers_json TEXT,
+    user_agent            TEXT,
+    tool_version          TEXT,
+    truncated             INTEGER NOT NULL DEFAULT 0,
+    captured_bytes        INTEGER NOT NULL DEFAULT 0,
+    body_path             TEXT,
+    captured_sha256       TEXT,
+    complete_sha256       TEXT,
+    error                 TEXT,
+    FOREIGN KEY (scan_run_id) REFERENCES scan_runs(id) ON DELETE SET NULL
+)""",
+    "CREATE INDEX idx_acq_scan_run ON acquisitions(scan_run_id)",
+    "CREATE INDEX idx_acq_complete ON acquisitions(complete_sha256)",
+)
+
+_ACQ_TEMP = "acquisitions_cascade"
+
+
 def _migrate_acquisitions_fk(conn: sqlite3.Connection) -> None:
     """Rebuild `acquisitions` if it still cascades from scan_runs.
 
-    The table shipped on 2026-08-12 with ON DELETE CASCADE, so `delete_case`
-    — which deletes scan_runs — silently deleted acquisition rows with them.
-    An append-only table that quietly loses rows is not append-only.
+    The table shipped on 2026-08-12 with ON DELETE CASCADE, so `delete_case` —
+    which deletes scan_runs — silently deleted acquisition rows with them. An
+    append-only table that quietly loses rows is not append-only.
 
-    `CREATE TABLE IF NOT EXISTS` does nothing to a table that already exists,
-    so correcting the schema text only fixed databases created afterwards.
-    SQLite cannot alter a foreign key in place; the table has to be rebuilt.
+    SQLite cannot alter a foreign key in place, so the table is rebuilt. Three
+    things make that safe to run on someone's only copy of an investigation:
+
+    ATOMIC. The whole rebuild is one transaction. A process killed halfway
+    rolls back to the original table rather than leaving the database with a
+    renamed table and no `acquisitions` at all.
+
+    SELF-CONTAINED. The DDL lives here rather than calling init_db, which
+    commits internally — breaking the transaction — and whose
+    `CREATE INDEX IF NOT EXISTS` silently skipped both indexes, because the
+    rename had carried the names to the temp table and the drop then removed
+    them. An earlier build of this migration completed "successfully" and left
+    the table with no indexes at all.
+
+    RECOVERABLE. An interrupted run of that earlier build could strand
+    `acquisitions_cascade`; it is adopted rather than ignored.
     """
     try:
-        row = conn.execute(
-            "SELECT sql FROM sqlite_master WHERE type='table' "
-            "AND name='acquisitions'").fetchone()
+        tables = {r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
     except sqlite3.Error:
         return
+
+    if _ACQ_TEMP in tables and "acquisitions" not in tables:
+        # Stranded by an interrupted earlier migration. The temp table holds
+        # the rows; finish the job rather than leaving them unreachable.
+        conn.execute(f"ALTER TABLE {_ACQ_TEMP} RENAME TO acquisitions")
+        conn.commit()
+        tables = (tables - {_ACQ_TEMP}) | {"acquisitions"}
+
+    if "acquisitions" not in tables:
+        return
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' "
+        "AND name='acquisitions'").fetchone()
     # Match the CLAUSE, not the word: the corrected schema's own comment says
     # "NO CASCADE, deliberately", and matching bare "CASCADE" rebuilt the
     # table on every single migrate_db call.
     if not row or "ON DELETE CASCADE" not in (row[0] or "").upper():
         return
 
-    cols = [r[1] for r in conn.execute("PRAGMA table_info(acquisitions)")]
-    names = ", ".join(cols)
-    # Foreign keys must be off for the rename-and-copy, or the drop cascades
-    # the very rows being preserved.
+    cols = ", ".join(r[1] for r in conn.execute(
+        "PRAGMA table_info(acquisitions)"))
+
+    # foreign_keys is a no-op inside a transaction, so it is set before BEGIN
+    # and restored after. Without it the DROP cascades the very rows being
+    # preserved.
     conn.commit()
     conn.execute("PRAGMA foreign_keys = OFF")
     try:
-        conn.execute("ALTER TABLE acquisitions RENAME TO acquisitions_cascade")
-        init_db(conn)                       # recreates it with SET NULL
-        conn.execute(f"INSERT INTO acquisitions ({names}) "
-                     f"SELECT {names} FROM acquisitions_cascade")
-        conn.execute("DROP TABLE acquisitions_cascade")
-        conn.commit()
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute(f"DROP TABLE IF EXISTS {_ACQ_TEMP}")
+        conn.execute(f"ALTER TABLE acquisitions RENAME TO {_ACQ_TEMP}")
+        # The rename carries the indexes across but NOT their names, which
+        # stay taken — so recreating them raises "already exists". They belong
+        # to the temp table and die with it either way; drop them explicitly
+        # so the new table can claim the names inside this same transaction.
+        for (idx,) in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='index' "
+                "AND tbl_name = ? AND name NOT LIKE 'sqlite_%'",
+                (_ACQ_TEMP,)).fetchall():
+            conn.execute(f"DROP INDEX {idx}")
+        for stmt in _ACQUISITIONS_DDL:
+            conn.execute(stmt)
+        conn.execute(f"INSERT INTO acquisitions ({cols}) "
+                     f"SELECT {cols} FROM {_ACQ_TEMP}")
+        conn.execute(f"DROP TABLE {_ACQ_TEMP}")
+        conn.execute("COMMIT")
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
     finally:
         conn.execute("PRAGMA foreign_keys = ON")
 
