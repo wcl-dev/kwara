@@ -15,6 +15,12 @@ __pycache__/
 # Streamlit 本機密鑰（若使用 secrets）
 .streamlit/secrets.toml
 
+# API keys / local secrets — kwara reads these from the ENVIRONMENT, never from
+# a tracked file. .env is where you keep them locally; only .env.example ships.
+.env
+.env.*
+!.env.example
+
 # kwara 本機 SQLite 與快照產物（clone 後由程式自動建立）
 kwara/data/*.db
 kwara/data/*.db-*

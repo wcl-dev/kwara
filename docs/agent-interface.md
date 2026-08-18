@@ -291,6 +291,35 @@ python -m kwara.cli discover prevalence --observations observations.jsonl \
 
 `screen` 只能把候選升級，不能替它開脫——未命中回報 `no_match`，不是「乾淨」。
 
+### `discover publicwww` — 用追蹤碼反查候選網域
+
+`sellers.json` 給的是「這家 SSP 服務哪些發布商」；PublicWWW 給的是另一個方向——**哪些網域的原始碼裡埋了這個追蹤碼**。ads.txt screening 做不到這個 pivot，因為 ads.txt 是固定路徑、不是頁面原始碼。
+
+```bash
+# 需要 KWARA_PUBLICWWW_API_KEY；產出跟 discover candidates 同格式，直接接 screen
+python -m kwara.cli discover publicwww 'G-ABC1234' 'AW-9988776' \
+    --out cand.txt --exclude-scanned
+python -m kwara.cli discover screen --domains cand.txt --bank obs.jsonl
+```
+
+同操作者會把同一個追蹤碼埋在一堆子網域上，所以預設**收斂到 apex 去重**（`--no-apex` 保留完整 hostname）。`--limit` 蓋掉 `KWARA_PUBLICWWW_MAX_RESULTS`。
+
+兩個刻意的邊界：
+
+- **key 不落地。** PublicWWW 的 export API 把 key 放在 query string，而 kwara 是個「什麼都留存」的工具（acquisition 存 requested URL、screen bank 存觀測 URL、export 全打包）。所以這個來源把 HTTP 交易**保持拋棄式**：key 走 request params、絕不 log URL、不寫 acquisition、不 bank body，只有網域活下來。`tests/test_publicwww_source.py` 對著原始碼把這條釘死。
+- **CLI-only，不開給 MCP。** 拿追蹤碼去查等於告訴第三方你在追哪個 operator——跟 `run corroborate` 同類的揭露決定。`mcp_server._WITHHELD` 列有 `cmd_discover_publicwww`，指令跑之前也會在 stderr 明講這件事。
+
+### `discover normalize` — 任意清單 → apex 的統一入口
+
+`candidates`（sellers.json）與 `publicwww`（追蹤碼）各自產候選；封鎖清單則常以 `hosts`（`0.0.0.0 bad.example`）或 adblock（`||bad.example^`）格式散落。`normalize` 把這些連同純清單、CSV 一起收斂成可直接餵 `screen` 的 apex，純本機、不連網：
+
+```bash
+python -m kwara.cli discover normalize --file blocklist.txt --out cand.txt
+python -m kwara.cli discover screen --domains cand.txt --bank obs.jsonl
+```
+
+element-hiding、regex、例外（`@@`）等非網域規則會被丟掉——它們不是乾淨網域。`--no-apex` 保留完整 hostname。MCP 對應工具 `normalize_domains`（本機轉換，對外曝露）。
+
 ## MCP server
 
 ### Install
@@ -394,6 +423,7 @@ quietly diverge.
 | 工具 | 對外？ | 說明 |
 |---|---|---|
 | `extract_candidates` | 否 | 從手上的 sellers.json 取出候選發布商網域 |
+| `normalize_domains` | 否 | 把任意格式清單（plain/hosts/adblock/CSV）收斂成 apex；本機、不連網 |
 | `screen_candidates` | **是** | 抓候選的 /ads.txt 比對已知指紋。**每次上限 500、預設 100** |
 | `cluster_observations` | 否 | 讓已存的觀測彼此分群，不需事先認識任何網域 |
 | `build_prevalence_table` | 否 | 建參照母體表，tier 判定會讀它 |
