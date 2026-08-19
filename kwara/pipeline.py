@@ -5,6 +5,7 @@ app.py 只呼叫這裡，不直接碰底層模組。
 """
 import json
 import sqlite3
+import sys
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
@@ -28,7 +29,32 @@ _POSTED_AT_FMTS = [
 
 
 def _parse_posted_at(raw: str):
+    """Parse a posted_at string to a NAIVE UTC datetime, or None.
+
+    Naive on purpose: the only caller subtracts a strptime()'d WHOIS creation
+    date from the result, and mixing aware and naive datetimes raises
+    TypeError, which that call site does not catch. An offset-bearing
+    ISO-8601 value is therefore converted to UTC and stripped of tzinfo
+    rather than returned as-is.
+    """
     raw = (raw or "").strip().replace(" UTC", "")
+    if not raw:
+        return None
+
+    # ISO-8601 first — the default output of essentially every API and export
+    # tool, and so the likeliest thing to arrive at a public ingest surface.
+    # fromisoformat() only learned to accept a trailing 'Z' in 3.11, and the
+    # project supports 3.10, so normalise it by hand.
+    iso = raw[:-1] + "+00:00" if raw.endswith(("Z", "z")) else raw
+    try:
+        dt = datetime.fromisoformat(iso)
+    except ValueError:
+        pass
+    else:
+        if dt.tzinfo is not None:
+            dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+        return dt
+
     for fmt in _POSTED_AT_FMTS:
         try:
             return datetime.strptime(raw, fmt)
@@ -200,6 +226,14 @@ def _enrich_domain_for_scan_run(
     data = lookup_ip(final_domain)
     ref_date = _parse_posted_at(posted_at) if posted_at else None
     if ref_date is None:
+        # Falling back to now() widens the computed domain age, which can
+        # suppress the new_domain tag — a silent downgrade of a signal, so a
+        # posted_at that was present but unusable is reported rather than
+        # swallowed. An absent posted_at is not an error and stays quiet.
+        if posted_at:
+            print(f"[warn] unparseable posted_at {posted_at!r} on scan_run "
+                  f"{scan_run_id}; using now() as the domain-age reference",
+                  file=sys.stderr)
         ref_date = datetime.now()
 
     intel_tags: list[str] = []

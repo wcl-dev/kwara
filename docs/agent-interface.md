@@ -76,6 +76,13 @@ python -m kwara.cli ingest csv --case 1 --file posts.csv
 ```
 
 CSV columns: `platform, permalink, actor_label, posted_at, message_text`.
+UTF-8, with or without a BOM. Only `message_text` is required.
+
+`posted_at` accepts ISO-8601 (`2025-05-18T17:29:25Z`, `...+08:00` — normalised
+to UTC) or `YYYY-MM-DD[ HH:MM[:SS]]`, `YYYY/MM/DD`, `DD-MM-YYYY`, `MM/DD/YYYY`.
+It is stored verbatim and parsed later, when domain intel dates a domain
+against the post that carried it; an unparseable value is reported on stderr
+at that point and the domain age is measured from now instead.
 
 **Collection**
 

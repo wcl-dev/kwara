@@ -67,7 +67,10 @@ def ingest_csv(conn: sqlite3.Connection, case_id: int, file_path: str) -> list[d
     Calls ingest_message for each row. Returns [{message_id, url_count}, ...].
     """
     results: list[dict] = []
-    with open(file_path, "r", encoding="utf-8", newline="") as f:
+    # utf-8-sig, not utf-8: Excel and most CJK-locale tooling emit a BOM, and
+    # csv.DictReader would fold it into the first header name, so every
+    # row.get() for that column would silently return the default.
+    with open(file_path, "r", encoding="utf-8-sig", newline="") as f:
         reader = csv.DictReader(f)
         for row in reader:
             message_id, urls = ingest_message(
