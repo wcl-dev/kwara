@@ -65,7 +65,7 @@ def _count_cloaking_suspects(conn: sqlite3.Connection, case_id: int) -> int:
     surfacing in the headline summary — it never reached Insights before.
     """
     rows = conn.execute(
-        f"""SELECT sr.cloaking_signal_json
+        f"""SELECT ua.original_url, sr.cloaking_signal_json
            FROM url_artifacts ua
            JOIN scan_runs sr ON sr.id = {LATEST_DONE_SCAN_RUN}
            WHERE ua.case_id = ?
@@ -73,14 +73,17 @@ def _count_cloaking_suspects(conn: sqlite3.Connection, case_id: int) -> int:
              AND TRIM(sr.cloaking_signal_json) != ''""",
         (case_id,),
     ).fetchall()
-    n = 0
+    # Distinct URLs, as the docstring says — not artifact rows. A URL carries
+    # one artifact row per post that quoted it, so counting rows reported one
+    # cloaking site once per account that pushed it.
+    suspects: set[str] = set()
     for r in rows:
         try:
             if json.loads(r["cloaking_signal_json"]).get("verdict") == "cloaking_suspect":
-                n += 1
+                suspects.add(r["original_url"])
         except (TypeError, ValueError):
             continue
-    return n
+    return len(suspects)
 
 
 def case_insights(conn: sqlite3.Connection, case_id: int) -> dict[str, Any]:

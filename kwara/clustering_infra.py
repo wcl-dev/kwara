@@ -159,8 +159,8 @@ def asn_clusters(conn: sqlite3.Connection, case_id: int) -> list:
                 "ip_address": r["ip_address"],
             })
 
-        if r["ua_id"] not in seen_urls[asn]:
-            seen_urls[asn].add(r["ua_id"])
+        if r["original_url"] not in seen_urls[asn]:
+            seen_urls[asn].add(r["original_url"])
             url_tags = merge_risk_tags(r["risk_tags"], r["intel_risk_tags"])
             data[asn]["urls"].append({"original_url": r["original_url"], "risk_tags": url_tags})
             if url_tags:
@@ -246,7 +246,7 @@ def shared_certificates(conn: sqlite3.Connection, case_id: int) -> dict:
     """
     rows = conn.execute(
         f"""SELECT sr.tls_info_json, sr.final_url,
-                  ua.id AS ua_id,
+                  ua.id AS ua_id, ua.original_url,
                   me.id AS post_id
            FROM url_artifacts ua
            JOIN message_evidence me ON me.id = ua.message_id
@@ -289,7 +289,7 @@ def shared_certificates(conn: sqlite3.Connection, case_id: int) -> dict:
             }
             cert_data[key] = entry
         entry["domains"].add(domain)
-        entry["urls"].add(r["ua_id"])
+        entry["urls"].add(r["original_url"])
         entry["posts"].add(r["post_id"])
 
     # ── Cluster A: same cert covering 2+ distinct domains ──────────────
@@ -376,7 +376,8 @@ def certificate_authorities(conn: sqlite3.Connection, case_id: int) -> list:
       issuer, domain_count, url_count, cert_count, domains, earliest_notBefore
     """
     rows = conn.execute(
-        f"""SELECT sr.tls_info_json, sr.final_url, ua.id AS ua_id
+        f"""SELECT sr.tls_info_json, sr.final_url,
+                  ua.id AS ua_id, ua.original_url
            FROM url_artifacts ua
            JOIN scan_runs sr ON sr.id = {LATEST_DONE_SCAN_RUN}
            WHERE ua.case_id = ?
@@ -410,7 +411,7 @@ def certificate_authorities(conn: sqlite3.Connection, case_id: int) -> list:
         if serial:
             entry["serials"].add(serial)
         entry["domains"].add(domain)
-        entry["urls"].add(r["ua_id"])
+        entry["urls"].add(r["original_url"])
         if nb is not None and (entry["earliest"] is None or nb < entry["earliest"]):
             entry["earliest"] = nb
 
@@ -449,7 +450,7 @@ def shared_tracking_ids(conn: sqlite3.Connection, case_id: int) -> list:
     rows = conn.execute(
         f"""SELECT s.tracking_ids_json,
                   COALESCE(s.final_domain, '') AS final_domain,
-                  ua.id AS ua_id,
+                  ua.id AS ua_id, ua.original_url,
                   me.id AS post_id
            FROM url_artifacts ua
            JOIN message_evidence me ON me.id = ua.message_id
@@ -488,7 +489,7 @@ def shared_tracking_ids(conn: sqlite3.Connection, case_id: int) -> list:
                     "posts":   set(),
                 })
                 entry["domains"].add(domain)
-                entry["urls"].add(r["ua_id"])
+                entry["urls"].add(r["original_url"])
                 entry["posts"].add(r["post_id"])
 
     out: list[dict] = []
@@ -557,11 +558,7 @@ def ad_tracking_platforms(conn: sqlite3.Connection, case_id: int) -> list:
                   COALESCE(s.final_domain, '') AS snap_domain
            FROM url_artifacts ua
            JOIN message_evidence me ON me.id = ua.message_id
-           LEFT JOIN scan_runs sr ON sr.url_artifact_id = ua.id
-               AND sr.id = (
-                   SELECT id FROM scan_runs WHERE url_artifact_id = ua.id
-                   ORDER BY id DESC LIMIT 1
-               )
+           LEFT JOIN scan_runs sr ON sr.id = (SELECT id FROM scan_runs WHERE url_artifact_id = ua.id ORDER BY id DESC LIMIT 1)
            -- HTML pixel signals count from every persona that was captured
            -- successfully; a failed re-snapshot is not one of them.
            LEFT JOIN snapshots s ON s.scan_run_id = sr.id
@@ -606,7 +603,7 @@ def ad_tracking_platforms(conn: sqlite3.Connection, case_id: int) -> list:
                     continue  # truly unknown — skip from provider lens
                 e = _entry(platform_id)
                 e["param_keys"].add(key)
-                e["urls"].add(r["ua_id"])
+                e["urls"].add(r["original_url"])
                 e["posts"].add(r["post_id"])
                 e["domains"].add(domain)
                 e["has_url"] = True
@@ -631,7 +628,7 @@ def ad_tracking_platforms(conn: sqlite3.Connection, case_id: int) -> list:
                     for ident in ids:
                         if ident:
                             e["tracking_ids"].add(ident)
-                    e["urls"].add(r["ua_id"])
+                    e["urls"].add(r["original_url"])
                     e["posts"].add(r["post_id"])
                     if snap_domain:
                         e["domains"].add(snap_domain)
@@ -834,7 +831,7 @@ def shared_ad_accounts(conn: sqlite3.Connection, case_id: int) -> dict:
     """
     rows = conn.execute(
         f"""SELECT sr.ads_txt_json, sr.final_url, sr.id AS scan_run_id,
-                  ua.id AS ua_id, me.id AS post_id
+                  ua.id AS ua_id, ua.original_url, me.id AS post_id
            FROM url_artifacts ua
            JOIN message_evidence me ON me.id = ua.message_id
            JOIN scan_runs sr ON sr.id = {LATEST_DONE_SCAN_RUN}
@@ -903,7 +900,7 @@ def shared_ad_accounts(conn: sqlite3.Connection, case_id: int) -> dict:
                 entry = {"domains": set(), "urls": set(), "posts": set()}
                 account_data[key] = entry
             entry["domains"].add(domain)
-            entry["urls"].add(r["ua_id"])
+            entry["urls"].add(r["original_url"])
             entry["posts"].add(r["post_id"])
 
     denom = len(case_domains) or 1

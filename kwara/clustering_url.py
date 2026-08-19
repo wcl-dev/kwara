@@ -71,8 +71,8 @@ def shared_destinations(conn: sqlite3.Connection, case_id: int) -> tuple:
         if not domain:
             continue
 
-        if r["ua_id"] not in seen_urls[domain]:
-            seen_urls[domain].add(r["ua_id"])
+        if r["original_url"] not in seen_urls[domain]:
+            seen_urls[domain].add(r["original_url"])
             url_tags = merge_risk_tags(r["risk_tags"], r["intel_risk_tags"])
             data[domain]["urls"].append({"original_url": r["original_url"], "risk_tags": url_tags})
             if url_tags:
@@ -157,12 +157,12 @@ def wrapper_relationships(conn: sqlite3.Connection, case_id: int) -> list:
 
         key = (original, final)
         entry = by_pair.setdefault(key, {
-            "ua_ids":      set(),
+            "urls":        set(),
             "post_ids":    set(),
             "hops":        [],
             "sample_urls": [],
         })
-        entry["ua_ids"].add(r["ua_id"])
+        entry["urls"].add(r["original_url"])
         entry["post_ids"].add(r["post_id"])
         if r["hop_count"] is not None:
             entry["hops"].append(r["hop_count"])
@@ -177,7 +177,7 @@ def wrapper_relationships(conn: sqlite3.Connection, case_id: int) -> list:
         out.append({
             "original_domain": original,
             "final_domain":    final,
-            "url_count":       len(e["ua_ids"]),
+            "url_count":       len(e["urls"]),
             "post_count":      len(e["post_ids"]),
             "min_hops":        min(hops),
             "max_hops":        max(hops),
@@ -218,14 +218,10 @@ def shared_params(conn: sqlite3.Connection, case_id: int) -> list:
     Returns list sorted by post_count desc.
     """
     rows = conn.execute(
-        """SELECT ua.original_url, sr.final_url, me.id AS post_id
+        f"""SELECT ua.original_url, sr.final_url, me.id AS post_id
            FROM url_artifacts ua
            JOIN message_evidence me ON me.id = ua.message_id
-           LEFT JOIN scan_runs sr ON sr.url_artifact_id = ua.id
-               AND sr.id = (
-                   SELECT id FROM scan_runs WHERE url_artifact_id = ua.id
-                   ORDER BY id DESC LIMIT 1
-               )
+           LEFT JOIN scan_runs sr ON sr.id = (SELECT id FROM scan_runs WHERE url_artifact_id = ua.id ORDER BY id DESC LIMIT 1)
            WHERE ua.case_id = ?""",
         (case_id,),
     ).fetchall()
@@ -296,14 +292,10 @@ def shared_param_keys(conn: sqlite3.Connection, case_id: int) -> list:
     Returns list sorted by distinct_posts desc, distinct_values desc.
     """
     rows = conn.execute(
-        """SELECT ua.original_url, sr.final_url, me.id AS post_id
+        f"""SELECT ua.original_url, sr.final_url, me.id AS post_id
            FROM url_artifacts ua
            JOIN message_evidence me ON me.id = ua.message_id
-           LEFT JOIN scan_runs sr ON sr.url_artifact_id = ua.id
-               AND sr.id = (
-                   SELECT id FROM scan_runs WHERE url_artifact_id = ua.id
-                   ORDER BY id DESC LIMIT 1
-               )
+           LEFT JOIN scan_runs sr ON sr.id = (SELECT id FROM scan_runs WHERE url_artifact_id = ua.id ORDER BY id DESC LIMIT 1)
            WHERE ua.case_id = ?""",
         (case_id,),
     ).fetchall()
