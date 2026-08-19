@@ -31,7 +31,7 @@ from .param_attribution import (
     identify_param,
     merge_risk_tags,
 )
-from .sql import LATEST_DONE_SCAN_RUN
+from .sql import LATEST_DONE_SCAN_RUN_FOR_URL, LATEST_SCAN_RUN_FOR_URL
 
 
 def shared_destinations(conn: sqlite3.Connection, case_id: int) -> tuple:
@@ -50,7 +50,7 @@ def shared_destinations(conn: sqlite3.Connection, case_id: int) -> tuple:
                   sr.intel_risk_tags
            FROM url_artifacts ua
            JOIN message_evidence me ON me.id = ua.message_id
-           JOIN scan_runs sr ON sr.id = {LATEST_DONE_SCAN_RUN}
+           JOIN scan_runs sr ON sr.id = {LATEST_DONE_SCAN_RUN_FOR_URL}
            LEFT JOIN snapshots s ON s.scan_run_id = sr.id
                AND s.id = (
                    SELECT id FROM snapshots WHERE scan_run_id = sr.id
@@ -142,7 +142,7 @@ def wrapper_relationships(conn: sqlite3.Connection, case_id: int) -> list:
                   me.id AS post_id
            FROM url_artifacts ua
            JOIN message_evidence me ON me.id = ua.message_id
-           JOIN scan_runs sr ON sr.id = {LATEST_DONE_SCAN_RUN}
+           JOIN scan_runs sr ON sr.id = {LATEST_DONE_SCAN_RUN_FOR_URL}
            WHERE ua.case_id = ? AND sr.final_url IS NOT NULL""",
         (case_id,),
     ).fetchall()
@@ -221,7 +221,7 @@ def shared_params(conn: sqlite3.Connection, case_id: int) -> list:
         f"""SELECT ua.original_url, sr.final_url, me.id AS post_id
            FROM url_artifacts ua
            JOIN message_evidence me ON me.id = ua.message_id
-           LEFT JOIN scan_runs sr ON sr.id = (SELECT id FROM scan_runs WHERE url_artifact_id = ua.id ORDER BY id DESC LIMIT 1)
+           LEFT JOIN scan_runs sr ON sr.id = {LATEST_SCAN_RUN_FOR_URL}
            WHERE ua.case_id = ?""",
         (case_id,),
     ).fetchall()
@@ -295,7 +295,7 @@ def shared_param_keys(conn: sqlite3.Connection, case_id: int) -> list:
         f"""SELECT ua.original_url, sr.final_url, me.id AS post_id
            FROM url_artifacts ua
            JOIN message_evidence me ON me.id = ua.message_id
-           LEFT JOIN scan_runs sr ON sr.id = (SELECT id FROM scan_runs WHERE url_artifact_id = ua.id ORDER BY id DESC LIMIT 1)
+           LEFT JOIN scan_runs sr ON sr.id = {LATEST_SCAN_RUN_FOR_URL}
            WHERE ua.case_id = ?""",
         (case_id,),
     ).fetchall()

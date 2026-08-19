@@ -89,12 +89,20 @@ at that point and the domain age is measured from now instead.
 ```bash
 python -m kwara.cli run attribute --case 1          # start here
 python -m kwara.cli run scan --case 1
+python -m kwara.cli run scan --case 1 --artifact 42   # re-observe one URL
 python -m kwara.cli run intel --case 1
 python -m kwara.cli run snapshot --case 1 --limit 5 # slow: Playwright
 python -m kwara.cli run corroborate --scan-run 12
 python -m kwara.cli run cloaking --scan-run 12 --force
 python -m kwara.cli run adstxt --scan-run 12 --force
 ```
+
+`run scan` and `run attribute` fetch each distinct URL in the case once, not
+once per post that carried it — N accounts pushing one link is the finding,
+not a reason to send N requests at the target. The artifacts that were not
+fetched still carry their posts through every attribution query, and the
+response reports `skipped_duplicate_urls` so the saving is visible. Pass
+explicit `--artifact` ids to re-observe a URL the case has already scanned.
 
 `run attribute` is the cheap first pass — redirect scan, static HTML tracking
 IDs, ads.txt, and WHOIS/ASN, with no browser. It populates the clustering

@@ -224,7 +224,12 @@ def cmd_run_scan(args):
     conn = _open_db(args)
     require_case(conn, args.case)
 
+    # Explicit --artifact ids bypass the per-URL dedup, which is the escape
+    # hatch for deliberately re-observing a URL the case already scanned.
+    explicit = bool(args.artifact)
     artifact_ids = args.artifact or pipeline._artifacts_needing_scan(conn, args.case)
+    deduped = 0 if explicit else pipeline._artifacts_covered_by_a_sibling(
+        conn, args.case)
     scanned, errors = [], []
     for aid in artifact_ids:
         try:
@@ -232,6 +237,7 @@ def cmd_run_scan(args):
         except Exception as e:  # noqa: BLE001 — best-effort batch, report per item
             errors.append(f"artifact {aid}: {e}")
     return {"case_id": args.case, "scanned": len(scanned),
+            "skipped_duplicate_urls": deduped,
             "scan_run_ids": scanned, "errors": errors}
 
 

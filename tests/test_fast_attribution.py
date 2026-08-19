@@ -11,7 +11,8 @@ import tempfile
 from datetime import datetime, timezone
 
 from kwara.db import get_conn, init_db, migrate_db
-from kwara.pipeline import _artifacts_needing_scan, _scan_runs_needing
+from kwara.pipeline import (_artifacts_covered_by_a_sibling,
+                            _artifacts_needing_scan, _scan_runs_needing)
 
 
 def _now():
@@ -71,14 +72,52 @@ def _snapshot(conn, sr_id, capture_status="ok", method="playwright"):
 
 
 def test_artifacts_needing_scan_excludes_those_with_done_scan():
+    # Distinct URLs, because selection is now per URL rather than per artifact
+    # row: three artifacts sharing one URL would collapse to one target and
+    # say nothing about how scan status is read.
     conn = _db(); cid = _case(conn)
-    a_done = _artifact(conn, cid); _scan_run(conn, a_done, status="done")
-    a_none = _artifact(conn, cid)            # never scanned
-    a_err = _artifact(conn, cid); _scan_run(conn, a_err, status="error")
+    a_done = _artifact(conn, cid, "https://done.test/")
+    _scan_run(conn, a_done, status="done")
+    a_none = _artifact(conn, cid, "https://none.test/")     # never scanned
+    a_err = _artifact(conn, cid, "https://err.test/")
+    _scan_run(conn, a_err, status="error")
     needing = set(_artifacts_needing_scan(conn, cid))
     assert a_none in needing
     assert a_err in needing                  # error scan doesn't count as done
     assert a_done not in needing
+
+
+def test_one_url_carried_by_many_posts_is_scanned_once():
+    """The saving step 2 exists for, and the shape live case data had.
+
+    Twenty-two accounts pushing one link produced twenty-two artifacts and,
+    before this, twenty-two outbound requests to the same URL.
+    """
+    conn = _db(); cid = _case(conn)
+    ids = [_artifact(conn, cid, "https://pushed-by-many.test/x") for _ in range(22)]
+    needing = _artifacts_needing_scan(conn, cid)
+    assert needing == [min(ids)], "one fetch for the URL, not one per account"
+    assert _artifacts_covered_by_a_sibling(conn, cid) == 21
+
+
+def test_a_url_scanned_under_another_post_is_not_rescanned():
+    """Scanned-ness belongs to the URL, not to the artifact row."""
+    conn = _db(); cid = _case(conn)
+    first = _artifact(conn, cid, "https://shared.test/x")
+    _scan_run(conn, first, status="done")
+    _artifact(conn, cid, "https://shared.test/x")           # a later post, same link
+    assert _artifacts_needing_scan(conn, cid) == []
+    assert _artifacts_covered_by_a_sibling(conn, cid) == 1
+
+
+def test_dedup_does_not_reach_across_cases():
+    conn = _db()
+    scanned_case = _case(conn)
+    a = _artifact(conn, scanned_case, "https://shared.test/x")
+    _scan_run(conn, a, status="done")
+    other_case = _case(conn)
+    b = _artifact(conn, other_case, "https://shared.test/x")
+    assert _artifacts_needing_scan(conn, other_case) == [b]
 
 
 def test_lightweight_target_when_no_usable_snapshot():

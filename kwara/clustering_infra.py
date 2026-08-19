@@ -73,7 +73,8 @@ from .param_attribution import (
     merge_risk_tags,
 )
 from . import acquisition as _acq
-from .sql import LATEST_DONE_SCAN_RUN, usable_snapshots
+from .sql import (LATEST_DONE_SCAN_RUN, LATEST_DONE_SCAN_RUN_FOR_URL,
+                  LATEST_SCAN_RUN_FOR_URL, usable_snapshots)
 
 
 def _is_direct_ip(host: str) -> bool:
@@ -121,7 +122,7 @@ def asn_clusters(conn: sqlite3.Connection, case_id: int) -> list:
                   me.id AS post_id
            FROM url_artifacts ua
            JOIN message_evidence me ON me.id = ua.message_id
-           JOIN scan_runs sr ON sr.id = {LATEST_DONE_SCAN_RUN}
+           JOIN scan_runs sr ON sr.id = {LATEST_DONE_SCAN_RUN_FOR_URL}
            LEFT JOIN snapshots s ON s.scan_run_id = sr.id
                AND s.id = (
                    SELECT id FROM snapshots WHERE scan_run_id = sr.id
@@ -250,7 +251,7 @@ def shared_certificates(conn: sqlite3.Connection, case_id: int) -> dict:
                   me.id AS post_id
            FROM url_artifacts ua
            JOIN message_evidence me ON me.id = ua.message_id
-           JOIN scan_runs sr ON sr.id = {LATEST_DONE_SCAN_RUN}
+           JOIN scan_runs sr ON sr.id = {LATEST_DONE_SCAN_RUN_FOR_URL}
            WHERE ua.case_id = ?
              AND sr.tls_info_json IS NOT NULL
              AND TRIM(sr.tls_info_json) != ''""",
@@ -454,7 +455,7 @@ def shared_tracking_ids(conn: sqlite3.Connection, case_id: int) -> list:
                   me.id AS post_id
            FROM url_artifacts ua
            JOIN message_evidence me ON me.id = ua.message_id
-           JOIN scan_runs sr ON sr.id = {LATEST_DONE_SCAN_RUN}
+           JOIN scan_runs sr ON sr.id = {LATEST_DONE_SCAN_RUN_FOR_URL}
            -- EVERY usable snapshot of the pinned scan, not one of them: a
            -- cloaker serves a different page — often a different landing
            -- DOMAIN — to a browser than to a crawler, and both are the
@@ -558,7 +559,7 @@ def ad_tracking_platforms(conn: sqlite3.Connection, case_id: int) -> list:
                   COALESCE(s.final_domain, '') AS snap_domain
            FROM url_artifacts ua
            JOIN message_evidence me ON me.id = ua.message_id
-           LEFT JOIN scan_runs sr ON sr.id = (SELECT id FROM scan_runs WHERE url_artifact_id = ua.id ORDER BY id DESC LIMIT 1)
+           LEFT JOIN scan_runs sr ON sr.id = {LATEST_SCAN_RUN_FOR_URL}
            -- HTML pixel signals count from every persona that was captured
            -- successfully; a failed re-snapshot is not one of them.
            LEFT JOIN snapshots s ON s.scan_run_id = sr.id
@@ -834,7 +835,7 @@ def shared_ad_accounts(conn: sqlite3.Connection, case_id: int) -> dict:
                   ua.id AS ua_id, ua.original_url, me.id AS post_id
            FROM url_artifacts ua
            JOIN message_evidence me ON me.id = ua.message_id
-           JOIN scan_runs sr ON sr.id = {LATEST_DONE_SCAN_RUN}
+           JOIN scan_runs sr ON sr.id = {LATEST_DONE_SCAN_RUN_FOR_URL}
            WHERE ua.case_id = ?
              AND sr.ads_txt_json IS NOT NULL
              AND TRIM(sr.ads_txt_json) != ''""",

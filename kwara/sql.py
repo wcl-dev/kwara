@@ -39,6 +39,46 @@ LATEST_DONE_SCAN_RUN = (
     "ORDER BY id DESC LIMIT 1)"
 )
 
+# The same pick, widened to the URL rather than the artifact row.
+#
+# WHY: a URL gets one url_artifacts row per post that carried it, and N
+# accounts pushing one link is the finding, not an anomaly. The scan belongs
+# to the URL — what that link does when you follow it — while the artifact
+# row records which post carried it. Pinning the scan to the artifact row
+# therefore makes an artifact with no scan of its own vanish from every
+# analysis INNER JOIN, taking its post with it: collapse 22 accounts pushing
+# one link down to 1, and the coordination signal is gone.
+#
+# ORDER BY puts the artifact's OWN scan first, so this is byte-identical to
+# LATEST_DONE_SCAN_RUN whenever the artifact has been scanned — which was
+# every row before the scan step began deduplicating by URL. It never
+# discards an observation: a sibling's scan is borrowed, not substituted for
+# a real one.
+#
+# SCOPE: attribution and clustering only — "what does this URL do, and who
+# pushed it". Collection-coverage counts (insights, clusters.case_counts,
+# narrative) must NOT use it: they answer "how much did we actually collect",
+# and borrowing would report an artifact as scanned when it never was.
+LATEST_DONE_SCAN_RUN_FOR_URL = (
+    "(SELECT sr_url.id FROM scan_runs sr_url "
+    "JOIN url_artifacts ua_url ON ua_url.id = sr_url.url_artifact_id "
+    "WHERE ua_url.case_id = ua.case_id "
+    "AND ua_url.original_url = ua.original_url "
+    "AND sr_url.status = 'done' "
+    "ORDER BY (ua_url.id = ua.id) DESC, sr_url.id DESC LIMIT 1)"
+)
+
+# As above but unfiltered by status, for the LEFT JOIN sites that deliberately
+# take the latest scan of any status (an errored scan still pins a final_url
+# the analyst needs to see).
+LATEST_SCAN_RUN_FOR_URL = (
+    "(SELECT sr_url.id FROM scan_runs sr_url "
+    "JOIN url_artifacts ua_url ON ua_url.id = sr_url.url_artifact_id "
+    "WHERE ua_url.case_id = ua.case_id "
+    "AND ua_url.original_url = ua.original_url "
+    "ORDER BY (ua_url.id = ua.id) DESC, sr_url.id DESC LIMIT 1)"
+)
+
 # Columns the usable-snapshot idiom is allowed to gate on. Extend when a new
 # analysis layer needs a different populated column.
 _USABLE_SNAPSHOT_COLS = frozenset({

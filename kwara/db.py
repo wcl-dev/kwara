@@ -504,6 +504,11 @@ def init_db(conn: sqlite3.Connection) -> None:
     -- the scale a cross-case index is built for.
     CREATE INDEX IF NOT EXISTS idx_scan_runs_artifact_status
         ON scan_runs(url_artifact_id, status, id);
+    -- sql.LATEST_DONE_SCAN_RUN_FOR_URL resolves a scan through every artifact
+    -- in the case that carries the same URL, so the (case_id, original_url)
+    -- lookup runs once per artifact row and needs to be an index seek.
+    CREATE INDEX IF NOT EXISTS idx_url_artifacts_case_url
+        ON url_artifacts(case_id, original_url, id);
     CREATE INDEX IF NOT EXISTS idx_snapshots_scan_run
         ON snapshots(scan_run_id, capture_status, id);
     CREATE INDEX IF NOT EXISTS idx_redirect_hops_scan_run

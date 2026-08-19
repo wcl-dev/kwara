@@ -334,16 +334,66 @@ def run_snapshot_batch(conn: sqlite3.Connection, scan_run_ids: list[int],
 # Decouples "are these linked?" (cheap: scan + lightweight HTML + ads.txt +
 # WHOIS) from "preserve the evidence" (heavy: screenshots / HTML / HAR).
 # ---------------------------------------------------------------------------
+# A URL the case has not scanned yet, whichever artifact row carries it. The
+# NOT EXISTS reaches through url_artifacts rather than testing sr.url_artifact_id
+# directly, so a URL already scanned under a different post is recognised as
+# scanned.
+_URL_NOT_YET_SCANNED = """
+    NOT EXISTS (SELECT 1 FROM scan_runs sr
+                  JOIN url_artifacts ua_sib ON ua_sib.id = sr.url_artifact_id
+                 WHERE ua_sib.case_id = ua.case_id
+                   AND ua_sib.original_url = ua.original_url
+                   AND sr.status = 'done')
+"""
+
+
 def _artifacts_needing_scan(conn: sqlite3.Connection, case_id: int) -> list[int]:
-    """URL artifacts in the case with no completed scan yet (pure query)."""
+    """One artifact per distinct URL the case has not scanned yet (pure query).
+
+    Deduplicated by URL, not by artifact row. A URL gets one url_artifacts row
+    per post that carried it, and N accounts pushing one link is the finding
+    this tool exists to surface — so the per-artifact version fired one request
+    per account at a single target. On live case data that was 22 requests to
+    one URL inside eleven minutes, from one egress, against a site under
+    investigation.
+
+    What makes this safe is that the analysis joins resolve a scan through any
+    artifact in the case carrying the same URL (sql.LATEST_DONE_SCAN_RUN_FOR_URL).
+    Without that, the artifacts skipped here would drop out of every INNER JOIN
+    and take their posts with them — turning 22 coordinated accounts into 1.
+    Do not reintroduce this dedup anywhere those joins do not reach.
+
+    An analyst who deliberately wants a URL re-observed passes explicit
+    --artifact ids, which bypasses this selection entirely.
+    """
     return [r["id"] for r in conn.execute(
-        """SELECT ua.id FROM url_artifacts ua
-           WHERE ua.case_id = ?
-             AND NOT EXISTS (SELECT 1 FROM scan_runs sr
-                             WHERE sr.url_artifact_id = ua.id AND sr.status = 'done')
-           ORDER BY ua.id""",
+        f"""SELECT MIN(ua.id) AS id FROM url_artifacts ua
+           WHERE ua.case_id = ? AND {_URL_NOT_YET_SCANNED}
+           GROUP BY ua.original_url
+           ORDER BY id""",
         (case_id,),
     ).fetchall()]
+
+
+def _artifacts_covered_by_a_sibling(conn: sqlite3.Connection, case_id: int) -> int:
+    """Artifacts this run will not fetch because another row carries their URL.
+
+    Reported alongside the scan count so the saving reads as deduplication
+    rather than under-collection — a smaller number with no explanation is how
+    a silent cap looks from the outside.
+    """
+    # The comparison is against what a per-artifact selection would have
+    # fetched — artifacts with no done scan OF THEIR OWN — not against the
+    # per-URL predicate, which by construction already excludes them.
+    would_have_fetched = conn.execute(
+        """SELECT COUNT(*) AS n FROM url_artifacts ua
+           WHERE ua.case_id = ?
+             AND NOT EXISTS (SELECT 1 FROM scan_runs sr
+                             WHERE sr.url_artifact_id = ua.id
+                               AND sr.status = 'done')""",
+        (case_id,),
+    ).fetchone()["n"]
+    return would_have_fetched - len(_artifacts_needing_scan(conn, case_id))
 
 
 def _scan_runs_needing(conn: sqlite3.Connection, case_id: int,
@@ -403,7 +453,9 @@ def run_fast_attribution(conn: sqlite3.Connection, case_id: int,
     Best-effort: per-item failures are collected in `errors`, never raised.
     Returns {scanned, attributed, ads, intel, errors}.
     """
-    summary: dict = {"scanned": 0, "attributed": 0, "ads": 0, "intel": 0, "errors": []}
+    summary: dict = {"scanned": 0, "skipped_duplicate_urls":
+                     _artifacts_covered_by_a_sibling(conn, case_id),
+                     "attributed": 0, "ads": 0, "intel": 0, "errors": []}
 
     def _tick(msg):
         if progress:
