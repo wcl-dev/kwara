@@ -599,6 +599,11 @@ def candidates_from_publicwww(
     acquisition, banks no body, logs no URL — and only the domains survive. The
     key is read from KWARA_PUBLICWWW_API_KEY and travels in request params,
     never in a URL anything logs.
+
+    Limitation: PublicWWW indexes static homepage source only, so an id that is
+    JS/GTM-injected, inner-page-only, or on a site below its crawl threshold
+    does not surface — which is the profile of the more sophisticated operators.
+    A null result is not evidence of a small footprint.
     """
     if not PUBLICWWW_API_KEY:
         raise RuntimeError(

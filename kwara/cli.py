@@ -1042,7 +1042,9 @@ def build_parser() -> argparse.ArgumentParser:
     d_pubw = _leaf(dis, "publicwww",
                    help="domains embedding a tracking id, via PublicWWW "
                         "(OUTBOUND + discloses the query; needs "
-                        "KWARA_PUBLICWWW_API_KEY, never written to disk)")
+                        "KWARA_PUBLICWWW_API_KEY, never written to disk; "
+                        "static homepage source only — JS/GTM-injected ids "
+                        "won't surface)")
     d_pubw.add_argument("snippet", nargs="+",
                         help="tracking id(s) to search, e.g. G-ABC1234")
     d_pubw.add_argument("--out", help="write one domain per line to this file")

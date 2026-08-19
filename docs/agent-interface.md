@@ -309,6 +309,14 @@ python -m kwara.cli discover screen --domains cand.txt --bank obs.jsonl
 - **key 不落地。** PublicWWW 的 export API 把 key 放在 query string，而 kwara 是個「什麼都留存」的工具（acquisition 存 requested URL、screen bank 存觀測 URL、export 全打包）。所以這個來源把 HTTP 交易**保持拋棄式**：key 走 request params、絕不 log URL、不寫 acquisition、不 bank body，只有網域活下來。`tests/test_publicwww_source.py` 對著原始碼把這條釘死。
 - **CLI-only，不開給 MCP。** 拿追蹤碼去查等於告訴第三方你在追哪個 operator——跟 `run corroborate` 同類的揭露決定。`mcp_server._WITHHELD` 列有 `cmd_discover_publicwww`，指令跑之前也會在 stderr 明講這件事。
 
+**限制：只搜得到「靜態首頁原始碼」裡的碼。** PublicWWW 索引的是靜態抓取的 HTML、且預設只涵蓋首頁，所以下面三種碼它看不到、pivot 也就撈不到：
+
+- **GTM / JS 注入的碼**——例如 GA4 透過 GTM 載入時，`G-…` 藏在 GTM 容器 JSON 裡、不在頁面 source。kwara 是開瀏覽器 render 抓到的，PublicWWW 的靜態爬蟲不是。
+- **只出現在內頁的碼**——大站常只在文章頁掛 AdSense，首頁 source 沒有（頁面提示的 internal-pages search 是另一條／付費）。
+- **crawl 門檻下的小站**——小型區域農場可能根本不在 PublicWWW 的索引裡。
+
+這剛好是 GTM／cloaker 型操作者的形態，所以 **PublicWWW 在最高技術的目標上最沒用**。2026-08-19 對三個真實 operator 碼用免費版實測：靜態硬寫 `data-ad-client=` 的農場回 10（但本地已擁有更多、反而超越它），另一個 AdSense 帳號與一個 GTM 型 GA4 都回 **0**。**把它當「低技術、靜態模板農場」的輔助來源，別當追蹤高技術操作者的主力；null 結果不代表足跡小，可能只是它看不到。**
+
 ### `discover normalize` — 任意清單 → apex 的統一入口
 
 `candidates`（sellers.json）與 `publicwww`（追蹤碼）各自產候選；封鎖清單則常以 `hosts`（`0.0.0.0 bad.example`）或 adblock（`||bad.example^`）格式散落。`normalize` 把這些連同純清單、CSV 一起收斂成可直接餵 `screen` 的 apex，純本機、不連網：
