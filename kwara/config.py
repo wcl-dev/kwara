@@ -315,6 +315,29 @@ DISCOVERY_MAX_REDIRECTS: int = int(
     os.environ.get("KWARA_DISCOVERY_MAX_REDIRECTS", "3")
 )
 
+# ── PublicWWW candidate source (discovery.py) ────────────────────────────
+# PublicWWW indexes page HTML source, so a tracking id (G-…, AW-…, a pixel id)
+# can be turned into the set of domains that embed it — the outbound pivot
+# ads.txt screening cannot make, because ads.txt is a predictable *path*, not
+# page source. The domains it returns feed `discover screen` like any other
+# candidate list.
+#
+# The key matters here in a way it does not for urlscan: PublicWWW's export API
+# carries it in the query STRING, which is exactly the shape kwara's retention
+# machinery would persist (acquisition records the requested URL; the screen
+# bank records observation URLs; export bundles both). So the source holds the
+# transaction transient — see discovery.candidates_from_publicwww — and the key
+# never lands on disk. Unset → the source is unavailable and says so.
+PUBLICWWW_API_KEY: str | None = os.environ.get("KWARA_PUBLICWWW_API_KEY") or None
+PUBLICWWW_API_URL: str = os.environ.get(
+    "KWARA_PUBLICWWW_API_URL", "https://publicwww.com/websites/")
+PUBLICWWW_TIMEOUT: int = int(os.environ.get("KWARA_PUBLICWWW_TIMEOUT", "30"))
+# One snippet can match five figures of domains. Cap what a single pivot pulls
+# so the candidate list stays reviewable and the screen that follows stays
+# bounded; override per run with `discover publicwww --limit`.
+PUBLICWWW_MAX_RESULTS: int = int(
+    os.environ.get("KWARA_PUBLICWWW_MAX_RESULTS", "2000"))
+
 
 # ── Shortlink SaaS catalog (clustering.py + snapshots.py + app.py) ───────
 # Domains that are themselves shortlink services. When a scan's final_domain

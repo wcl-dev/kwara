@@ -770,6 +770,38 @@ def cmd_discover_candidates(args):
             "domains": None if args.out else doms}
 
 
+def cmd_discover_publicwww(args):
+    from . import discovery
+    if not args.quiet:
+        _err("querying PublicWWW — this DISCLOSES the snippet(s) you are "
+             "hunting to a third party. The API key is read from the "
+             "environment and never written to disk.")
+    doms = discovery.candidates_from_publicwww(
+        args.snippet, apex=not args.no_apex, limit=args.limit)
+    if args.exclude_scanned:
+        from .utils.domain import extract_domain_from_url
+        conn = _open_db(args)
+        seen = {extract_domain_from_url(r[0] or "") for r in conn.execute(
+            "SELECT final_url FROM scan_runs WHERE final_url IS NOT NULL")}
+        doms = [d for d in doms if d not in seen]
+    if args.out:
+        with open(args.out, "w", encoding="utf-8") as fh:
+            fh.write("\n".join(doms) + "\n")
+    return {"candidates": len(doms), "out": args.out,
+            "domains": None if args.out else doms}
+
+
+def cmd_discover_normalize(args):
+    from . import discovery
+    with open(args.file, encoding="utf-8") as fh:
+        doms = discovery.parse_domain_list(fh.read(), apex=not args.no_apex)
+    if args.out:
+        with open(args.out, "w", encoding="utf-8") as fh:
+            fh.write("\n".join(doms) + "\n")
+    return {"candidates": len(doms), "out": args.out,
+            "domains": None if args.out else doms}
+
+
 def cmd_discover_screen(args):
     from . import discovery
     from .index_db import get_index_conn
@@ -1006,6 +1038,34 @@ def build_parser() -> argparse.ArgumentParser:
     d_cand.add_argument("--exclude-scanned", action="store_true",
                         help="drop domains this case DB has already scanned")
     d_cand.set_defaults(fn=cmd_discover_candidates)
+
+    d_pubw = _leaf(dis, "publicwww",
+                   help="domains embedding a tracking id, via PublicWWW "
+                        "(OUTBOUND + discloses the query; needs "
+                        "KWARA_PUBLICWWW_API_KEY, never written to disk; "
+                        "static homepage source only — JS/GTM-injected ids "
+                        "won't surface)")
+    d_pubw.add_argument("snippet", nargs="+",
+                        help="tracking id(s) to search, e.g. G-ABC1234")
+    d_pubw.add_argument("--out", help="write one domain per line to this file")
+    d_pubw.add_argument("--exclude-scanned", action="store_true",
+                        help="drop domains this case DB has already scanned")
+    d_pubw.add_argument("--limit", type=int,
+                        help="cap total candidates (default "
+                             "KWARA_PUBLICWWW_MAX_RESULTS)")
+    d_pubw.add_argument("--no-apex", action="store_true",
+                        help="keep full hostnames instead of collapsing to apex")
+    d_pubw.set_defaults(fn=cmd_discover_publicwww)
+
+    d_norm = _leaf(dis, "normalize",
+                   help="fold any domain list (plain / hosts / adblock / CSV) "
+                        "into apexes ready for screen — local, no network")
+    d_norm.add_argument("--file", required=True,
+                        help="a domain list in any common format")
+    d_norm.add_argument("--out", help="write one domain per line to this file")
+    d_norm.add_argument("--no-apex", action="store_true",
+                        help="keep full hostnames instead of collapsing to apex")
+    d_norm.set_defaults(fn=cmd_discover_normalize)
 
     d_scr = _leaf(dis, "screen",
                   help="fetch each candidate's /ads.txt and match known templates")

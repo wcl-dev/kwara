@@ -103,6 +103,7 @@ command reference, the tool list, and the reasoning.
 | `KWARA_BROWSER_TIMEZONE` | `Asia/Taipei` | Playwright browser timezone |
 | `KWARA_HMAC_KEY` | *(unset)* | HMAC key for signing evidence pack manifest |
 | `KWARA_URLSCAN_API_KEY` | *(unset)* | urlscan.io API key (free community tier) |
+| `KWARA_PUBLICWWW_API_KEY` | *(unset)* | PublicWWW source-code search key; enables `discover publicwww`. Read from the env only, never written to disk — see [docs/agent-interface.md](docs/agent-interface.md) |
 | `KWARA_HTTP_TIMEOUT` | `10` | Scanner per-request timeout (seconds) |
 | `KWARA_MAX_HOPS` | `20` | Redirect chain hop limit |
 | `KWARA_NEW_DOMAIN_DAYS` | `180` | "New domain" risk flag threshold (days) |

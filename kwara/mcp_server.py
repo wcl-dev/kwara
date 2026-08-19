@@ -52,6 +52,7 @@ _WITHHELD = {
     "cmd_run_cloaking": "a step inside run attribute, which is exposed whole",
     "cmd_run_intel": "a step inside run attribute, which is exposed whole",
     "cmd_run_corroborate": "discloses the investigation to third parties",
+    "cmd_discover_publicwww": "discloses which fingerprint is being hunted to a third party",
 }
 
 try:
@@ -376,6 +377,23 @@ def extract_candidates(
     """
     return _call(cli.cmd_discover_candidates, sellers_json=sellers_json,
                  out=out, exclude_scanned=exclude_scanned, db=db)
+
+
+@mcp.tool()
+def normalize_domains(
+    file: str,
+    out: str | None = None,
+    no_apex: bool = False,
+) -> dict:
+    """Fold any domain list into apexes ready for screen_candidates.
+
+    Local, no network: reads a file in whatever shape a candidate list arrives
+    — plain, a hosts file (`0.0.0.0 bad.example`), adblock rules
+    (`||bad.example^`), or PublicWWW's CSV — and emits the registrable domains.
+    Lets a blocklist enter the same funnel as sellers.json candidates.
+    """
+    return _call(cli.cmd_discover_normalize, file=file, out=out,
+                 no_apex=no_apex)
 
 
 @mcp.tool()

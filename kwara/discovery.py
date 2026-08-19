@@ -37,7 +37,7 @@ WHAT ACTUALLY DISCRIMINATES (measured 2026-08-05, 31 apexes in the case DB)
   cleared — this stage can only promote, never exonerate.
 
 Pure functions take an already-fetched ads.txt result so the scoring is
-unit-testable offline; only `screen_domain` touches the network.
+unit-testable offline; only `screen_domain` and `candidates_from_publicwww` reach the network.
 """
 from __future__ import annotations
 
@@ -52,7 +52,7 @@ import secrets
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
-from urllib.parse import urlparse
+from urllib.parse import urlparse, quote
 
 import requests
 
@@ -63,6 +63,10 @@ from .config import (
     ADS_TXT_TIMEOUT,
     DISCOVERY_MAX_REDIRECTS,
     DISCOVERY_WORKERS,
+    PUBLICWWW_API_KEY,
+    PUBLICWWW_API_URL,
+    PUBLICWWW_MAX_RESULTS,
+    PUBLICWWW_TIMEOUT,
     SCANNER_USER_AGENT,
 )
 from .index_db import SIGNAL_ADS_TXT_TEMPLATE
@@ -535,6 +539,94 @@ def candidates_from_sellers_json(paths: Iterable[str]) -> list[str]:
             if apex:
                 out.add(apex)
     return sorted(out)
+
+
+# hosts-file sinkhole addresses: the line is "<sink-ip> domain", domain second.
+_HOSTS_SINK = re.compile(r"^(?:0\.0\.0\.0|127\.0\.0\.1|::1?|255\.255\.255\.255)$")
+
+
+def parse_domain_list(text: str, *, apex: bool = True) -> list[str]:
+    """Registrable domains out of a domain list in any common shape.
+
+    Handles what candidate lists actually arrive as: PublicWWW's CSV export
+    (`host`, `host;count`, `host,count`), plain one-per-line, `hosts`-file
+    sinkholes (`0.0.0.0 bad.example`), and adblock domain-anchor rules
+    (`||bad.example^$opts`). Element-hiding, regex and exception (`@@`) adblock
+    rules are skipped — they are not clean domains. For a tracking-id pivot the
+    host is collapsed to its registrable domain; pass apex=False to keep it
+    whole. Pure, so every format is exercised without a key or the network.
+    """
+    out: set[str] = set()
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line[0] in "#!" or line.startswith(("[", "@@")):
+            continue                        # comment / adblock header or exception
+        if line.startswith("||"):           # adblock  ||domain^$third-party
+            token = re.split(r"[\^/$*:?]", line[2:], maxsplit=1)[0]
+        elif "##" in line or line.startswith(("/", "|")):
+            continue                        # element-hiding / regex / other rule
+        else:
+            first = line.split(None, 1)[0]
+            if _HOSTS_SINK.match(first):    # hosts file: sink-ip then domain
+                parts = line.split()
+                token = parts[1] if len(parts) > 1 else ""
+            else:                           # plain, or CSV host;count / host,count
+                token = re.split(r"[;,\s]", line, maxsplit=1)[0]
+        token = token.strip().strip('"')
+        if not token or token.lower() in {"url", "domain", "host"}:
+            continue                        # a header row, not a result
+        host = extract_domain_from_url(token) if apex else (
+            urlparse(token if "://" in token else "//" + token).hostname)
+        if host:
+            out.add(host.lower())
+    return sorted(out)
+
+
+def candidates_from_publicwww(
+    snippets: Iterable[str],
+    *,
+    apex: bool = True,
+    limit: int | None = None,
+    session: requests.Session | None = None,
+) -> list[str]:
+    """Registrable domains whose page source embeds each snippet, via PublicWWW.
+
+    The network sibling of `candidates_from_sellers_json`: it produces a
+    candidate list for `screen` and produces nothing kept as evidence.
+    PublicWWW's export API carries the key in the query string, so persisting
+    the request URL would leak the key into the case DB and any exported pack.
+    This function therefore keeps the transaction transient — it records no
+    acquisition, banks no body, logs no URL — and only the domains survive. The
+    key is read from KWARA_PUBLICWWW_API_KEY and travels in request params,
+    never in a URL anything logs.
+
+    Limitation: PublicWWW indexes static homepage source only, so an id that is
+    JS/GTM-injected, inner-page-only, or on a site below its crawl threshold
+    does not surface — which is the profile of the more sophisticated operators.
+    A null result is not evidence of a small footprint.
+    """
+    if not PUBLICWWW_API_KEY:
+        raise RuntimeError(
+            "KWARA_PUBLICWWW_API_KEY is unset — set it to use the publicwww "
+            "candidate source (read from the env, never written to disk)")
+    sess = session or requests.Session()
+    cap = PUBLICWWW_MAX_RESULTS if limit is None else limit
+    found: set[str] = set()
+    for snippet in snippets:
+        # Exact-match the snippet: a full tracking id is specific enough that a
+        # raw source hit is an embedding, not a passing mention.
+        query = quote(f'"{snippet}"', safe="")
+        resp = sess.get(
+            PUBLICWWW_API_URL + query + "/",
+            params={"export": "csv", "key": PUBLICWWW_API_KEY},
+            timeout=PUBLICWWW_TIMEOUT,
+            headers={"User-Agent": SCANNER_USER_AGENT},
+        )
+        resp.raise_for_status()
+        found.update(parse_domain_list(resp.text, apex=apex))
+        if len(found) >= cap:
+            break
+    return sorted(found)[:cap]
 
 
 def build_prevalence(observations: Iterable[dict[str, Any]]) -> dict[str, Any]:
