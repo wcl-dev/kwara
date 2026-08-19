@@ -140,7 +140,12 @@ def test_bare_site_names_are_caught_too(identifiers):
     # nothing about a disclosure and would make the guard unusable.
     stems -= {"redacted139", "news", "video", "health", "travel", "search",
               "share", "media", "daily", "world", "online", "mobile",
-              "digital", "content", "network", "public", "server", "static"}
+              "digital", "content", "network", "public", "server", "static",
+              # "article" joined the list on 2026-08-19: the docs describe
+              # where a content farm puts its AdSense, and "article pages" is
+              # the only way to say it. A doc set about content farms cannot
+              # avoid the word.
+              "article"}
     found = {}
     for stem in sorted(stems):
         hits = [f for f in _grep(stem)

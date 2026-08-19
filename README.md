@@ -110,6 +110,11 @@ command reference, the tool list, and the reasoning.
 | `KWARA_DATA_DIR` | *(beside the package)* | Case database, capture store and export packs. Move all three together — after `pip install` the package directory is often root-owned and wiped on upgrade |
 | `KWARA_INDEX_DB_PATH` | `~/.kwara/index.db` | Central cross-case signal index (spans multiple DB files) |
 
+Those are the ones most people set. kwara reads 48 variables in all — the
+rest are analysis thresholds, and they decide things like whether a shared
+ad account reads as *same operator* or *same reseller*. Complete list with
+defaults and reasoning: [`docs/configuration.md`](docs/configuration.md).
+
 ## Project structure
 
 | Directory | Description |
@@ -125,6 +130,7 @@ command reference, the tool list, and the reasoning.
 | `corpus_manifest.py` | Hashes the gitignored discovery corpus so its integrity is checkable |
 | `docs/agent-interface.md` | Full CLI command reference and MCP tool list |
 | `docs/analysis-design.md` | How the analysis layer works and why — algorithms, thresholds, invariants |
+| `docs/configuration.md` | Every environment variable: defaults, and what each threshold decides |
 | `docs/guide.md` · `docs/guide.zh-TW.md` | Usage guide, English and Traditional Chinese |
 | `docs/kwara_adtech_crosswalk*.html` | Illustrated crosswalk: forensic targets ↔ the digital-advertising ecosystem |
 | `requirements.txt` · `requirements-agent.txt` · `requirements-dev.txt` | Base install, MCP extras, test tooling |

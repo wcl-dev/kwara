@@ -252,4 +252,6 @@ The screening funnel finds candidates sharing a deployment with targets you
 already know. That is a **separate workflow** — see the `discover` section of
 [agent-interface.md](agent-interface.md).
 
-The full list of environment variables is in [README.md](../README.md).
+The variables you are most likely to set are in [README.md](../README.md).
+The complete list — including every analysis threshold — is in
+[configuration.md](configuration.md).

@@ -198,4 +198,4 @@ ZIP 含 CSV、截圖、HTML、HAR、稽核紀錄、SHA-256 manifest、中英雙�
 
 判別器可以從候選網域裡找出與已知目標同源的站。它是**另一條工作流**，見 [agent-interface.md](agent-interface.md) 的 `discover` 章節。
 
-環境變數完整清單見 [README.zh-TW.md](../README.zh-TW.md)。
+最常設定的環境變數見 [README.zh-TW.md](../README.zh-TW.md)；完整清單（含所有分析門檻）見 [configuration.md](configuration.md)。

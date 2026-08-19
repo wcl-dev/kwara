@@ -107,6 +107,10 @@ claude mcp add kwara -- /abs/path/to/.venv/bin/python -m kwara.mcp_server
 | `KWARA_DATA_DIR` | *（套件目錄旁）* | 案件資料庫、擷取庫、匯出封包。一個旋鈕移動三者——`pip install` 之後套件目錄常是 root 所有、升級時會被清掉 |
 | `KWARA_INDEX_DB_PATH` | `~/.kwara/index.db` | 跨案件訊號中央索引（橫跨多個 DB 檔） |
 
+以上是最常設定的幾個。kwara 實際讀取 48 個環境變數，其餘是分析門檻——它們決定的
+是像「共用的廣告帳號要判成同一操作者還是同一代管商」這種事。完整清單、預設值與
+判定理由見 [`docs/configuration.md`](docs/configuration.md)。
+
 ## 專案結構
 
 | 目錄 | 說明 |
@@ -122,6 +126,7 @@ claude mcp add kwara -- /abs/path/to/.venv/bin/python -m kwara.mcp_server
 | `corpus_manifest.py` | 對 gitignore 的發現語料做雜湊，使其完整性可驗證 |
 | `docs/agent-interface.md` | 完整 CLI 指令參考與 MCP 工具清單 |
 | `docs/analysis-design.md` | 分析層原理與設計——演算法、門檻、必須保留的契約 |
+| `docs/configuration.md` | 全部環境變數：預設值，以及每個門檻決定什麼 |
 | `docs/guide.md` · `docs/guide.zh-TW.md` | 操作說明，中英各一 |
 | `docs/kwara_adtech_crosswalk*.html` | 圖解對照誌：鑑識標的 ↔ 數位廣告生態 |
 | `requirements.txt` · `requirements-agent.txt` · `requirements-dev.txt` | 基本安裝、MCP 額外依賴、測試工具 |

@@ -238,7 +238,8 @@ inference under a gentler label.
 
 **Shared GTM containers**
 
-`weak_links` carries `type: "gtm_container"` entries at tier `相關未證實`,
+`weak_links` carries `type: "gtm_container"` entries at tier `相關未證實`
+("related, unproven" — tier values are emitted as literal strings),
 with `container_id`, `domains`, per-domain `members` giving each domain's
 `group_id` (null when it belongs to no confirmed group), `spans_groups`, and
 both `readings`. A container never contributes a union edge. In the cross-case
@@ -264,69 +265,112 @@ an audit log, a SHA-256 manifest, and a bilingual README.
 
 ---
 
-## `discover` — 候選篩選漏斗
+## `discover` — the candidate screening funnel
 
-**這一組會對外連線**，直接造訪候選網站。完整原理見 [analysis-design.md](analysis-design.md) §十一。
+**This group makes outbound connections** and visits candidate sites directly.
+The full reasoning is in [analysis-design.md](analysis-design.md) §11 (written
+in Traditional Chinese).
 
 ```bash
-# 1. 從 SSP 的 sellers.json 取出候選發布商網域
+# 1. Pull candidate publisher domains out of an SSP's sellers.json
 python -m kwara.cli discover candidates ssp1.json ssp2.json \
     --out candidates.txt --exclude-scanned
 
-# 2. 抓每個候選的 /ads.txt，比對索引裡的已知模板
-#    --bank 是重點：把觀測存下來，它同時是參照母體與自我分群的輸入
+# 2. Fetch each candidate's /ads.txt and compare against known templates.
+#    --bank is the point: it stores the observations, and those are both the
+#    reference population and the input to self-clustering
 python -m kwara.cli discover screen --domains candidates.txt \
     --bank observations.jsonl
 
-# 3. 讓候選彼此分群（不需要事先認識任何網域）
+# 3. Let the candidates cluster against each other (requires no prior
+#    knowledge of any domain)
 python -m kwara.cli discover cluster --observations observations.jsonl \
     --portfolio-only
 
-# 4. 用觀測建參照母體——tier 判定會讀它
+# 4. Build the reference population from the observations — tier reads it
 python -m kwara.cli discover prevalence --observations observations.jsonl \
     --out discovery/data/reference_prevalence.json
 ```
 
-挑 SSP 要挑冷門的：大型交易所同時服務主流發布商，池子會被稀釋（9,501 個候選命中 1 個），小型區域 SSP 的名單密度高得多（666 個候選命中 2 個）。
+Pick obscure SSPs. A large exchange also serves mainstream publishers, so the
+pool is diluted (9,501 candidates, 1 hit), while a small regional SSP's list
+is far denser (666 candidates, 2 hits).
 
-`screen` 只能把候選升級，不能替它開脫——未命中回報 `no_match`，不是「乾淨」。
+`screen` can only promote a candidate, never exonerate one — a miss reports
+`no_match`, which is not the same as "clean".
 
-### `discover publicwww` — 用追蹤碼反查候選網域
+### `discover publicwww` — pivot from a tracking id to candidate domains
 
-`sellers.json` 給的是「這家 SSP 服務哪些發布商」；PublicWWW 給的是另一個方向——**哪些網域的原始碼裡埋了這個追蹤碼**。ads.txt screening 做不到這個 pivot，因為 ads.txt 是固定路徑、不是頁面原始碼。
+`sellers.json` answers "which publishers does this SSP serve". PublicWWW
+answers the other direction — **which domains embed this tracking id in their
+source**. ads.txt screening cannot make that pivot, because ads.txt is a fixed
+path, not page source.
 
 ```bash
-# 需要 KWARA_PUBLICWWW_API_KEY；產出跟 discover candidates 同格式，直接接 screen
+# Needs KWARA_PUBLICWWW_API_KEY; output matches discover candidates, so it
+# feeds screen directly
 python -m kwara.cli discover publicwww 'G-ABC1234' 'AW-9988776' \
     --out cand.txt --exclude-scanned
 python -m kwara.cli discover screen --domains cand.txt --bank obs.jsonl
 ```
 
-同操作者會把同一個追蹤碼埋在一堆子網域上，所以預設**收斂到 apex 去重**（`--no-apex` 保留完整 hostname）。`--limit` 蓋掉 `KWARA_PUBLICWWW_MAX_RESULTS`。
+One operator will embed the same tracking id across a pile of subdomains, so
+the default **collapses to the apex and deduplicates** (`--no-apex` keeps full
+hostnames). `--limit` overrides `KWARA_PUBLICWWW_MAX_RESULTS`.
 
-兩個刻意的邊界：
+Two deliberate boundaries:
 
-- **key 不落地。** PublicWWW 的 export API 把 key 放在 query string，而 kwara 是個「什麼都留存」的工具（acquisition 存 requested URL、screen bank 存觀測 URL、export 全打包）。所以這個來源把 HTTP 交易**保持拋棄式**：key 走 request params、絕不 log URL、不寫 acquisition、不 bank body，只有網域活下來。`tests/test_publicwww_source.py` 對著原始碼把這條釘死。
-- **CLI-only，不開給 MCP。** 拿追蹤碼去查等於告訴第三方你在追哪個 operator——跟 `run corroborate` 同類的揭露決定。`mcp_server._WITHHELD` 列有 `cmd_discover_publicwww`，指令跑之前也會在 stderr 明講這件事。
+- **The key never lands on disk.** PublicWWW's export API carries the key in
+  the query string, and kwara is a tool that retains everything (acquisition
+  stores the requested URL, the screen bank stores observation URLs, export
+  bundles both). So this source keeps the HTTP transaction **transient**: the
+  key travels in request params, the URL is never logged, no acquisition is
+  written, no body is banked — only the domains survive.
+  `tests/test_publicwww_source.py` pins that against the source.
+- **CLI-only, not exposed over MCP.** Looking up a tracking id tells a third
+  party which operator you are following — the same class of disclosure
+  decision as `run corroborate`. `mcp_server._WITHHELD` lists
+  `cmd_discover_publicwww`, and the command says so on stderr before it runs.
 
-**限制：只搜得到「靜態首頁原始碼」裡的碼。** PublicWWW 索引的是靜態抓取的 HTML、且預設只涵蓋首頁，所以下面三種碼它看不到、pivot 也就撈不到：
+**Limitation: it only finds ids in the static homepage source.** PublicWWW
+indexes statically fetched HTML and by default covers the homepage only, so
+three kinds of id are invisible to it — and the pivot cannot reach them:
 
-- **GTM / JS 注入的碼**——例如 GA4 透過 GTM 載入時，`G-…` 藏在 GTM 容器 JSON 裡、不在頁面 source。kwara 是開瀏覽器 render 抓到的，PublicWWW 的靜態爬蟲不是。
-- **只出現在內頁的碼**——大站常只在文章頁掛 AdSense，首頁 source 沒有（頁面提示的 internal-pages search 是另一條／付費）。
-- **crawl 門檻下的小站**——小型區域農場可能根本不在 PublicWWW 的索引裡。
+- **Ids injected through GTM or JS.** When GA4 loads via GTM, the `G-…` sits
+  inside the GTM container JSON, not in page source. kwara sees it because it
+  renders the page in a browser; PublicWWW's static crawler does not.
+- **Ids that appear only on inner pages.** Large sites often carry AdSense on
+  article pages alone, with nothing in the homepage source (the internal-pages
+  search the site offers is a separate, paid path).
+- **Sites below the crawl threshold.** A small regional farm may simply not be
+  in PublicWWW's index at all.
 
-這剛好是 GTM／cloaker 型操作者的形態，所以 **PublicWWW 在最高技術的目標上最沒用**。2026-08-19 對三個真實 operator 碼用免費版實測：靜態硬寫 `data-ad-client=` 的農場回 10（但本地已擁有更多、反而超越它），另一個 AdSense 帳號與一個 GTM 型 GA4 都回 **0**。**把它當「低技術、靜態模板農場」的輔助來源，別當追蹤高技術操作者的主力；null 結果不代表足跡小，可能只是它看不到。**
+That is precisely the shape of a GTM/cloaker-type operator, so **PublicWWW is
+least useful against the most technically capable targets.** Measured on the
+free tier against three real operator ids on 2026-08-19: the farm that
+hard-codes `data-ad-client=` statically returned 10 (and the local corpus
+already held more, so it added nothing), while another AdSense account and a
+GTM-delivered GA4 both returned **0**. **Treat it as a supporting source for
+low-sophistication, static-template farms, not as the primary way to track a
+capable operator. A null result does not mean a small footprint — it may mean
+only that this source cannot see it.**
 
-### `discover normalize` — 任意清單 → apex 的統一入口
+### `discover normalize` — any list → apexes, one entry point
 
-`candidates`（sellers.json）與 `publicwww`（追蹤碼）各自產候選；封鎖清單則常以 `hosts`（`0.0.0.0 bad.example`）或 adblock（`||bad.example^`）格式散落。`normalize` 把這些連同純清單、CSV 一起收斂成可直接餵 `screen` 的 apex，純本機、不連網：
+`candidates` (sellers.json) and `publicwww` (tracking ids) each produce
+candidates their own way; blocklists, meanwhile, arrive scattered across
+`hosts` format (`0.0.0.0 bad.example`) and adblock format (`||bad.example^`).
+`normalize` folds those, along with plain lists and CSVs, into apexes that feed
+`screen` directly. Purely local, no network:
 
 ```bash
 python -m kwara.cli discover normalize --file blocklist.txt --out cand.txt
 python -m kwara.cli discover screen --domains cand.txt --bank obs.jsonl
 ```
 
-element-hiding、regex、例外（`@@`）等非網域規則會被丟掉——它們不是乾淨網域。`--no-apex` 保留完整 hostname。MCP 對應工具 `normalize_domains`（本機轉換，對外曝露）。
+Non-domain rules — element hiding, regex, exceptions (`@@`) — are dropped;
+they are not clean domains. `--no-apex` keeps full hostnames. The MCP tool is
+`normalize_domains` (local transformation, exposed).
 
 ## MCP server
 
@@ -426,76 +470,109 @@ quietly diverge.
   relationship graph and the operator-group labelling both use them.
 
 
-### MCP 的 discovery 工具
+### The discovery tools over MCP
 
-| 工具 | 對外？ | 說明 |
+| Tool | Outbound? | What it does |
 |---|---|---|
-| `extract_candidates` | 否 | 從手上的 sellers.json 取出候選發布商網域 |
-| `normalize_domains` | 否 | 把任意格式清單（plain/hosts/adblock/CSV）收斂成 apex；本機、不連網 |
-| `screen_candidates` | **是** | 抓候選的 /ads.txt 比對已知指紋。**每次上限 500、預設 100** |
-| `cluster_observations` | 否 | 讓已存的觀測彼此分群，不需事先認識任何網域 |
-| `build_prevalence_table` | 否 | 建參照母體表，tier 判定會讀它 |
+| `extract_candidates` | No | Pull candidate publisher domains out of a sellers.json you already hold |
+| `normalize_domains` | No | Fold any list format (plain / hosts / adblock / CSV) into apexes; local, no network |
+| `screen_candidates` | **Yes** | Fetch candidates' /ads.txt and compare against known fingerprints. **Cap 500 per call, default 100** |
+| `cluster_observations` | No | Cluster stored observations against each other, with no prior knowledge of any domain |
+| `build_prevalence_table` | No | Build the reference population table that tier decisions read |
 
-`screen_candidates` 設上限的理由與 `capture_snapshots` 相同：它直接造訪每一個候選，而掃描清單動輒五位數。agent 不該一次呼叫就啟動上萬網站的掃描；更大的批次走 CLI，那裡有人在場。
+`screen_candidates` is capped for the same reason as `capture_snapshots`: it
+visits every candidate directly, and screening lists routinely run to five
+figures. An agent should not be able to start a sweep of tens of thousands of
+sites in a single call. Larger batches go through the CLI, where a person is
+present.
 
-### `index crosslinks` — 第三方 endpoint 同時也是被調查的落地網域
+### `index crosslinks` — when a third-party endpoint is itself an investigated landing domain
 
 ```bash
 python -m kwara.cli index crosslinks
 ```
 
-endpoint 索引裡多數是網頁碰巧載入的廣告科技，而「稀有」分不出它與操作者自架設施——調查語料全是嫌疑者，只有一個頁面呼叫過的 DSP 看起來跟私有資產主機一樣罕見。這個查詢改問是非題：**這個第三方主機，本身是不是我們調查過的網域？** 是的話，兩邊就是接在一起的，不管各自的 ads.txt 怎麼說。
+Most of the endpoint index is ad tech a page happened to load, and "rarity"
+cannot separate that from an operator's own infrastructure — an investigation
+corpus is all suspects, so a DSP called by exactly one page looks just as rare
+as a private asset host. This query asks a yes/no question instead: **is this
+third-party host itself a domain we have investigated?** If it is, the two are
+wired together, whatever their respective ads.txt files say.
 
-不需要任何門檻。MCP 對應工具 `operator_cross_links`。
+No threshold needed. The MCP tool is `operator_cross_links`.
 
-實際產出（2026-08-06）：QSH 的 `hub-site.example`／`satellite-site.example`／`satellite2-site.example` 都從 `statics.private-cdn.example` 與 `s1.private-cdn2.example` 載入靜態資源——那是 01 家族叢集的私有 CDN。這條連結在 HAR 裡躺了三個月，而且推翻了先前依 ads.txt 帳號得出的「兩案無關聯」判斷。
+Real output (2026-08-06): QSH's `hub-site.example`, `satellite-site.example`
+and `satellite2-site.example` all load static assets from
+`statics.private-cdn.example` and `s1.private-cdn2.example` — the private CDN
+of the 01-family cluster. That link had been sitting in the HAR for three
+months, and it overturned an earlier "the two cases are unrelated" conclusion
+that had been drawn from ads.txt accounts.
 
-### `evidence list` — 證據在哪
+### `evidence list` — where the evidence is
 
-擷取庫是用 `scan_run_id` 當門牌：
+The capture store is addressed by `scan_run_id`:
 
 ```
 kwara/data/snapshots/7/20260505T081730971984_9fd1/screenshot.png
                      ↑ scan_run_id
 ```
 
-**6.6 GB 的證據，目錄名全是數字**，檔案系統本身看不出哪個目錄屬於哪個網域。把它翻譯回來是 Streamlit UI 唯一不可替代的功能。
+**6.6 GB of evidence, every directory named in digits.** The filesystem itself
+cannot say which directory belongs to which domain. Translating that back was
+the one thing the Streamlit UI did that nothing else replaced.
 
 ```bash
-# 這個網域的證據在哪（跨所有案件）
+# Where is this domain's evidence (across all cases)
 python -m kwara.cli evidence list --domain visitor-landing.example
 
-# 這個案件有哪些證據
+# What evidence does this case have
 python -m kwara.cli evidence list --case 3
 ```
 
-`--case` 與 `--domain` 至少要給一個——都不給的話答案是整個庫，那不算答案。
+At least one of `--case` and `--domain` is required — with neither, the answer
+is the entire store, and that is not an answer.
 
-輸出的 `by_domain` 摘要給每個網域的擷取次數、用過哪些方式、範例路徑；`items` 給逐筆細節。每個檔案都做**磁碟實存檢查**：資料庫聲稱存在但檔案已消失的，計入 `missing_screenshot_files`——那正是值得舉報的保管鏈缺口。
+The `by_domain` summary gives each domain's capture count, the methods used,
+and a sample path; `items` gives per-record detail. Every file gets an
+**on-disk existence check**: files the database claims but that have since
+vanished are counted in `missing_screenshot_files` — precisely the
+chain-of-custody gap worth reporting.
 
-MCP 對應工具 `list_evidence(case=..., domain=...)`。
+The MCP tool is `list_evidence(case=..., domain=...)`.
 
-### 證據區：`evidence describe` 與 `evidence browse`
+### The evidence area: `evidence describe` and `evidence browse`
 
-擷取庫的佈局是為了**寫入安全**設計的——每個 scan_run 一個目錄、每次擷取一個子目錄、永不覆蓋。那對保管鏈是對的形狀，對人是錯的形狀。兩個指令補上人這一側，都不搬動任何位元組。
+The capture store's layout is built for **write safety** — one directory per
+scan_run, one subdirectory per capture, never overwritten. That is the right
+shape for chain of custody and the wrong shape for a person. These two
+commands supply the human side, and neither moves a single byte.
 
-**`evidence describe`** 在每個擷取目錄放一個 `capture.json`（網域、URL、擷取時間、方式、案件）：
+**`evidence describe`** drops a `capture.json` into each capture directory
+(domain, URL, capture time, method, case):
 
 ```bash
-python -m kwara.cli evidence describe            # 全部回填
-python -m kwara.cli evidence describe --dry-run  # 先看會動幾個
+python -m kwara.cli evidence describe            # backfill everything
+python -m kwara.cli evidence describe --dry-run  # see how many would change
 ```
 
-意義在於：把資料夾交給別人、或資料庫壞掉時，**目錄本身仍然說得出自己是什麼**。這才符合「第三方不需要信任我們」那個設計主張。`captured_at` 是證據擷取時間、`described_at` 是說明寫入時間——回填不會把今天的日期蓋在五月的證據上。
+The point: when the folder is handed to someone else, or when the database
+breaks, **the directory can still say what it is**. That is what the "a third
+party should not have to trust us" design claim requires. `captured_at` is
+when the evidence was captured, `described_at` when the description was
+written — a backfill does not stamp today's date on May's evidence.
 
-**`evidence browse`** 用網域當目錄名，投影出第二個檢視：
+**`evidence browse`** projects a second view that uses domains as directory
+names:
 
 ```bash
 python -m kwara.cli evidence browse --out ~/evidence-area --case 3
 ```
 
 ```
-~/evidence-area/visitor-landing.example/2026-05-05T0817_playwright -> 真正的擷取目錄
+~/evidence-area/visitor-landing.example/2026-05-05T0817_playwright -> the real capture directory
 ```
 
-符號連結，證據不複製也不會分岔；隨時可重建，庫才是真相。**它會拒絕寫入不是自己建立的目錄**——重建前會清空樹，指錯路徑會毀掉別人的東西。
+Symlinks, so the evidence is neither copied nor forked, and the view can be
+rebuilt at any time — the store is the truth. **It refuses to write into a
+directory it did not create**: it empties the tree before rebuilding, so a
+mistyped path would otherwise destroy someone else's files.
