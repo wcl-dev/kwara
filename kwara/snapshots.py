@@ -165,64 +165,269 @@ def _compute_subprocess_timeout(n: int, timeout: int, mode: str) -> int:
     return int(n * (timeout + 50) + 360)
 
 
-def _run_worker_phase(urls_info: list[dict], timeout: int, mode: str,
-                      env_override: dict[str, str] | None = None) -> list[dict]:
+def _screenshot_cap_sec(env: dict) -> float:
+    """Mirror of _snapshot_worker._screenshot_timeout_sec, read from the child's
+    environment so the parent's stall budget matches what the child will allow."""
+    raw = (env.get("KWARA_SCREENSHOT_TIMEOUT") or "").strip()
+    try:
+        val = float(raw) if raw else 45.0
+    except ValueError:
+        val = 45.0
+    return val if val > 0 else 45.0
+
+
+def _per_url_stall_cap(timeout: int, mode: str, env: dict) -> int:
+    """How long ONE url may go without the worker reporting it finished.
+
+    Not a per-URL budget so much as a wedged-detector: it is derived from the
+    worst legitimate path through the worker and then given generous headroom,
+    because killing a slow-but-working capture costs evidence. What it buys is
+    the guarantee that a single domain cannot hold the batch forever — before
+    this, one infinite-scroll site stalled a 57-URL run past an hour and the
+    only bound was the whole-batch timeout, 2.5 hours away, whose expiry would
+    have thrown away every capture the run had already made.
+    """
+    ss = _screenshot_cap_sec(env)
+    shot = ss * 4 / 3          # full page, then the viewport fallback
+    if mode == "headed_only":
+        worst = timeout + 25 + 8 + shot + 7
+    else:
+        # the CF path can run the whole capture twice with a 35-55s wait between
+        worst = 2 * (timeout + 6 + 8 + shot) + 55 + 5
+    return int(worst * 1.5) + 60
+
+
+def _kill_process_tree(proc) -> None:
+    """Kill the worker AND the browser it launched.
+
+    proc.kill() reaches the Python process only. Its Chromium children outlive
+    it — that is precisely the "程序仍活著" state the stall was reported in — so
+    kill the group on POSIX and use taskkill /T on Windows.
+    """
+    import signal
+    import subprocess
+
+    try:
+        if os.name == "nt":
+            subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                           capture_output=True)
+        else:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+    except Exception:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+    try:
+        proc.wait(timeout=30)
+    except Exception:
+        pass
+
+
+def _read_progress(path: str) -> dict[int, dict]:
+    """Entries the worker finished and flushed, keyed by position in its batch.
+
+    Tolerates a truncated tail: the last line may be half-written if the worker
+    was killed mid-append.
+    """
+    out: dict[int, dict] = {}
+    if not path or not os.path.exists(path):
+        return out
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(rec, dict) and isinstance(rec.get("i"), int):
+                    out[rec["i"]] = rec.get("entry") or {}
+    except OSError:
+        pass
+    return out
+
+
+def _launch_worker(urls_info: list[dict], timeout: int, mode: str,
+                   sub_env: dict) -> tuple[list[dict] | None, dict[int, dict], int | None, str]:
+    """Run the worker once over `urls_info`, watching it for a stall.
+
+    Returns (results, progress, stalled_pos, note):
+      results     — the worker's own result list when it exited normally, else None
+      progress    — per-position entries it flushed before exiting
+      stalled_pos — position of the URL that wedged it, or None
+      note        — error text to use when results is None and nothing stalled
+    """
     import subprocess
     import tempfile
-
-    if not urls_info:
-        return []
+    import time as _time
 
     with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False,
                                      encoding='utf-8') as f_in:
-        json.dump({"urls": urls_info, "timeout": timeout, "mode": mode}, f_in)
         input_file = f_in.name
-
     result_file = input_file.replace('.json', '_result.json')
+    progress_file = input_file.replace('.json', '_progress.jsonl')
+
+    with open(input_file, 'w', encoding='utf-8') as fh:
+        json.dump({"urls": urls_info, "timeout": timeout, "mode": mode,
+                   "progress_file": progress_file}, fh)
+
     script = os.path.join(os.path.dirname(__file__), '_snapshot_worker.py')
     venv_python = os.path.join(os.path.dirname(__file__), '.venv', 'Scripts', 'python.exe')
     python_exe = venv_python if os.path.exists(venv_python) else sys.executable
 
-    # Pass per-case locale to the subprocess via environment variables
+    overall_timeout = _compute_subprocess_timeout(len(urls_info), timeout, mode)
+    stall_cap = _per_url_stall_cap(timeout, mode, sub_env)
+
+    out_f = open(input_file + ".out", "w+", encoding="utf-8", errors="replace")
+    popen_kw = dict(stdout=out_f, stderr=subprocess.STDOUT, env=sub_env)
+    if os.name != "nt":
+        # own process group, so _kill_process_tree can take the browser with it
+        popen_kw["start_new_session"] = True
+
+    results = None
+    stalled_pos = None
+    note = ""
+    try:
+        proc = subprocess.Popen([python_exe, script, input_file, result_file],
+                                **popen_kw)
+    except Exception as exc:
+        out_f.close()
+        _cleanup_files(input_file, result_file, progress_file, input_file + ".out")
+        return None, {}, None, f"subprocess error: {exc}"
+
+    started = _time.monotonic()
+    last_change = started
+    seen_count = 0
+    try:
+        while True:
+            if proc.poll() is not None:
+                break
+            now = _time.monotonic()
+            n = len(_read_progress(progress_file))
+            if n > seen_count:
+                seen_count = n
+                last_change = now
+            if now - last_change > stall_cap:
+                stalled_pos = seen_count
+                _kill_process_tree(proc)
+                break
+            if now - started > overall_timeout:
+                note = "subprocess timed out"
+                _kill_process_tree(proc)
+                break
+            _time.sleep(1.0)
+    finally:
+        progress = _read_progress(progress_file)
+        try:
+            out_f.flush()
+            out_f.seek(0)
+            child_output = out_f.read()[-500:]
+        except Exception:
+            child_output = ""
+        out_f.close()
+
+        if stalled_pos is None and not note:
+            if os.path.exists(result_file):
+                try:
+                    with open(result_file, 'r', encoding='utf-8') as fh:
+                        results = json.load(fh)
+                except Exception as exc:
+                    note = f"bad result file: {exc}"
+            else:
+                note = f"no result file; stderr: {child_output}"
+
+        _cleanup_files(input_file, result_file, progress_file, input_file + ".out")
+
+    return results, progress, stalled_pos, note
+
+
+def _cleanup_files(*paths) -> None:
+    for pth in paths:
+        try:
+            os.unlink(pth)
+        except OSError:
+            pass
+
+
+def _run_worker_phase(urls_info: list[dict], timeout: int, mode: str,
+                      env_override: dict[str, str] | None = None) -> list[dict]:
+    """One capture phase, resumable past whichever URL brought the worker down.
+
+    The worker reports each finished URL as it goes, so a launch that ends
+    early still tells us how far it got. Whatever it flushed is kept, the URL
+    it died on is recorded as a failed capture, and the URLs after it go to a
+    fresh worker. Every restart advances by at least one position, so the loop
+    cannot spin. Result order always matches urls_info.
+
+    A launch that comes back with NOTHING — no results, no progress — is read
+    as an environment failure rather than a bad URL, and the phase gives up
+    instead of relaunching into the same wall.
+    """
+    if not urls_info:
+        return []
+
     sub_env = dict(os.environ)
     if env_override:
         sub_env.update(env_override)
 
-    overall_timeout = _compute_subprocess_timeout(len(urls_info), timeout, mode)
-    proc = None
-    try:
-        proc = subprocess.run(
-            [python_exe, script, input_file, result_file],
-            timeout=overall_timeout,
-            capture_output=True, text=True,
-            env=sub_env,
-        )
-    except subprocess.TimeoutExpired:
-        return _error_results(urls_info, "subprocess timed out")
-    except Exception as exc:
-        return _error_results(urls_info, f"subprocess error: {exc}")
-    finally:
-        try:
-            os.unlink(input_file)
-        except OSError:
-            pass
+    by_index: dict[int, dict] = {}
+    remaining = list(range(len(urls_info)))
 
-    if not os.path.exists(result_file):
-        stderr = (proc.stderr or "")[:500] if proc else ""
-        return _error_results(urls_info, f"no result file; stderr: {stderr}")
+    while remaining:
+        chunk = [urls_info[i] for i in remaining]
+        results, progress, stalled_pos, note = _launch_worker(
+            chunk, timeout, mode, sub_env)
 
-    try:
-        with open(result_file, 'r', encoding='utf-8') as f:
-            results = json.load(f)
-    except Exception as exc:
-        results = _error_results(urls_info, f"bad result file: {exc}")
-    finally:
-        try:
-            os.unlink(result_file)
-        except OSError:
-            pass
+        if results is not None and len(results) == len(chunk):
+            for pos, entry in enumerate(results):
+                by_index[remaining[pos]] = entry
+            break
 
-    return results
+        for pos, entry in progress.items():
+            if 0 <= pos < len(chunk) and entry:
+                by_index[remaining[pos]] = entry
+
+        if note and "subprocess timed out" in note:
+            # The whole-launch bound, not one URL. With the worker's own
+            # watchdog in front of it this should never fire; if it does, the
+            # problem is not the next URL and relaunching just burns the clock
+            # again. Keep what was salvaged, stop.
+            for pos, i in enumerate(remaining):
+                by_index.setdefault(i, _error_results([chunk[pos]], note)[0])
+            break
+
+        if stalled_pos is not None:
+            # The parent's own watchdog fired: the worker stopped reporting
+            # and was killed, so it never got to name the URL itself.
+            if 0 <= stalled_pos < len(chunk):
+                by_index[remaining[stalled_pos]] = _error_results(
+                    [chunk[stalled_pos]],
+                    "capture stalled; worker killed after "
+                    f"{_per_url_stall_cap(timeout, mode, sub_env)}s "
+                    "with no progress",
+                )[0]
+            advance = stalled_pos + 1
+        elif progress:
+            # The worker died on its own — its watchdog, or a crash. Anything
+            # it flushed is already recorded above; resume after the last one.
+            advance = max(progress) + 1
+            missing = advance - 1
+            if missing < len(chunk) and missing not in progress:
+                by_index[remaining[missing]] = _error_results(
+                    [chunk[missing]], note or "worker exited early")[0]
+        else:
+            for pos, i in enumerate(remaining):
+                by_index.setdefault(i, _error_results(
+                    [chunk[pos]], note or "worker produced no results")[0])
+            break
+
+        remaining = remaining[advance:]
+
+    return [by_index.get(i) or _error_results([urls_info[i]], "no result")[0]
+            for i in range(len(urls_info))]
 
 
 def _capture_in_subprocess(urls_info: list[dict], timeout: int = 30,
@@ -323,7 +528,8 @@ def _derive_capture_status(
         extra = "screenshot_missing" if not ss_ok else None
         d = (detail + ";" + extra) if (detail and extra) else (detail or extra or "internet_archive_html")
         return CAPTURE_WAYBACK, d
-    if error_note and "subprocess timed out" in error_note:
+    if error_note and ("subprocess timed out" in error_note
+                       or "capture stalled" in error_note):
         return CAPTURE_TIMEOUT, detail
     if not ss_ok and not html_ok:
         return (CAPTURE_FILE_MISSING, detail or "no_screenshot_no_html")
@@ -370,6 +576,15 @@ def _prepare_insert_row(
 
     cap_status, cap_detail = _derive_capture_status(error_note, ss_ok, html_ok, used_wb)
 
+    # A screenshot that fell back to the viewport is still a usable capture, so
+    # it must not become an 'error' row that `run snapshot` retries forever.
+    # But an analyst reading a 1280x800 image of a page that scrolls for
+    # kilometres deserves to know why it is cropped — that goes in the detail.
+    shot_note = r.get("screenshot_note")
+    if shot_note:
+        cap_detail = f"{cap_detail}; {shot_note}" if cap_detail else shot_note
+        cap_detail = cap_detail[:500]
+
     tags = _risk_tags(final_url, hop_count, request_domains)
     if cap_status != CAPTURE_OK:
         if "capture_error" not in tags:
@@ -386,42 +601,23 @@ def _prepare_insert_row(
     )
 
 
-def snapshot_url(conn: sqlite3.Connection, scan_run_id: int, timeout: int = 30,
-                 env_override: dict[str, str] | None = None) -> int:
-    row = conn.execute(
-        """SELECT sr.final_url, sr.hop_count, ua.case_id, ua.id AS url_artifact_id
-           FROM scan_runs sr
-           JOIN url_artifacts ua ON ua.id = sr.url_artifact_id
-           WHERE sr.id = ?""",
-        (scan_run_id,),
-    ).fetchone()
-    if row is None:
-        raise ValueError(f"scan_run_id {scan_run_id} not found")
+def _record_capture(conn: sqlite3.Connection, scan_run_id: int,
+                    meta: dict, r: dict) -> int:
+    """Write one capture's snapshot row + audit entry, committed immediately.
 
-    final_url = row['final_url']
-    hop_count = row['hop_count'] or 0
-    case_id = row['case_id']
-    final_domain = urlparse(final_url).hostname or ''
-
-    base_dir = _per_capture_dir(scan_run_id, final_url=final_url,
-                                capture_method="playwright", case_id=case_id)
-    screenshot_path = os.path.join(base_dir, 'screenshot.png')
-    html_path = os.path.join(base_dir, 'page.html')
-
-    results = _capture_in_subprocess([{
-        "scan_run_id": scan_run_id,
-        "final_url": final_url,
-        "screenshot_path": screenshot_path,
-        "html_path": html_path,
-    }], timeout=timeout, env_override=env_override)
-    r = results[0]
-
+    Shared by snapshot_url and snapshot_batch so a fix to how a capture is
+    recorded cannot land on one path and miss the other.
+    """
     (request_domains, error_note, screenshot_path, html_path, tags,
-     cap_status, cap_detail) = _prepare_insert_row(final_url, hop_count, r)
+     cap_status, cap_detail) = _prepare_insert_row(
+        meta["final_url"], meta["hop_count"], r)
 
-    _har_path = r.get("har_path") if r.get("har_path") and os.path.exists(r.get("har_path", "")) else None
+    har = r.get("har_path")
+    har_path = har if har and os.path.exists(har) else None
     tracking_ids = extract_tracking_ids_from_file(html_path)
-    tracking_ids_json = json.dumps(tracking_ids, ensure_ascii=False) if tracking_ids else None
+    tracking_ids_json = (json.dumps(tracking_ids, ensure_ascii=False)
+                         if tracking_ids else None)
+
     conn.execute(
         """INSERT INTO snapshots
                (scan_run_id, final_url, final_domain,
@@ -431,8 +627,8 @@ def snapshot_url(conn: sqlite3.Connection, scan_run_id: int, timeout: int = 30,
                 capture_method)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
-            scan_run_id, final_url, final_domain,
-            screenshot_path, html_path, _har_path,
+            scan_run_id, meta["final_url"], meta["final_domain"],
+            screenshot_path, html_path, har_path,
             json.dumps(request_domains),
             json.dumps(tags),
             _now(),
@@ -446,11 +642,11 @@ def snapshot_url(conn: sqlite3.Connection, scan_run_id: int, timeout: int = 30,
     snapshot_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
 
     write_audit(
-        conn, 'snapshot_url', case_id=case_id,
+        conn, 'snapshot_url', case_id=meta["case_id"],
         meta={
             'scan_run_id': scan_run_id, 'snapshot_id': snapshot_id,
-            'final_url': final_url, 'final_domain': final_domain,
-            'hop_count': hop_count, 'risk_tags': tags,
+            'final_url': meta["final_url"], 'final_domain': meta["final_domain"],
+            'hop_count': meta["hop_count"], 'risk_tags': tags,
             'request_domain_count': len(request_domains),
             'error': error_note,
             'capture_status': cap_status,
@@ -461,94 +657,119 @@ def snapshot_url(conn: sqlite3.Connection, scan_run_id: int, timeout: int = 30,
     return snapshot_id
 
 
+def _scan_run_meta(conn: sqlite3.Connection, scan_run_id: int) -> dict | None:
+    row = conn.execute(
+        """SELECT sr.final_url, sr.hop_count, ua.case_id
+           FROM scan_runs sr
+           JOIN url_artifacts ua ON ua.id = sr.url_artifact_id
+           WHERE sr.id = ?""",
+        (scan_run_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    return {
+        "final_url": row["final_url"],
+        "hop_count": row["hop_count"] or 0,
+        "case_id": row["case_id"],
+        "final_domain": urlparse(row["final_url"]).hostname or '',
+    }
+
+
+def snapshot_url(conn: sqlite3.Connection, scan_run_id: int, timeout: int = 30,
+                 env_override: dict[str, str] | None = None) -> int:
+    meta = _scan_run_meta(conn, scan_run_id)
+    if meta is None:
+        raise ValueError(f"scan_run_id {scan_run_id} not found")
+
+    base_dir = _per_capture_dir(scan_run_id, final_url=meta["final_url"],
+                                capture_method="playwright",
+                                case_id=meta["case_id"])
+
+    results = _capture_in_subprocess([{
+        "scan_run_id": scan_run_id,
+        "final_url": meta["final_url"],
+        "screenshot_path": os.path.join(base_dir, 'screenshot.png'),
+        "html_path": os.path.join(base_dir, 'page.html'),
+    }], timeout=timeout, env_override=env_override)
+
+    return _record_capture(conn, scan_run_id, meta, results[0])
+
+
+def _snapshot_chunk_size() -> int:
+    """URLs per capture subprocess. KWARA_SNAPSHOT_CHUNK overrides."""
+    raw = os.environ.get("KWARA_SNAPSHOT_CHUNK", "").strip()
+    try:
+        n = int(raw) if raw else 5
+    except ValueError:
+        n = 5
+    return max(1, n)
+
+
 def snapshot_batch(conn: sqlite3.Connection, scan_run_ids: list[int],
                    timeout: int = 30,
                    env_override: dict[str, str] | None = None) -> list[int]:
-    jobs = []
-    meta_map = {}
+    """Capture many URLs, in chunks, recording each chunk before the next starts.
+
+    Two things used to happen once for the whole batch, and both were reasons a
+    57-URL run that had to be killed left nothing behind but litter: every
+    capture directory was allocated up front, and no snapshots row was written
+    until the last URL came back. Kill it at URL 25 and you had 57 directories,
+    25 sets of artifacts, and zero rows — the orphan directories reconcile
+    reports (2,440 of them, 1.67 GB, as of 2026-08-25).
+
+    Chunking fixes both: directories are allocated a chunk at a time, and each
+    chunk's rows are committed before the next subprocess starts. An interrupted
+    run now loses at most one chunk, and `run snapshot` picks the rest up as
+    pending on the next invocation. The apex round-robin still runs over the
+    WHOLE batch before chunking, so same-site URLs stay spread apart.
+    """
+    ordered: list[int] = []
+    seen: set[int] = set()
     for sr_id in scan_run_ids:
-        row = conn.execute(
-            """SELECT sr.final_url, sr.hop_count, ua.case_id
-               FROM scan_runs sr
-               JOIN url_artifacts ua ON ua.id = sr.url_artifact_id
-               WHERE sr.id = ?""",
-            (sr_id,),
-        ).fetchone()
-        if row is None:
-            continue
+        if sr_id not in seen:
+            seen.add(sr_id)
+            ordered.append(sr_id)
 
-        base_dir = _per_capture_dir(sr_id, final_url=row["final_url"],
-                                    capture_method="playwright",
-                                    case_id=row["case_id"])
+    meta_map: dict[int, dict] = {}
+    for sr_id in ordered:
+        meta = _scan_run_meta(conn, sr_id)
+        if meta is not None:
+            meta_map[sr_id] = meta
 
-        jobs.append({
-            "scan_run_id": sr_id,
-            "final_url": row["final_url"],
-            "screenshot_path": os.path.join(base_dir, 'screenshot.png'),
-            "html_path": os.path.join(base_dir, 'page.html'),
-        })
-        meta_map[sr_id] = {
-            "final_url": row["final_url"],
-            "hop_count": row["hop_count"] or 0,
-            "case_id": row["case_id"],
-            "final_domain": urlparse(row["final_url"]).hostname or '',
-        }
-
-    if not jobs:
+    if not meta_map:
         return []
 
-    jobs = _round_robin_by_apex(jobs)
-    results = _capture_in_subprocess(jobs, timeout=timeout, env_override=env_override)
+    spread = _round_robin_by_apex([
+        {"scan_run_id": sr_id, "final_url": meta_map[sr_id]["final_url"]}
+        for sr_id in ordered if sr_id in meta_map
+    ])
+    targets = [j["scan_run_id"] for j in spread]
 
-    by_sr = {j["scan_run_id"]: r for j, r in zip(jobs, results)}
-    snapshot_ids = []
-    for sr_id in scan_run_ids:
-        if sr_id not in by_sr:
-            continue
-        r = by_sr[sr_id]
-        m = meta_map[sr_id]
+    chunk_size = _snapshot_chunk_size()
+    ids_by_sr: dict[int, int] = {}
 
-        (request_domains, error_note, screenshot_path, html_path, tags,
-         cap_status, cap_detail) = _prepare_insert_row(m["final_url"], m["hop_count"], r)
+    for start in range(0, len(targets), chunk_size):
+        batch = targets[start:start + chunk_size]
+        jobs = []
+        for sr_id in batch:
+            m = meta_map[sr_id]
+            base_dir = _per_capture_dir(sr_id, final_url=m["final_url"],
+                                        capture_method="playwright",
+                                        case_id=m["case_id"])
+            jobs.append({
+                "scan_run_id": sr_id,
+                "final_url": m["final_url"],
+                "screenshot_path": os.path.join(base_dir, 'screenshot.png'),
+                "html_path": os.path.join(base_dir, 'page.html'),
+            })
 
-        _har_p = r.get("har_path") if r.get("har_path") and os.path.exists(r.get("har_path", "")) else None
-        tracking_ids = extract_tracking_ids_from_file(html_path)
-        tracking_ids_json = json.dumps(tracking_ids, ensure_ascii=False) if tracking_ids else None
-        conn.execute(
-            """INSERT INTO snapshots
-                   (scan_run_id, final_url, final_domain,
-                    screenshot_path, html_path, har_path,
-                    request_domains_json, risk_tags, captured_at,
-                    capture_status, capture_detail, tracking_ids_json,
-                    capture_method)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                sr_id, m["final_url"], m["final_domain"],
-                screenshot_path, html_path, _har_p,
-                json.dumps(request_domains), json.dumps(tags), _now(),
-                cap_status, cap_detail, tracking_ids_json,
-                CAPTURE_METHOD_PLAYWRIGHT,
-            ),
-        )
-        conn.commit()
-        snapshot_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        results = _capture_in_subprocess(jobs, timeout=timeout,
+                                         env_override=env_override)
+        for job, r in zip(jobs, results):
+            sr_id = job["scan_run_id"]
+            ids_by_sr[sr_id] = _record_capture(conn, sr_id, meta_map[sr_id], r)
 
-        write_audit(
-            conn, 'snapshot_url', case_id=m["case_id"],
-            meta={
-                'scan_run_id': sr_id, 'snapshot_id': snapshot_id,
-                'final_url': m["final_url"], 'final_domain': m["final_domain"],
-                'hop_count': m["hop_count"], 'risk_tags': tags,
-                'request_domain_count': len(request_domains),
-                'error': error_note,
-                'capture_status': cap_status,
-                'capture_detail': cap_detail,
-                'tracking_id_platforms': sorted(tracking_ids.keys()),
-            },
-        )
-        snapshot_ids.append(snapshot_id)
-
-    return snapshot_ids
+    return [ids_by_sr[sr_id] for sr_id in ordered if sr_id in ids_by_sr]
 
 
 def _needs_manual_or_retry_capture(
