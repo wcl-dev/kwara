@@ -38,6 +38,7 @@ claimed three exclusions while eleven commands were actually missing — the
     being investigated. That belongs to a human who has decided to disclose.
 """
 import argparse
+import importlib.metadata
 import os
 import sys
 
@@ -58,9 +59,25 @@ _WITHHELD = {
 try:
     from mcp.server.fastmcp import FastMCP
 except ImportError:  # pragma: no cover - dependency guidance
+    # Two unrelated failures land here and they need opposite fixes. An absent
+    # SDK is an install. An mcp 2.x SDK is a version conflict — 2.0 renamed
+    # FastMCP to MCPServer — and telling its owner to install the SDK sends
+    # them round a loop they cannot win, because it is already installed.
+    try:
+        _mcp_version = importlib.metadata.version("mcp")
+    except importlib.metadata.PackageNotFoundError:
+        _mcp_version = None
+    if _mcp_version is None:
+        raise SystemExit(
+            "The MCP SDK is not installed. Run:\n"
+            "    python -m pip install -r requirements-agent.txt"
+        )
     raise SystemExit(
-        "The MCP SDK is not installed. Run:\n"
-        "    python -m pip install -r requirements-agent.txt"
+        f"The MCP SDK is installed (mcp {_mcp_version}) but kwara cannot use "
+        "it: mcp 2.x renamed FastMCP to MCPServer, and kwara targets 1.x. "
+        "Run:\n"
+        "    python -m pip install -r requirements-agent.txt\n"
+        "which pins mcp<2, or install 'mcp>=1.2.0,<2' directly."
     )
 
 mcp = FastMCP("kwara")
