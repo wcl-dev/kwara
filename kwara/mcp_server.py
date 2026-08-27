@@ -41,6 +41,8 @@ import argparse
 import importlib.metadata
 import os
 import sys
+from collections.abc import Callable
+from typing import Any
 
 
 from . import cli
@@ -56,31 +58,65 @@ _WITHHELD = {
     "cmd_discover_publicwww": "discloses which fingerprint is being hunted to a third party",
 }
 
-try:
-    from mcp.server.mcpserver import MCPServer
-except ImportError:  # pragma: no cover - dependency guidance
-    # Two unrelated failures land here and they need opposite fixes. An absent
-    # SDK is an install. An mcp 1.x SDK is a version conflict — MCPServer was
-    # called FastMCP before 2.0 — and telling its owner to install the SDK
-    # sends them round a loop they cannot win, because it is already there.
-    try:
-        _mcp_version = importlib.metadata.version("mcp")
-    except importlib.metadata.PackageNotFoundError:
-        _mcp_version = None
-    if _mcp_version is None:
-        raise SystemExit(
-            "The MCP SDK is not installed. Run:\n"
-            "    python -m pip install -r requirements-agent.txt"
-        )
-    raise SystemExit(
-        f"The MCP SDK is installed (mcp {_mcp_version}) but kwara cannot use "
-        "it: MCPServer was called FastMCP before mcp 2.0, and kwara targets "
-        "2.x. Run:\n"
-        "    python -m pip install -r requirements-agent.txt\n"
-        "which pins mcp>=2, or install 'mcp>=2' directly."
-    )
+# The 26 tools below are collected here and handed to the SDK only when the
+# server is actually built. Importing this module therefore works without the
+# optional [agent] extra, which matters because the previous import-time
+# SystemExit took down pytest's entire collection -- including the 750-odd
+# tests that never touch MCP -- and SystemExit derives from BaseException, so
+# it surfaced as INTERNALERROR rather than as a failing test.
+_TOOL_FUNCTIONS: list[Callable[..., Any]] = []
 
-mcp = MCPServer("kwara")
+
+def _tool() -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    """Collect a tool. Returns the function untouched, so every tool stays an
+    ordinary callable for the CLI-parity tests and for `inspect.getsource`."""
+    def register(fn: Callable[..., Any]) -> Callable[..., Any]:
+        _TOOL_FUNCTIONS.append(fn)
+        return fn
+    return register
+
+
+class _MCPUnavailable(RuntimeError):
+    """The SDK could not be loaded. Raised where a caller can still react."""
+
+
+def _mcp_diagnostic(exc: ImportError) -> str:
+    """Say which of the three situations this is, rather than assuming one.
+
+    The guard this replaces reported every ImportError as the 2.0 rename, so
+    a broken transitive dependency inside a perfectly correct 2.x install was
+    described as a version conflict and sent its owner to reinstall the SDK.
+    """
+    try:
+        version = importlib.metadata.version("mcp")
+    except importlib.metadata.PackageNotFoundError:
+        version = None
+
+    if version is None:
+        return ("The MCP SDK is not installed. Run:\n"
+                "    python -m pip install -r requirements-agent.txt")
+    if version.split(".", 1)[0] != "2":
+        return (f"kwara needs mcp 2.x, and mcp {version} is installed: "
+                "MCPServer was called FastMCP before 2.0. Run:\n"
+                "    python -m pip install -r requirements-agent.txt\n"
+                "or install 'mcp>=2,<3' directly.")
+    return (f"mcp {version} is installed and is the right major version, but "
+            f"MCPServer could not be imported: {exc}. The MCP install is "
+            "probably incomplete -- reinstall it.")
+
+
+def _build_server() -> Any:
+    """Import the SDK and register every collected tool. Raises
+    _MCPUnavailable rather than exiting, so importers keep control."""
+    try:
+        from mcp.server.mcpserver import MCPServer
+    except ImportError as exc:
+        raise _MCPUnavailable(_mcp_diagnostic(exc)) from exc
+
+    server = MCPServer("kwara")
+    for fn in _TOOL_FUNCTIONS:
+        server.add_tool(fn)
+    return server
 
 
 def _call(fn, **kwargs):
@@ -93,13 +129,13 @@ def _call(fn, **kwargs):
 # Cases
 # ---------------------------------------------------------------------------
 
-@mcp.tool()
+@_tool()
 def list_cases(db: str | None = None) -> list[dict]:
     """List every investigation case with its URL and scan counts."""
     return _call(cli.cmd_case_list, db=db)
 
 
-@mcp.tool()
+@_tool()
 def create_case(
     title: str,
     description: str = "",
@@ -118,7 +154,7 @@ def create_case(
                  locale_preset=locale_preset, locale=None, timezone=None, db=db)
 
 
-@mcp.tool()
+@_tool()
 def case_status(case: int, db: str | None = None) -> dict:
     """Case detail plus progress counts: URLs, scanned, unscanned, pending snapshots."""
     return _call(cli.cmd_case_show, case=case, db=db)
@@ -128,7 +164,7 @@ def case_status(case: int, db: str | None = None) -> dict:
 # Collection
 # ---------------------------------------------------------------------------
 
-@mcp.tool()
+@_tool()
 def ingest_urls(
     case: int,
     urls: list[str],
@@ -149,7 +185,7 @@ def ingest_urls(
                  posted_at=posted_at, db=db)
 
 
-@mcp.tool()
+@_tool()
 def run_attribution(case: int, force: bool = False, db: str | None = None) -> dict:
     """Cheap attribution pass over every un-scanned URL in the case.
 
@@ -167,7 +203,7 @@ def run_attribution(case: int, force: bool = False, db: str | None = None) -> di
     return _call(cli.cmd_run_attribute, case=case, force=force, db=db, quiet=True)
 
 
-@mcp.tool()
+@_tool()
 def capture_snapshots(case: int, limit: int = 5, db: str | None = None) -> dict:
     """Capture full evidence for pending URLs: screenshot, HTML, and HAR.
 
@@ -185,14 +221,14 @@ def capture_snapshots(case: int, limit: int = 5, db: str | None = None) -> dict:
 # Analysis
 # ---------------------------------------------------------------------------
 
-@mcp.tool()
+@_tool()
 def insights(case: int, lang: str = "en", db: str | None = None) -> dict:
     """Rule-based case summary: headline, findings, risk flags, and evidence gaps."""
     _set_lang(lang)
     return _call(cli.cmd_analyze_insights, case=case, db=db)
 
 
-@mcp.tool()
+@_tool()
 def clusters(case: int, db: str | None = None) -> dict:
     """Operator groups and the shared signals linking domains together.
 
@@ -203,13 +239,13 @@ def clusters(case: int, db: str | None = None) -> dict:
     return _call(cli.cmd_analyze_clusters, case=case, db=db)
 
 
-@mcp.tool()
+@_tool()
 def narrative(case: int, db: str | None = None) -> dict:
     """Plain-prose verdict with the reasoning behind it. Output is Traditional Chinese."""
     return _call(cli.cmd_analyze_narrative, case=case, db=db)
 
 
-@mcp.tool()
+@_tool()
 def relationship_graph(
     case: int,
     out: str,
@@ -231,13 +267,13 @@ def relationship_graph(
 # Cross-case index
 # ---------------------------------------------------------------------------
 
-@mcp.tool()
+@_tool()
 def index_case(case: int, db: str | None = None, index_db: str | None = None) -> dict:
     """Add this case's signals to the central cross-case index."""
     return _call(cli.cmd_index_build, case=case, db=db, index_db=index_db)
 
 
-@mcp.tool()
+@_tool()
 def lookup_signal(
     value: str,
     signal_type: str | None = None,
@@ -247,7 +283,7 @@ def lookup_signal(
     return _call(cli.cmd_index_lookup, value=value, type=signal_type, index_db=index_db)
 
 
-@mcp.tool()
+@_tool()
 def operator_cross_links(index_db: str | None = None) -> dict:
     """Third-party endpoints that are THEMSELVES investigated landing domains.
 
@@ -262,7 +298,7 @@ def operator_cross_links(index_db: str | None = None) -> dict:
     return _call(cli.cmd_index_crosslinks, index_db=index_db)
 
 
-@mcp.tool()
+@_tool()
 def recurring_signals(min_cases: int = 2, index_db: str | None = None) -> dict:
     """Signals that resurface across separate investigations — the same operator showing up again."""
     return _call(cli.cmd_index_recurring, min_cases=min_cases, index_db=index_db)
@@ -272,7 +308,7 @@ def recurring_signals(min_cases: int = 2, index_db: str | None = None) -> dict:
 # Evidence
 # ---------------------------------------------------------------------------
 
-@mcp.tool()
+@_tool()
 def list_evidence(case: int | None = None, domain: str | None = None,
                   db: str | None = None) -> dict:
     """Where a domain's captured evidence sits on disk, with existence checks.
@@ -289,7 +325,7 @@ def list_evidence(case: int | None = None, domain: str | None = None,
     return _call(cli.cmd_evidence_list, case=case, domain=domain, db=db)
 
 
-@mcp.tool()
+@_tool()
 def reconcile_evidence(attach: bool = False, include_partial: bool = False,
                        also_db: list[str] | None = None, limit: int = 20,
                        db: str | None = None) -> dict:
@@ -321,7 +357,7 @@ def reconcile_evidence(attach: bool = False, include_partial: bool = False,
                  also_db=list(also_db or []), limit=limit, db=db)
 
 
-@mcp.tool()
+@_tool()
 def describe_evidence(case: int | None = None, db: str | None = None) -> dict:
     """Write a capture.json caption into each capture directory.
 
@@ -332,7 +368,7 @@ def describe_evidence(case: int | None = None, db: str | None = None) -> dict:
     return _call(cli.cmd_evidence_describe, case=case, dry_run=False, db=db)
 
 
-@mcp.tool()
+@_tool()
 def browse_evidence(out: str, case: int | None = None,
                     domain: str | None = None, db: str | None = None) -> dict:
     """Build a domain-keyed symlink tree over the capture store at `out`.
@@ -344,13 +380,13 @@ def browse_evidence(out: str, case: int | None = None,
                  db=db)
 
 
-@mcp.tool()
+@_tool()
 def ingest_csv(case: int, file: str, db: str | None = None) -> dict:
     """Ingest a CSV of messages/URLs into a case, one scan target per row."""
     return _call(cli.cmd_ingest_csv, case=case, file=file, db=db)
 
 
-@mcp.tool()
+@_tool()
 def set_case_locale(case: int, locale_preset: str | None = None,
                     locale: str | None = None, timezone: str | None = None,
                     db: str | None = None) -> dict:
@@ -364,7 +400,7 @@ def set_case_locale(case: int, locale_preset: str | None = None,
                  locale=locale, timezone=timezone, db=db)
 
 
-@mcp.tool()
+@_tool()
 def export_case(case: int, db: str | None = None) -> dict:
     """Export the case as a ZIP evidence pack: CSVs, screenshots, HTML, HAR, audit log, SHA-256 manifest."""
     return _call(cli.cmd_export_case, case=case, db=db)
@@ -375,7 +411,7 @@ def export_case(case: int, db: str | None = None) -> dict:
 # Discovery — finding candidates rather than working a known case
 # ---------------------------------------------------------------------------
 
-@mcp.tool()
+@_tool()
 def extract_candidates(
     sellers_json: list[str],
     out: str | None = None,
@@ -396,7 +432,7 @@ def extract_candidates(
                  out=out, exclude_scanned=exclude_scanned, db=db)
 
 
-@mcp.tool()
+@_tool()
 def normalize_domains(
     file: str,
     out: str | None = None,
@@ -413,7 +449,7 @@ def normalize_domains(
                  no_apex=no_apex)
 
 
-@mcp.tool()
+@_tool()
 def screen_candidates(
     domains: str,
     limit: int = 100,
@@ -441,7 +477,7 @@ def screen_candidates(
                  bank=bank, workers=None, db=db, index_db=index_db, quiet=True)
 
 
-@mcp.tool()
+@_tool()
 def cluster_observations(observations: str, portfolio_only: bool = False) -> dict:
     """Group banked observations that serve a byte-identical ads.txt as each other.
 
@@ -459,7 +495,7 @@ def cluster_observations(observations: str, portfolio_only: bool = False) -> dic
                  portfolio_only=portfolio_only)
 
 
-@mcp.tool()
+@_tool()
 def build_prevalence_table(
     observations: str,
     out: str,
@@ -488,7 +524,11 @@ def _set_lang(lang: str) -> None:
 
 
 def main() -> None:
-    mcp.run()
+    try:
+        server = _build_server()
+    except _MCPUnavailable as exc:
+        raise SystemExit(str(exc)) from None
+    server.run()
 
 
 if __name__ == "__main__":
