@@ -64,6 +64,27 @@ kwara case new --title "Op Nightingale"
 > Playwright is optional. Scanning, WHOIS, ads.txt and the attribution analysis need no browser; only screenshots do.
 
 
+## Install without cloning
+
+The Quick Start above is the developer path — `-e` installs an editable link
+back into the checkout, which is what you want if you intend to change the
+code. To just run the tool:
+
+```bash
+python -m pip install git+https://github.com/wcl-dev/kwara.git
+python -m playwright install chromium     # only if you need screenshots
+export KWARA_DATA_DIR=~/.kwara/data       # set this BEFORE the first case
+```
+
+`KWARA_DATA_DIR` is listed under optional environment variables below because
+it is optional for a clone-and-run checkout. It is not optional here. Left
+unset, the case database, the capture store and the export packs default to a
+`data/` directory beside the installed package — which `pip install --upgrade`
+removes and recreates, taking the evidence with it. Point it somewhere you
+back up, and set it before the first case so one case cannot end up split
+across two locations.
+
+
 ## CLI and MCP
 
 The CLI is the source of truth for automation; the MCP server is a thin wrapper
