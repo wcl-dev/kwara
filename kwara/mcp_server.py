@@ -57,12 +57,12 @@ _WITHHELD = {
 }
 
 try:
-    from mcp.server.fastmcp import FastMCP
+    from mcp.server.mcpserver import MCPServer
 except ImportError:  # pragma: no cover - dependency guidance
     # Two unrelated failures land here and they need opposite fixes. An absent
-    # SDK is an install. An mcp 2.x SDK is a version conflict — 2.0 renamed
-    # FastMCP to MCPServer — and telling its owner to install the SDK sends
-    # them round a loop they cannot win, because it is already installed.
+    # SDK is an install. An mcp 1.x SDK is a version conflict — MCPServer was
+    # called FastMCP before 2.0 — and telling its owner to install the SDK
+    # sends them round a loop they cannot win, because it is already there.
     try:
         _mcp_version = importlib.metadata.version("mcp")
     except importlib.metadata.PackageNotFoundError:
@@ -74,13 +74,13 @@ except ImportError:  # pragma: no cover - dependency guidance
         )
     raise SystemExit(
         f"The MCP SDK is installed (mcp {_mcp_version}) but kwara cannot use "
-        "it: mcp 2.x renamed FastMCP to MCPServer, and kwara targets 1.x. "
-        "Run:\n"
+        "it: MCPServer was called FastMCP before mcp 2.0, and kwara targets "
+        "2.x. Run:\n"
         "    python -m pip install -r requirements-agent.txt\n"
-        "which pins mcp<2, or install 'mcp>=1.2.0,<2' directly."
+        "which pins mcp>=2, or install 'mcp>=2' directly."
     )
 
-mcp = FastMCP("kwara")
+mcp = MCPServer("kwara")
 
 
 def _call(fn, **kwargs):

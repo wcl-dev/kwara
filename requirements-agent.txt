@@ -2,4 +2,4 @@
 # The CLI (kwara/cli.py) needs nothing beyond requirements.txt — install this
 # only if you want to drive kwara from an MCP client such as Claude Code.
 -r requirements.txt
-mcp>=1.2.0,<2
+mcp>=2
