@@ -64,6 +64,27 @@ kwara case new --title "Op Nightingale"
 > Playwright is optional. Scanning, WHOIS, ads.txt and the attribution analysis need no browser; only screenshots do.
 
 
+## Install without cloning
+
+The Quick Start above is the developer path — `-e` installs an editable link
+back into the checkout, which is what you want if you intend to change the
+code. To just run the tool:
+
+```bash
+python -m pip install git+https://github.com/wcl-dev/kwara.git
+python -m playwright install chromium     # only if you need screenshots
+export KWARA_DATA_DIR=~/.kwara/data       # set this BEFORE the first case
+```
+
+`KWARA_DATA_DIR` is listed under optional environment variables below because
+it is optional for a clone-and-run checkout. It is not optional here. Left
+unset, the case database, the capture store and the export packs default to a
+`data/` directory beside the installed package — which `pip install --upgrade`
+removes and recreates, taking the evidence with it. Point it somewhere you
+back up, and set it before the first case so one case cannot end up split
+across two locations.
+
+
 ## CLI and MCP
 
 The CLI is the source of truth for automation; the MCP server is a thin wrapper
@@ -101,6 +122,7 @@ command reference, the tool list, and the reasoning.
 | `KWARA_LANG` | `en` | Language for insights and narrative (`en` or `zh`) |
 | `KWARA_BROWSER_LOCALE` | `zh-TW` | Playwright browser locale for screenshots |
 | `KWARA_BROWSER_TIMEZONE` | `Asia/Taipei` | Playwright browser timezone |
+| `KWARA_SCREENSHOT_TIMEOUT` | `45` | Seconds one screenshot may take before it falls back to a viewport-only image |
 | `KWARA_HMAC_KEY` | *(unset)* | HMAC key for signing evidence pack manifest |
 | `KWARA_URLSCAN_API_KEY` | *(unset)* | urlscan.io API key (free community tier) |
 | `KWARA_PUBLICWWW_API_KEY` | *(unset)* | PublicWWW source-code search key; enables `discover publicwww`. Read from the env only, never written to disk — see [docs/agent-interface.md](docs/agent-interface.md) |

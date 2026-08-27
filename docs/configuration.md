@@ -41,9 +41,20 @@ if the two ever disagree.
 | `KWARA_BROWSER_LOCALE` | `zh-TW` | Playwright context locale |
 | `KWARA_BROWSER_TIMEZONE` | `Asia/Taipei` | Playwright context timezone |
 | `KWARA_BROWSER_LANGUAGES` | *(derived from the locale)* | Comma-separated `navigator.languages` override; wins over the derived value |
+| `KWARA_SCREENSHOT_TIMEOUT` | `45` | Seconds one screenshot may take. On overrun the capture falls back to a viewport-only image and records why in `capture_detail`, rather than waiting on a page that never finishes rendering |
+| `KWARA_SNAPSHOT_CHUNK` | `5` | URLs per capture subprocess. Each chunk's rows are committed before the next starts, so an interrupted run loses at most one chunk instead of the whole batch |
 
 Per-case locale presets (`case new --locale-preset tw`) set these for one case;
 the variables are the process-wide fallback.
+
+**On a page that will not finish.** Playwright's own timeouts are not the last
+line of defence here. Against a page whose main thread is jammed, `page.goto`
+returns, `page.content()` never does — it takes no timeout at all — and even
+`page.screenshot(timeout=…)` was measured still blocked at four times its
+stated budget. So the worker carries a watchdog thread outside the browser
+greenlet: a URL that overruns its phase budget is recorded as a stalled
+capture, the worker takes itself down, and the parent resumes at the next URL.
+One hostile domain costs one domain, not the batch.
 
 ## Risk flags
 

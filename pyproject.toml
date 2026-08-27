@@ -30,7 +30,7 @@ dependencies = [
 [project.optional-dependencies]
 # The MCP SDK is not part of the base install: someone running kwara by hand
 # has no use for it, and it pulls a dependency tree of its own.
-agent = ["mcp>=1.0.0"]
+agent = ["mcp>=1.0.0,<2"]
 dev = ["pytest>=8.0.0"]
 
 [project.scripts]
