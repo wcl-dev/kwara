@@ -64,6 +64,19 @@ kwara case new --title "夜鶯專案"
 > Playwright 是選用的。掃描、WHOIS、ads.txt 與歸因分析都不需要瀏覽器，只有截圖需要。
 
 
+## 不 clone 直接安裝
+
+上面的快速開始是**開發者路徑**——`-e` 裝的是可編輯連結，指回你的 checkout，適合打算改程式的人。只想使用這個工具的話：
+
+```bash
+python -m pip install git+https://github.com/wcl-dev/kwara.git
+python -m playwright install chromium     # 只有需要截圖時才要
+export KWARA_DATA_DIR=~/.kwara/data       # 建第一個案件「之前」就要設
+```
+
+`KWARA_DATA_DIR` 在下面被列為可選環境變數，因為對 clone-and-run 的 checkout 而言它確實是可選的。**在這條路徑上它不是可選的。** 不設的話，案件資料庫、擷取存放區與匯出封包會落在已安裝套件旁邊的 `data/` 目錄——而 `pip install --upgrade` 會移除並重建那個目錄，證據跟著一起消失。請指向一個你會備份的位置，並在建立第一個案件之前就設好，一個案件才不會被拆散在兩個地方。
+
+
 ## CLI 與 MCP
 
 CLI 是自動化的唯一真相來源，MCP server 只是薄薄包一層、呼叫同一批函式，兩者不會
