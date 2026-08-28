@@ -33,14 +33,29 @@ All evidence is stored locally in SQLite and can be exported as a ZIP evidence p
 
 ## Where kwara fits
 
-kwara replaces none of the tools below. It fills the gap between them: turning an investigator's scattered findings into a package the recipient can verify without trusting the investigator.
+A suspicious link raises three different questions, and they take different work
+to answer:
 
-| Compared with | What they do | What kwara does |
+- **Is the claim true?** — content verification.
+- **How is it spreading, and who is amplifying it?** — narrative and
+  coordinated-behaviour research.
+- **Who is behind this URL, and which other domains answer to the same
+  operator?** — infrastructure attribution.
+
+kwara only answers the third, and it is built so its output can be handed to
+work on the other two. It starts from something you supply — the URLs in a
+case, or a candidate population to screen — collects the infrastructure signals
+behind them, and assembles what it finds into a package the recipient can
+verify without trusting the investigator.
+
+### Compared with other tools
+
+| | What it does | What kwara adds |
 |---|---|---|
-| Fact-checking orgs (Cofacts, Taiwan FactCheck Center) | **Content** verification — is this claim true? | **Infrastructure** evidence — who is behind this URL, and which domains share an operator |
-| Influence-operations research (IORG, Doublethink Lab) | **Narrative** and **coordinated behaviour** research — how a story spreads | A **reproducible evidence pipeline** — infrastructure signals laid out flat for others to check |
-| WHOIS / ASN lookup tools | One domain, one query — a privacy proxy ends the trail | **Cross-domain clustering** — whether pixels, certificates, parameters, and headers link the domains |
-| General OSINT suites (Maltego, SpiderFoot) | Broad reach, needs a skilled operator, no case governance | **Per-case governance + evidence-pack export + RFC 3161 timestamps** — deliverable as-is |
+| WHOIS / ASN lookups | One domain, one query — a privacy proxy ends the trail | **Correlation across domains** — whether pixels, certificates, parameters and headers link them |
+| urlscan.io | A scan of one URL's infrastructure, kept on someone else's platform | **A local case database** — repeat captures comparable over time, and an export that verifies offline |
+| Hunchly | A browser extension that hashes, timestamps and captures every page you visit, and assembles them into a case file | **Headless collection of its own** — ads.txt, WHOIS, TLS, redirect chains — and clustering of the domains by what they share, rather than a record of where you browsed |
+| Maltego, SpiderFoot | Broad general-purpose OSINT with a large ecosystem of transforms and modules | **Specialisation in the advertising ecosystem**, plus a per-case lifecycle, an audit log, and RFC 3161 timestamps over the export |
 
 ## Requirements
 
