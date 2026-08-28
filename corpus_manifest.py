@@ -28,16 +28,21 @@ one of those exists, this manifest proves integrity, not age.
 
 THE LIMITATION THIS MANIFEST RECORDS, AND DOES NOT FIX
 
-kwara did not retain the raw response bodies of the ads.txt files it fetched.
-Both the discovery sweep (`discovery.py`) and the case pipeline (`adstxt.py`)
-read the bytes, compute a SHA-256, parse out the DIRECT accounts, and discard
-the bytes. `ads_txt_json` on a scan_run stores `raw_sha256` and the parsed
-records; there is no `raw` field. The evidence exporter does not export
-`ads_txt_json` at all.
+kwara did not retain the raw response bodies of the ads.txt files behind THIS
+corpus. The discovery sweep (`discovery.py`) reads the bytes, computes a
+SHA-256, parses out the DIRECT accounts, and discards them; it has no
+acquisitions write path and still has none.
 
-So kwara's strongest binding signal — two domains serving a byte-identical
-ads.txt — is, today, a claim a recipient must take on trust. They cannot
-re-hash either file. Where the site has since started refusing requests, they
+The case pipeline no longer works that way. As of 2026-08-12 — after this
+corpus was collected — `adstxt.py` hands the response bytes to its caller to
+persist, and the evidence exporter ships them with the pack alongside
+`ads_txt_json`, failing closed when a recorded body is missing from disk. A
+recipient of a pack built from a case today CAN re-hash the ads.txt for
+themselves. A recipient of this corpus cannot.
+
+So for this corpus kwara's strongest binding signal — two domains serving a
+byte-identical ads.txt — remains a claim a recipient must take on trust. They
+cannot re-hash either file. Where the site has since started refusing requests, they
 cannot re-fetch it either: blocked-site.example was observed on 2026-08-05 serving sha
 3bb8f682471e (278 accounts, identical to sibling-site.example) and returned HTTP 403 the
 following day.
@@ -47,10 +52,12 @@ them into independently verifiable evidence, because the bytes they were
 derived from no longer exist. And note the ceiling even after retention: two
 identical ads.txt bodies prove identical captured bytes, not a common
 operator — platform-generated templates are common, which the clustering code
-already guards against. Retaining response bytes at acquisition is a
-change to the collection path, not something a hashing script can supply after
-the fact. Until that lands, an ads.txt template match should be reported as an
-observation with a stated provenance limitation.
+already guards against. Retaining response bytes at acquisition was a change
+to the collection path, not something a hashing script could supply after the
+fact; it landed on 2026-08-12. A template match drawn from THIS corpus still
+has to be reported as an observation with a stated provenance limitation,
+because the bytes behind it were never kept. One drawn from a case collected
+since does not.
 """
 from __future__ import annotations
 
@@ -67,16 +74,23 @@ SCHEMA = "kwara-corpus-manifest/1"
 # Recorded in the manifest so it travels with the hashes rather than living
 # only in a commit message someone has to go looking for.
 PROVENANCE_LIMITATIONS = [
-    "Raw ads.txt response bodies were NOT retained. discovery.py and adstxt.py "
-    "hash and parse the bytes, then discard them; ads_txt_json stores "
-    "raw_sha256 and parsed records only.",
+    "Raw ads.txt response bodies were NOT retained by the discovery screening "
+    "path that produced this corpus. discovery.py hashes and parses the bytes, "
+    "then discards them, and has no acquisitions write path; ads_txt_json "
+    "stores raw_sha256 and parsed records only. The case pipeline is different "
+    "since 2026-08-12: adstxt.py hands the body on for its caller to persist. "
+    "That does not reach back to this corpus.",
     "A template match therefore cannot be re-verified from this corpus. The "
     "hashes here establish that the DERIVED observations have not changed "
     "since this manifest was written; they cannot establish that the "
     "original fetch was hashed or attributed correctly, nor WHEN the "
     "observation was made — the manifest proves integrity, not age.",
-    "The evidence exporter does not include ads_txt_json, so an export pack "
-    "carries no ads.txt evidence at all.",
+    "CORRECTED 2026-08-28, was wrong from 2026-08-12: this list used to state "
+    "that the evidence exporter carries no ads.txt evidence. exporter.py "
+    "selects ads_txt_json into urls/scan_runs.csv and ships the acquisition "
+    "response bytes with the pack, failing closed when a recorded body is "
+    "missing from disk. This concerns packs built from a case database, never "
+    "this corpus.",
     "reference_prevalence.json declares all 8 SSPs in its source field, but "
     "its 5,232 sites are round-1 only — run_round2.py stripped records before "
     "writing. The provenance field is wrong; the data is round 1.",
