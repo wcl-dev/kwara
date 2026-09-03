@@ -114,6 +114,122 @@ def test_timestamp_request_is_well_formed():
     assert req[0] == 0x30      # SEQUENCE
 
 
+def _tsa_reply(status=0, *, status_string=None, fail_info_bit=None, token=True):
+    """A DER TimeStampResp, as a TSA actually answers one.
+
+    Verified byte-for-byte against `openssl ts -reply -text`: the rejection
+    built here prints the same "Status: Rejected. / Status description: Error
+    during serial number generation." that FreeTSA returned in the field.
+    """
+    def der(tag, value):
+        return bytes([tag, len(value)]) + value
+
+    info = der(0x02, bytes([status]))
+    if status_string is not None:
+        info += der(0x30, der(0x0c, status_string.encode()))
+    if fail_info_bit is not None:                      # single named bit
+        n_bytes = fail_info_bit // 8 + 1
+        bits = bytearray(n_bytes)
+        bits[fail_info_bit // 8] = 1 << (7 - fail_info_bit % 8)
+        unused = n_bytes * 8 - (fail_info_bit + 1)
+        info += der(0x03, bytes([unused]) + bytes(bits))
+    body = der(0x30, info)
+    if token:
+        body += der(0x30, b"\x05\x00")                 # opaque, never parsed
+    return der(0x30, body)
+
+
+def _tsa_resp(*args, **kwargs):
+    return _resp(200, _tsa_reply(*args, **kwargs),
+                 {"Content-Type": "application/timestamp-reply"})
+
+
+def test_granted_timestamp_is_stored():
+    with patch.object(corroboration.requests, "post", return_value=_tsa_resp(0)):
+        out = corroboration.get_rfc3161_timestamp(b"payload")
+    assert out.get("token_b64"), out
+    assert out["status"] == "granted"
+    assert not out.get("error")
+
+
+def test_granted_with_mods_is_still_a_usable_token():
+    """grantedWithMods (1) means the TSA changed something it was allowed to
+    change — the token is valid and refusing it would throw evidence away."""
+    with patch.object(corroboration.requests, "post", return_value=_tsa_resp(1)):
+        out = corroboration.get_rfc3161_timestamp(b"payload")
+    assert out.get("token_b64"), out
+    assert out["status"] == "grantedWithMods"
+
+
+def test_a_rejection_is_never_stored_as_a_timestamp():
+    """The failure this exists for: a refusal arrives as HTTP 200 with
+    Content-Type application/timestamp-reply and a ~50-byte body carrying no
+    token. Stored blind, it reads as a timestamp in the record and proves
+    nothing — the whole point of corroboration is that a recipient can check
+    it without trusting us."""
+    reply = _tsa_resp(2, status_string="Error during serial number generation.",
+                      token=False)
+    with patch.object(corroboration.requests, "post", return_value=reply):
+        out = corroboration.get_rfc3161_timestamp(b"payload", attempts=1)
+    assert "token_b64" not in out, out
+    assert out["error"], out
+    assert "serial number generation" in out["error"]
+
+
+def test_a_transient_rejection_is_retried():
+    """FreeTSA's serial-number error clears on the next request — observed in
+    the field, and one bad draw must not cost the file its timestamp."""
+    replies = [_tsa_resp(2, status_string="Error during serial number generation.",
+                         token=False),
+               _tsa_resp(0)]
+    with patch.object(corroboration.requests, "post",
+                      side_effect=replies) as post:
+        out = corroboration.get_rfc3161_timestamp(b"payload", attempts=3)
+    assert out.get("token_b64"), out
+    assert post.call_count == 2
+
+
+def test_a_malformed_request_is_not_retried():
+    """badRequest names our own request as the problem. Re-sending the
+    identical bytes three times just triples the load on a free service."""
+    reply = _tsa_resp(2, fail_info_bit=2, token=False)   # badRequest
+    with patch.object(corroboration.requests, "post",
+                      return_value=reply) as post:
+        out = corroboration.get_rfc3161_timestamp(b"payload", attempts=3)
+    assert "token_b64" not in out, out
+    assert "badRequest" in out["error"], out
+    assert post.call_count == 1
+
+
+def test_granted_but_empty_reply_is_not_a_token():
+    """status=granted with no timeStampToken is nothing to store."""
+    with patch.object(corroboration.requests, "post",
+                      return_value=_tsa_resp(0, token=False)):
+        out = corroboration.get_rfc3161_timestamp(b"payload", attempts=1)
+    assert "token_b64" not in out, out
+    assert out["error"], out
+
+
+def test_an_unparseable_reply_is_an_error_not_a_token():
+    """A body that is not a TimeStampResp at all — a captive portal, a proxy
+    error page served with the right content-type — must not be base64'd into
+    the record as evidence."""
+    junk = _resp(200, b"<html>proxy error</html>",
+                 {"Content-Type": "application/timestamp-reply"})
+    with patch.object(corroboration.requests, "post", return_value=junk):
+        out = corroboration.get_rfc3161_timestamp(b"payload", attempts=1)
+    assert "token_b64" not in out, out
+    assert "unparseable" in out["error"], out
+
+
+def test_failure_info_bits_are_named():
+    """The bit names are what tell a caller whether a retry is worth it."""
+    info = corroboration._parse_timestamp_response(
+        _tsa_reply(2, fail_info_bit=25, token=False))     # systemFailure
+    assert info["fail_info"] == "systemFailure", info
+    assert corroboration._tsa_failure_is_transient(info)
+
+
 def test_timestamp_failure_is_captured():
     with patch.object(corroboration.requests, "post",
                       side_effect=requests.exceptions.ConnectionError("no tsa")):

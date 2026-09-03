@@ -139,19 +139,65 @@ def save_to_wayback(url: str) -> dict:
 
 # ── RFC 3161 Timestamp ───────────────────────────────────────────────────
 
-def get_rfc3161_timestamp(data: bytes) -> dict:
+# PKIStatus (RFC 3161 §2.4.2). Only granted/grantedWithMods carry a token.
+_TSA_STATUS = {
+    0: "granted",
+    1: "grantedWithMods",
+    2: "rejection",
+    3: "waiting",
+    4: "revocationWarning",
+    5: "revocationNotification",
+}
+_TSA_STATUS_OK = frozenset({0, 1})
+
+# PKIFailureInfo bit positions (RFC 3161 §2.4.2).
+_TSA_FAILURE_INFO = {
+    0:  "badAlg",
+    2:  "badRequest",
+    5:  "badDataFormat",
+    14: "timeNotAvailable",
+    15: "unacceptedPolicy",
+    16: "unacceptedExtension",
+    17: "addInfoNotAvailable",
+    25: "systemFailure",
+}
+
+# These name our request as the problem, so re-sending it changes nothing.
+# Anything else — including a rejection with no failInfo at all, which is how
+# FreeTSA reports "Error during serial number generation" — is the TSA having
+# a bad moment and clears on retry.
+_TSA_PERMANENT_FAILURES = frozenset({
+    "badAlg", "badRequest", "badDataFormat",
+    "unacceptedPolicy", "unacceptedExtension",
+})
+
+_TSA_MAX_ATTEMPTS = 3
+
+
+def get_rfc3161_timestamp(data: bytes, *, attempts: int = _TSA_MAX_ATTEMPTS) -> dict:
     """Request a trusted timestamp from an RFC 3161 Time Stamp Authority.
 
     The timestamp proves that `data` existed at a specific point in time,
     as attested by the TSA (default: FreeTSA.org).
 
+    A TSA that refuses still answers HTTP 200 with a well-formed
+    application/timestamp-reply — a ~55-byte TimeStampResp whose PKIStatusInfo
+    says rejection and which contains no token at all. Storing that as evidence
+    would put something in the record that looks timestamped and proves
+    nothing, so the reply's status is parsed and only granted (0) and
+    grantedWithMods (1) are returned as a token; everything else comes back as
+    an error. Transient refusals are retried up to `attempts` times.
+
     The timestamp token (DER-encoded) is returned as base64. It can be
     verified independently with OpenSSL:
       openssl ts -verify -data <file> -in token.tsr -CAfile cacert.pem
+    and its status read back with:
+      openssl ts -reply -in token.tsr -text | grep Status:
 
     Returns {"service": "rfc3161", "tsa_url": "...", "token_b64": "...",
-             "digest_sha256": "...", "requested_at": "..."}
-    on success, or {"service": "rfc3161", "error": "..."} on failure.
+             "digest_sha256": "...", "status": "granted", "requested_at": "..."}
+    on success, or {"service": "rfc3161", "error": "...", "attempts": n}
+    on failure.
     """
     digest = hashlib.sha256(data).digest()
 
@@ -160,28 +206,160 @@ def get_rfc3161_timestamp(data: bytes) -> dict:
     # pyasn1 or other heavy dependencies.
     tsq = _build_timestamp_request(digest)
 
-    _rate_wait("rfc3161")
-    try:
-        resp = requests.post(
-            TSA_URL,
-            data=tsq,
-            headers={"Content-Type": "application/timestamp-query"},
-            timeout=30,
-        )
-        resp.raise_for_status()
+    attempt = 0
+    last_error = "no attempt made"
+    for attempt in range(1, max(1, attempts) + 1):
+        _rate_wait("rfc3161")
+        try:
+            resp = requests.post(
+                TSA_URL,
+                data=tsq,
+                headers={"Content-Type": "application/timestamp-query"},
+                timeout=30,
+            )
+            resp.raise_for_status()
 
-        if resp.headers.get("Content-Type", "").startswith("application/timestamp-reply"):
-            token_b64 = base64.b64encode(resp.content).decode("ascii")
-            return {
-                "service": "rfc3161",
-                "tsa_url": TSA_URL,
-                "token_b64": token_b64,
-                "digest_sha256": hashlib.sha256(data).hexdigest(),
-                "requested_at": _now(),
-            }
-        return {"service": "rfc3161", "error": f"unexpected content-type: {resp.headers.get('Content-Type')}"}
-    except Exception as exc:
-        return {"service": "rfc3161", "error": str(exc)[:300]}
+            content_type = resp.headers.get("Content-Type", "")
+            if not content_type.startswith("application/timestamp-reply"):
+                return {"service": "rfc3161",
+                        "error": f"unexpected content-type: {content_type}",
+                        "attempts": attempt}
+
+            try:
+                info = _parse_timestamp_response(resp.content)
+            except ValueError as exc:
+                return {"service": "rfc3161",
+                        "error": f"unparseable TSA reply: {exc}"[:300],
+                        "attempts": attempt}
+
+            if info["status"] in _TSA_STATUS_OK:
+                if info["has_token"]:
+                    return {
+                        "service": "rfc3161",
+                        "tsa_url": TSA_URL,
+                        "token_b64": base64.b64encode(resp.content).decode("ascii"),
+                        "digest_sha256": hashlib.sha256(data).hexdigest(),
+                        "status": info["status_text"],
+                        "requested_at": _now(),
+                    }
+                # Accepted but empty: nothing to store, and worth another go.
+                last_error = f"TSA returned {info['status_text']} with no timeStampToken"
+            else:
+                last_error = _describe_tsa_failure(info)
+                if not _tsa_failure_is_transient(info):
+                    break
+        except Exception as exc:
+            last_error = str(exc)[:300]
+
+    return {"service": "rfc3161", "error": last_error, "attempts": attempt}
+
+
+def _describe_tsa_failure(info: dict) -> str:
+    """One line naming what the TSA refused and why, so the caller can tell a
+    malformed request from a server-side hiccup without re-parsing the DER."""
+    parts = [f"TSA rejected: {info['status_text']}({info['status']})"]
+    if info["fail_info"]:
+        parts.append(f"failInfo={info['fail_info']}")
+    if info["status_string"]:
+        parts.append(info["status_string"])
+    return " ".join(parts)[:300]
+
+
+def _tsa_failure_is_transient(info: dict) -> bool:
+    """Whether re-sending the identical request could plausibly succeed."""
+    named = {name for name in info["fail_info"].split(",") if name}
+    return not (named & _TSA_PERMANENT_FAILURES)
+
+
+def _parse_timestamp_response(der: bytes) -> dict:
+    """Read the PKIStatusInfo out of a DER TimeStampResp (RFC 3161 §2.4.2).
+
+      TimeStampResp ::= SEQUENCE {
+        status           PKIStatusInfo,
+        timeStampToken   TimeStampToken OPTIONAL }
+      PKIStatusInfo ::= SEQUENCE {
+        status           INTEGER,
+        statusString     PKIFreeText     OPTIONAL,
+        failInfo         PKIFailureInfo  OPTIONAL }
+
+    Only the outermost layers are decoded — the token itself is kept as
+    opaque bytes and verified with OpenSSL, not here.
+
+    Returns {"status": int, "status_text": str, "status_string": str,
+             "fail_info": str, "has_token": bool}.
+    Raises ValueError if the reply is not a parseable TimeStampResp.
+    """
+    tag, body, _ = _der_read(der, 0)
+    if tag != 0x30:
+        raise ValueError(f"TimeStampResp is not a SEQUENCE (tag 0x{tag:02x})")
+
+    tag, status_info, pos = _der_read(body, 0)
+    if tag != 0x30:
+        raise ValueError(f"PKIStatusInfo is not a SEQUENCE (tag 0x{tag:02x})")
+    has_token = pos < len(body)
+
+    tag, value, sub = _der_read(status_info, 0)
+    if tag != 0x02 or not value:
+        raise ValueError("PKIStatus is not an INTEGER")
+    status = int.from_bytes(value, "big", signed=True)
+
+    status_string = ""
+    fail_info = ""
+    while sub < len(status_info):
+        tag, value, sub = _der_read(status_info, sub)
+        if tag == 0x30:        # PKIFreeText ::= SEQUENCE OF UTF8String
+            texts, inner = [], 0
+            while inner < len(value):
+                _, text, inner = _der_read(value, inner)
+                texts.append(text.decode("utf-8", "replace"))
+            status_string = " ".join(texts)
+        elif tag == 0x03:      # PKIFailureInfo ::= BIT STRING
+            fail_info = _decode_failure_info(value)
+
+    return {
+        "status": status,
+        "status_text": _TSA_STATUS.get(status, f"unknown({status})"),
+        "status_string": status_string,
+        "fail_info": fail_info,
+        "has_token": has_token,
+    }
+
+
+def _decode_failure_info(bit_string: bytes) -> str:
+    """Names of the set bits in a DER BIT STRING, comma-separated."""
+    if len(bit_string) < 2:
+        return ""
+    unused, data = bit_string[0], bit_string[1:]
+    n_bits = len(data) * 8 - (unused if 0 <= unused < 8 else 0)
+    names = [
+        _TSA_FAILURE_INFO.get(i, f"bit{i}")
+        for i in range(n_bits)
+        if data[i // 8] >> (7 - i % 8) & 1
+    ]
+    return ",".join(names)
+
+
+def _der_read(buf: bytes, pos: int) -> tuple[int, bytes, int]:
+    """Read one DER TLV at `pos`; return (tag, value, next_pos).
+
+    Low-tag-number form only — every field of a PKIStatusInfo is a universal
+    primitive or a SEQUENCE.
+    """
+    if pos + 2 > len(buf):
+        raise ValueError("truncated DER header")
+    tag, length = buf[pos], buf[pos + 1]
+    pos += 2
+    if length & 0x80:
+        n_bytes = length & 0x7F
+        if not 1 <= n_bytes <= 4:
+            raise ValueError("unsupported DER length form")
+        if pos + n_bytes > len(buf):
+            raise ValueError("truncated DER length")
+        length = int.from_bytes(buf[pos:pos + n_bytes], "big")
+        pos += n_bytes
+    if pos + length > len(buf):
+        raise ValueError("truncated DER value")
+    return tag, bytes(buf[pos:pos + length]), pos + length
 
 
 def _build_timestamp_request(sha256_digest: bytes) -> bytes:
