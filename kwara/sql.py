@@ -59,24 +59,39 @@ LATEST_DONE_SCAN_RUN = (
 # pushed it". Collection-coverage counts (insights, clusters.case_counts,
 # narrative) must NOT use it: they answer "how much did we actually collect",
 # and borrowing would report an artifact as scanned when it never was.
+# Written as COALESCE(own latest, any sibling's latest) rather than one
+# subquery with `ORDER BY (ua_url.id = ua.id) DESC`: SQLite 3.47 through at
+# least 3.51 reject an outer-table reference inside a correlated subquery's
+# ORDER BY ("no such column: ua.id") while 3.53 accepts it, and which one a
+# machine has depends on its Python build. Outer references in WHERE work
+# everywhere. The two forms are equivalent: prefer this row's own scan, else
+# the newest scan of any row in the case carrying the same URL.
 LATEST_DONE_SCAN_RUN_FOR_URL = (
+    "COALESCE("
+    "(SELECT sr_own.id FROM scan_runs sr_own "
+    "WHERE sr_own.url_artifact_id = ua.id AND sr_own.status = 'done' "
+    "ORDER BY sr_own.id DESC LIMIT 1), "
     "(SELECT sr_url.id FROM scan_runs sr_url "
     "JOIN url_artifacts ua_url ON ua_url.id = sr_url.url_artifact_id "
     "WHERE ua_url.case_id = ua.case_id "
     "AND ua_url.original_url = ua.original_url "
     "AND sr_url.status = 'done' "
-    "ORDER BY (ua_url.id = ua.id) DESC, sr_url.id DESC LIMIT 1)"
+    "ORDER BY sr_url.id DESC LIMIT 1))"
 )
 
 # As above but unfiltered by status, for the LEFT JOIN sites that deliberately
 # take the latest scan of any status (an errored scan still pins a final_url
 # the analyst needs to see).
 LATEST_SCAN_RUN_FOR_URL = (
+    "COALESCE("
+    "(SELECT sr_own.id FROM scan_runs sr_own "
+    "WHERE sr_own.url_artifact_id = ua.id "
+    "ORDER BY sr_own.id DESC LIMIT 1), "
     "(SELECT sr_url.id FROM scan_runs sr_url "
     "JOIN url_artifacts ua_url ON ua_url.id = sr_url.url_artifact_id "
     "WHERE ua_url.case_id = ua.case_id "
     "AND ua_url.original_url = ua.original_url "
-    "ORDER BY (ua_url.id = ua.id) DESC, sr_url.id DESC LIMIT 1)"
+    "ORDER BY sr_url.id DESC LIMIT 1))"
 )
 
 # Columns the usable-snapshot idiom is allowed to gate on. Extend when a new
