@@ -183,13 +183,24 @@ def test_nothing_from_the_corpus_is_tracked_at_all():
     locally instead.
     """
     repo = os.path.dirname(REAL)
-    if not os.path.isdir(os.path.join(repo, ".git")):
+    # exists, not isdir: in a git worktree .git is a file.
+    if not os.path.exists(os.path.join(repo, ".git")):
         pytest.skip("not a git checkout")
 
-    listed = subprocess.run(["git", "ls-files", "discovery/"], cwd=repo,
+    # No trailing slash, so a tracked symlink named `discovery` is caught too.
+    listed = subprocess.run(["git", "ls-files", "discovery"], cwd=repo,
                             capture_output=True, text=True)
     assert listed.returncode == 0
     assert listed.stdout.split() == [], listed.stdout
+
+    if os.path.islink(os.path.join(repo, "discovery")):
+        # When the corpus lives outside the repo (discovery -> ~/kwara-work),
+        # git refuses any pathspec beyond the link: check-ignore exits 128 and
+        # `git add` refuses the same way. What remains to protect is the link
+        # itself.
+        r = subprocess.run(["git", "check-ignore", "-q", "discovery"], cwd=repo)
+        assert r.returncode == 0, "the discovery symlink is not ignored"
+        return
 
     for rel in ("discovery/FINDINGS.md",
                 "discovery/data/reference_adstxt.jsonl.gz",
