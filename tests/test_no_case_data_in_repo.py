@@ -96,6 +96,23 @@ def _grep(needle: str) -> list[str]:
     return [f for f in r.stdout.split() if f]
 
 
+# Lists the maintainer chose to publish (decided 2026-10-02). A domain in one
+# of these is a deliberate publication, not a leak, so domain names and bare
+# site names found there are allowed. Nothing else is: a tracking ID is not
+# exempt here or anywhere, and no IP address may appear in these files at all
+# (test_no_ip_address_in_a_published_list).
+PUBLISHED_DIRS = ("datasets/",)
+
+
+def _outside_published(paths: list[str]) -> list[str]:
+    return [p for p in paths if not p.startswith(PUBLISHED_DIRS)]
+
+
+def _is_domain(ident: str) -> bool:
+    # Tracking IDs (G-…, UA-…, GTM-…, ca-pub-…) never contain a dot.
+    return "." in ident
+
+
 @pytest.fixture(scope="module")
 def identifiers():
     if not os.path.isdir(os.path.join(REPO, ".git")):
@@ -112,6 +129,8 @@ def test_no_live_domain_or_tracking_id_is_in_a_tracked_file(identifiers):
     found = {}
     for ident in sorted(identifiers):
         hits = _grep(ident)
+        if _is_domain(ident):
+            hits = _outside_published(hits)
         if hits:
             found[ident] = hits
     assert not found, (
@@ -148,7 +167,7 @@ def test_bare_site_names_are_caught_too(identifiers):
               "article"}
     found = {}
     for stem in sorted(stems):
-        hits = [f for f in _grep(stem)
+        hits = [f for f in _outside_published(_grep(stem))
                 # A stem that only appears as part of a longer word is not a
                 # reference to the site.
                 if _mentions_stem(os.path.join(REPO, f), stem)]
@@ -192,3 +211,27 @@ def test_the_guard_can_actually_fail():
     assert _grep("kwara"), "git grep found nothing at all — is it working?"
     absent = "zz" + "not-present-anywhere" + "-" + str(0xDEADBEEF)
     assert not _grep(absent)
+
+
+_IPV4 = re.compile(r"(?<![0-9.])(?:\d{1,3}\.){3}\d{1,3}(?![0-9.])")
+
+
+def test_no_ip_address_in_a_published_list():
+    """A published list is exempt from the domain check, so it must not become
+    a way to carry anything else. An IP address in one is either a server the
+    list does not need or, worse, the analyst's own connection echoed back by
+    an ad server. Unlike the checks above, this one needs no case database."""
+    if not os.path.isdir(os.path.join(REPO, ".git")):
+        pytest.skip("not a git checkout")
+    r = subprocess.run(["git", "ls-files", "--", *PUBLISHED_DIRS],
+                       cwd=REPO, capture_output=True, text=True)
+    found = {}
+    for f in r.stdout.split():
+        with open(os.path.join(REPO, f), encoding="utf-8",
+                  errors="replace") as fh:
+            ips = sorted(set(_IPV4.findall(fh.read())))
+        if ips:
+            found[f] = len(ips)
+    assert not found, (
+        "IP addresses in published lists (counts only, values withheld):\n"
+        + "\n".join(f"  {k}: {v}" for k, v in found.items()))

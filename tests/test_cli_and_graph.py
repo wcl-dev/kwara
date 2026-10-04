@@ -312,3 +312,23 @@ def test_evidence_browse_refuses_a_directory_it_did_not_create():
     with pytest.raises(SystemExit):
         args.fn(args)
     assert os.path.isfile(os.path.join(theirs, "important.txt"))
+
+
+def test_evidence_browse_refuses_an_out_inside_a_relocated_store(tmp_path):
+    """The store is wherever KWARA_DATA_DIR puts it, not <repo>/kwara/data.
+    A subprocess, because config reads the variable at import time."""
+    import subprocess, sys
+    conn, path = _tmp_db_with_snapshot([(1, "farm.com", "/nonexistent/a.png")])
+    data_dir = tmp_path / "data"
+    (data_dir / "snapshots").mkdir(parents=True)
+    out = data_dir / "snapshots" / "area"
+    repo = os.path.dirname(os.path.dirname(os.path.abspath(cli.__file__)))
+    env = dict(os.environ, KWARA_DATA_DIR=str(data_dir))
+    env.pop("KWARA_DB_PATH", None)
+    proc = subprocess.run(
+        [sys.executable, "-m", "kwara.cli", "evidence", "browse",
+         "--out", str(out), "--db", path],
+        capture_output=True, text=True, env=env, cwd=repo, timeout=60)
+    assert proc.returncode != 0, proc.stdout + proc.stderr
+    assert "must not be inside the capture store" in proc.stderr
+    assert not out.exists()

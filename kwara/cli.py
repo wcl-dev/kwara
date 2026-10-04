@@ -407,10 +407,6 @@ def cmd_index_recurring(args):
 BROWSE_MARKER = ".kwara-evidence-browse"
 
 
-def cli_module_dir() -> str:
-    return os.path.dirname(os.path.abspath(__file__))
-
-
 def cmd_evidence_browse(args):
     """Build a browsable evidence area keyed by domain, without moving anything.
 
@@ -428,11 +424,13 @@ def cmd_evidence_browse(args):
     Refuses to write into a directory it did not create — this walks a user
     -supplied path and clearing the wrong one would destroy work.
     """
+    from . import config
     conn = _open_db(args)
     out_dir = os.path.realpath(os.path.expanduser(args.out))
-    store = os.path.realpath(
-        os.path.join(os.path.dirname(os.path.abspath(cli_module_dir())),
-                     "kwara", "data", "snapshots"))
+    # The configured store, not <repo>/kwara/data/snapshots: with
+    # KWARA_DATA_DIR pointing elsewhere the repo path is a different (or
+    # missing) directory, and the guard would protect the wrong tree.
+    store = os.path.realpath(config.SNAPSHOT_ROOT)
     if out_dir == store or out_dir.startswith(store + os.sep):
         raise SystemExit(
             "evidence browse: --out must not be inside the capture store "
