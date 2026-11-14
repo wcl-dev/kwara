@@ -30,6 +30,7 @@ def migrate_db(conn: sqlite3.Connection) -> None:
         ("har_path", "TEXT"),
         ("tracking_ids_json", "TEXT"),
         ("capture_method", "TEXT"),
+        ("investigator_ip_json", "TEXT"),
     ]
     for col, defn in new_cols:
         try:

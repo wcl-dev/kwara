@@ -138,6 +138,8 @@ command reference, the tool list, and the reasoning.
 | `KWARA_BROWSER_LOCALE` | `zh-TW` | Playwright browser locale for screenshots |
 | `KWARA_BROWSER_TIMEZONE` | `Asia/Taipei` | Playwright browser timezone |
 | `KWARA_SCREENSHOT_TIMEOUT` | `45` | Seconds one screenshot may take before it falls back to a viewport-only image |
+| `KWARA_REDACT_INVESTIGATOR_IP` | `1` | Strip the analyst's own IP (echoed by ad responses) from HAR/HTML at capture time; `0` only records it |
+| `KWARA_INVESTIGATOR_IPS` | — | Comma-separated addresses known to be the analyst's, always redacted |
 | `KWARA_HMAC_KEY` | *(unset)* | HMAC key for signing evidence pack manifest |
 | `KWARA_URLSCAN_API_KEY` | *(unset)* | urlscan.io API key (free community tier) |
 | `KWARA_PUBLICWWW_API_KEY` | *(unset)* | PublicWWW source-code search key; enables `discover publicwww`. Read from the env only, never written to disk — see [docs/agent-interface.md](docs/agent-interface.md) |

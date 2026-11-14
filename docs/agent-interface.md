@@ -166,6 +166,26 @@ python -m kwara.cli export case --case 1
 `missing_screenshot_files` — a database row pointing at a file that is gone is
 a chain-of-custody gap, not a cosmetic issue.
 
+**Finding the analyst's own IP in stored captures**
+
+```bash
+python -m kwara.cli evidence ip-scan --case 1              # report only
+python -m kwara.cli evidence ip-scan --case 1 --redact     # rewrite, keep originals beside the files
+python -m kwara.cli evidence ip-scan --ip 203.0.113.7 --redact   # add an address you know is yours
+```
+
+Third-party ad responses echo the visitor's address back (`cip`,
+`x-client-ip`, `x-forwarded-for`, `custom-connecting-ip`, `auip=` …) and the
+HAR records every one of them, so a store captured before this existed carries
+the analyst's address on most pages that showed an ad — on one live store, 582
+files across 19 cases. New captures are scanned and redacted as they are
+recorded (`KWARA_REDACT_INVESTIGATOR_IP`); `ip-scan` is for the backlog. It
+discovers addresses from the echo positions, then re-scans every byte for each
+discovered value, and reports `screenshots_to_check` for pages whose body
+printed an address, since pixels cannot be scanned. `--redact` keeps the
+untouched bytes as `<name>.original-unredacted<ext>` so a timestamp that binds
+the original still verifies; `--no-backup` drops them.
+
 **Reconciling the store against the database**
 
 ```bash

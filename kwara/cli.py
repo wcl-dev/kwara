@@ -284,8 +284,64 @@ def cmd_run_snapshot(args):
     if not args.quiet:
         _err(f"capturing {len(targets)} snapshot(s), env={env or 'default'}")
     snapshot_ids = pipeline.run_snapshot_batch(conn, targets, env_override=env)
-    return {"case_id": args.case, "snapshots": len(snapshot_ids),
-            "snapshot_ids": snapshot_ids, "scan_run_ids": targets}
+    return _snapshot_batch_report(conn, args.case, targets, snapshot_ids)
+
+
+# Capture states that mean "we have the page": a browser capture, a Wayback
+# fallback, or something a person placed by hand.
+_CAPTURE_OK_STATES = ("ok", "wayback", "manual")
+
+
+def _snapshot_batch_report(conn, case_id: int, targets: list[int],
+                           snapshot_ids: list[int]) -> dict:
+    """Count what the batch actually produced, and refuse to look successful
+    when it produced nothing.
+
+    `snapshots: 6` used to mean six rows were written — including six rows
+    whose status was file_missing because the Playwright browser was not
+    installed. The count of rows is not the count of captures; this reports
+    both, lists every failure with its reason, and sets a non-zero exit code
+    when not one capture succeeded.
+    """
+    rows = conn.execute(
+        f"""SELECT s.id, s.scan_run_id, s.final_domain, s.capture_status,
+                   s.capture_detail, s.investigator_ip_json
+              FROM snapshots s
+             WHERE s.id IN ({",".join("?" * len(snapshot_ids)) or "NULL"})
+             ORDER BY s.id""", snapshot_ids).fetchall() if snapshot_ids else []
+    by_status: dict[str, int] = {}
+    failed, ip_hits, ip_redacted = [], 0, 0
+    for r in rows:
+        st = r["capture_status"] or "unknown"
+        by_status[st] = by_status.get(st, 0) + 1
+        if st not in _CAPTURE_OK_STATES:
+            failed.append({"snapshot_id": r["id"], "scan_run_id": r["scan_run_id"],
+                           "domain": r["final_domain"], "status": st,
+                           "detail": (r["capture_detail"] or "")[:200]})
+        if r["investigator_ip_json"]:
+            info = json.loads(r["investigator_ip_json"])
+            if info.get("ips"):
+                ip_hits += 1
+                ip_redacted += bool(info.get("redacted"))
+    captured = sum(by_status.get(s, 0) for s in _CAPTURE_OK_STATES)
+    out = {"case_id": case_id, "snapshots": len(snapshot_ids),
+           "captured": captured, "failed": len(failed), "by_status": by_status,
+           "failures": failed, "snapshot_ids": snapshot_ids, "scan_run_ids": targets,
+           "investigator_ip": {"captures_with_hits": ip_hits, "redacted": ip_redacted}}
+    if failed:
+        _err(f"{len(failed)} of {len(snapshot_ids)} capture(s) failed "
+             f"({', '.join(f'{k}={v}' for k, v in by_status.items())})")
+        detail = " ".join(f["detail"] for f in failed)
+        if "playwright install" in detail.lower():
+            _err("the Playwright browser this build expects is not installed — "
+                 "run: uv run playwright install chromium")
+    if targets and captured == 0:
+        out["exit_code"] = 1
+        _err("no capture succeeded; exit code 1")
+    if ip_hits and ip_redacted < ip_hits:
+        _err(f"investigator IP found in {ip_hits} capture(s), redacted in "
+             f"{ip_redacted}; see investigator_ip_json on the snapshot rows")
+    return out
 
 
 def cmd_run_corroborate(args):
@@ -618,6 +674,55 @@ def cmd_evidence_reconcile(args):
             _open_db(args), rep, dry_run=not args.apply, force=args.force,
             include_partial=args.include_partial)
     return out
+
+
+def cmd_evidence_ip_scan(args):
+    """Find (and with --redact remove) the investigator's IP in stored captures.
+
+    For stores captured before capture-time redaction existed. Reports per
+    capture; writes only with --redact, keeping the original beside the file
+    unless --no-backup, so a timestamp that binds the original still verifies.
+    """
+    from .ip_exposure import scan_capture
+    conn = _open_db(args)
+    where, params = [], []
+    if args.case:
+        where.append("ua.case_id = ?"); params.append(args.case)
+    if args.domain:
+        where.append("s.final_domain = ?"); params.append(args.domain)
+    rows = conn.execute(
+        f"""SELECT s.id, s.scan_run_id, ua.case_id, s.final_domain,
+                   s.har_path, s.html_path
+              FROM snapshots s
+              JOIN scan_runs sr ON sr.id = s.scan_run_id
+              JOIN url_artifacts ua ON ua.id = sr.url_artifact_id
+             {"WHERE " + " AND ".join(where) if where else ""}
+             ORDER BY s.id""", params).fetchall()
+    items, ips_seen = [], set()
+    for r in rows:
+        if not (r["har_path"] or r["html_path"]):
+            continue
+        res = scan_capture(r["har_path"], r["html_path"], redact=args.redact,
+                           extra_ips=args.ip, keep_original=not args.no_backup)
+        if not res["ips"] and not res["parse_error"]:
+            continue
+        ips_seen.update(res["ips"])
+        if args.redact and res["redacted"]:
+            conn.execute("UPDATE snapshots SET investigator_ip_json = ? WHERE id = ?",
+                         (json.dumps(res, ensure_ascii=False), r["id"]))
+        items.append({"snapshot_id": r["id"], "case_id": r["case_id"],
+                      "domain": r["final_domain"], **res})
+    if args.redact:
+        conn.commit()
+    affected = [i for i in items if i["occurrences"]]
+    if affected and not args.redact:
+        _err(f"investigator IP present in {len(affected)} capture(s); "
+             "re-run with --redact to remove it")
+    return {"scanned": len(rows), "captures_with_ip": len(affected),
+            "distinct_addresses": len(ips_seen), "redacted": args.redact,
+            "screenshots_to_check": [i["snapshot_id"] for i in items
+                                     if i["screenshot_may_show_ip"]],
+            "items": items}
 
 
 def cmd_evidence_list(args):
@@ -1161,6 +1266,22 @@ def build_parser() -> argparse.ArgumentParser:
                        help="orphan examples to show (default 20)")
     e_rec.set_defaults(fn=cmd_evidence_reconcile)
 
+    e_ip = _leaf(ev, "ip-scan",
+                 help="find the investigator's own IP echoed into stored "
+                      "captures (third-party ad responses do this); "
+                      "--redact removes it")
+    e_ip.add_argument("--case", type=int)
+    e_ip.add_argument("--domain")
+    e_ip.add_argument("--ip", action="append", default=[], metavar="ADDR",
+                      help="an address known to be the investigator's; "
+                           "repeatable (also KWARA_INVESTIGATOR_IPS)")
+    e_ip.add_argument("--redact", action="store_true",
+                      help="rewrite the files (default only reports)")
+    e_ip.add_argument("--no-backup", action="store_true",
+                      help="with --redact, do not keep the original bytes "
+                           "beside the file")
+    e_ip.set_defaults(fn=cmd_evidence_ip_scan)
+
     e_list.add_argument("--case", type=int,
                         help="limit to one case (or use --domain)")
     e_list.add_argument("--domain",
@@ -1187,7 +1308,13 @@ def main(argv: list[str] | None = None) -> int:
         from .i18n import set_lang
         set_lang(args.lang)
     try:
-        _emit(args.fn(args), args)
+        result = args.fn(args)
+        _emit(result, args)
+        # A command that ran to completion but achieved nothing says so here
+        # (capture batches where no capture succeeded); an exception is for
+        # not being able to run at all.
+        if isinstance(result, dict) and result.get("exit_code"):
+            return int(result["exit_code"])
     except (ValueError, RuntimeError, FileNotFoundError) as e:
         _err(f"error: {e}")
         return 1
