@@ -7,6 +7,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
+from .ip_exposure import redaction_enabled, scan_capture
 from .audit import write_audit
 from .config import (
     HIGH_TRACKER_THRESHOLD,
@@ -614,6 +615,12 @@ def _record_capture(conn: sqlite3.Connection, scan_run_id: int,
 
     har = r.get("har_path")
     har_path = har if har and os.path.exists(har) else None
+    # The analyst's own address is not evidence; strip it before the row,
+    # the timestamp or the export can bind it. KWARA_REDACT_INVESTIGATOR_IP=0
+    # turns the rewrite off but the scan still runs and is recorded.
+    ip_exposure = scan_capture(har_path, html_path, redact=redaction_enabled())
+    investigator_ip_json = (json.dumps(ip_exposure, ensure_ascii=False)
+                            if ip_exposure["ips"] or ip_exposure["parse_error"] else None)
     tracking_ids = extract_tracking_ids_from_file(html_path)
     tracking_ids_json = (json.dumps(tracking_ids, ensure_ascii=False)
                          if tracking_ids else None)
@@ -624,8 +631,8 @@ def _record_capture(conn: sqlite3.Connection, scan_run_id: int,
                 screenshot_path, html_path, har_path,
                 request_domains_json, risk_tags, captured_at,
                 capture_status, capture_detail, tracking_ids_json,
-                capture_method)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                capture_method, investigator_ip_json)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             scan_run_id, meta["final_url"], meta["final_domain"],
             screenshot_path, html_path, har_path,
@@ -636,6 +643,7 @@ def _record_capture(conn: sqlite3.Connection, scan_run_id: int,
             cap_detail,
             tracking_ids_json,
             CAPTURE_METHOD_PLAYWRIGHT,
+            investigator_ip_json,
         ),
     )
     conn.commit()
@@ -652,6 +660,8 @@ def _record_capture(conn: sqlite3.Connection, scan_run_id: int,
             'capture_status': cap_status,
             'capture_detail': cap_detail,
             'tracking_id_platforms': sorted(tracking_ids.keys()),
+            'investigator_ip_addresses': len(ip_exposure["ips"]),
+            'investigator_ip_redacted': ip_exposure["redacted"],
         },
     )
     return snapshot_id

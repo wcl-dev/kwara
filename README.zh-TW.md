@@ -121,6 +121,8 @@ claude mcp add kwara -- /abs/path/to/.venv/bin/python -m kwara.mcp_server
 | `KWARA_BROWSER_LOCALE` | `zh-TW` | Playwright 截圖瀏覽器語系 |
 | `KWARA_BROWSER_TIMEZONE` | `Asia/Taipei` | Playwright 截圖瀏覽器時區 |
 | `KWARA_SCREENSHOT_TIMEOUT` | `45` | 單張截圖秒數上限，逾時改截可視區 |
+| `KWARA_REDACT_INVESTIGATOR_IP` | `1` | 擷取時把調查者自己的 IP（第三方廣告回應會回印）從 HAR／HTML 抹掉；設 `0` 只記錄不改 |
+| `KWARA_INVESTIGATOR_IPS` | — | 已知屬於調查者的位址（逗號分隔），一律抹掉 |
 | `KWARA_HMAC_KEY` | *（未設定）* | 證據封包 manifest HMAC 簽章密鑰 |
 | `KWARA_URLSCAN_API_KEY` | *（未設定）* | urlscan.io API key（免費 community tier） |
 | `KWARA_HTTP_TIMEOUT` | `10` | 掃描逾時秒數 |

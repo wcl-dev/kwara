@@ -42,6 +42,8 @@ if the two ever disagree.
 | `KWARA_BROWSER_TIMEZONE` | `Asia/Taipei` | Playwright context timezone |
 | `KWARA_BROWSER_LANGUAGES` | *(derived from the locale)* | Comma-separated `navigator.languages` override; wins over the derived value |
 | `KWARA_SCREENSHOT_TIMEOUT` | `45` | Seconds one screenshot may take. On overrun the capture falls back to a viewport-only image and records why in `capture_detail`, rather than waiting on a page that never finishes rendering |
+| `KWARA_REDACT_INVESTIGATOR_IP` | `1` | Strip the analyst's own IP address from a capture's HAR and HTML before the snapshot row is written. Third-party ad responses echo the visitor's address (`cip`, `x-client-ip`, `x-forwarded-for`, `auip=` …) and the HAR records all of it; it is never evidence. `0` keeps the bytes but still records what was found in `investigator_ip_json` |
+| `KWARA_INVESTIGATOR_IPS` | — | Comma-separated addresses known to be the analyst's, added to the exact-value pass on top of what the echo positions reveal. Useful when captures are made through a fixed egress |
 | `KWARA_SNAPSHOT_CHUNK` | `5` | URLs per capture subprocess. Each chunk's rows are committed before the next starts, so an interrupted run loses at most one chunk instead of the whole batch |
 
 Per-case locale presets (`case new --locale-preset tw`) set these for one case;

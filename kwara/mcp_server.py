@@ -36,6 +36,10 @@ claimed three exclusions while eleven commands were actually missing — the
   • **Third-party corroboration.** `run corroborate` sends the URL under
     investigation to Wayback and urlscan, which publishes the fact that it is
     being investigated. That belongs to a human who has decided to disclose.
+  • **Rewriting stored evidence.** `scan_investigator_ip` reports where the
+    analyst's own address sits in old captures; `--redact` is CLI-only. The
+    rewrite is benign — the address is never evidence — but it changes bytes
+    a timestamp may already bind, and a person decides that.
 """
 import argparse
 import importlib.metadata
@@ -323,6 +327,32 @@ def list_evidence(case: int | None = None, domain: str | None = None,
     but which are no longer on disk — a chain-of-custody gap worth raising.
     """
     return _call(cli.cmd_evidence_list, case=case, domain=domain, db=db)
+
+
+@_tool()
+def scan_investigator_ip(case: int | None = None, domain: str | None = None,
+                         ip: list[str] | None = None, db: str | None = None) -> dict:
+    """Find the analyst's own IP address echoed into stored captures.
+
+    Third-party ad responses send the visitor's address back — `cip`,
+    `x-client-ip`, `x-forwarded-for`, `custom-connecting-ip`, `auip=` — and the
+    HAR records every one of them, so a store captured before capture-time
+    redaction existed carries the address on most pages that showed an ad (582
+    files across 19 cases on one live store). Captures made now are scanned
+    and cleaned as they are recorded; this tool is for the backlog.
+
+    It discovers addresses from the echo positions, then re-scans every byte
+    of each file for the discovered values, so an address that also landed in
+    a body or a query string is counted. `ip` adds addresses you already know
+    are the analyst's. `screenshots_to_check` lists captures whose page body
+    printed an address: pixels cannot be scanned, so look at those by eye.
+
+    This tool only reports. Removing the address is
+    `kwara evidence ip-scan --redact` at the CLI, which keeps the original
+    bytes beside each file so an existing timestamp still verifies.
+    """
+    return _call(cli.cmd_evidence_ip_scan, case=case, domain=domain,
+                 ip=list(ip or []), redact=False, no_backup=False, db=db)
 
 
 @_tool()
