@@ -31,6 +31,10 @@ def migrate_db(conn: sqlite3.Connection) -> None:
         ("tracking_ids_json", "TEXT"),
         ("capture_method", "TEXT"),
         ("investigator_ip_json", "TEXT"),
+        # Google tag IDs read from the HAR's request URLs. NULL = not derived
+        # (no HAR, or captured before this column); "{}" = derived, none.
+        # Leads only: nothing that forms groups reads this column.
+        ("network_tag_ids_json", "TEXT"),
     ]
     for col, defn in new_cols:
         try:

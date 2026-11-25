@@ -540,7 +540,8 @@ def attach(conn: sqlite3.Connection, rep: dict, *, dry_run: bool = True,
     that database owns would then be attached to the wrong case. `force`
     overrides, and the audit record says it was forced.
     """
-    from .fingerprints import extract_tracking_ids_from_file
+    from .fingerprints import (extract_network_tag_ids_from_har,
+                               extract_tracking_ids_from_file)
 
     if not rep.get("safe") and not force:
         return {"attached": 0, "refused": True,
@@ -701,6 +702,7 @@ def attach(conn: sqlite3.Connection, rep: dict, *, dry_run: bool = True,
             continue
 
         tracking = extract_tracking_ids_from_file(html_path) if html_path else {}
+        net_ids = extract_network_tag_ids_from_har(har_path)
         domains: list = []
         if har_path:
             try:
@@ -725,6 +727,8 @@ def attach(conn: sqlite3.Connection, rep: dict, *, dry_run: bool = True,
             "har_path": har_path,
             "request_domains_json": json.dumps(domains) if domains else None,
             "tracking_ids_json": json.dumps(tracking) if tracking else None,
+            "network_tag_ids_json": (json.dumps(net_ids)
+                                     if net_ids is not None else None),
             "captured_at": o.get("captured_at"),
             "capture_status": "ok",
             "capture_method": _method_for(o.get("files", [])),

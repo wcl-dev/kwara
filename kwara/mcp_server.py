@@ -60,6 +60,8 @@ _WITHHELD = {
     "cmd_run_intel": "a step inside run attribute, which is exposed whole",
     "cmd_run_corroborate": "discloses the investigation to third parties",
     "cmd_discover_publicwww": "discloses which fingerprint is being hunted to a third party",
+    "cmd_evidence_net_ids": "one-off backfill for captures predating the column; "
+                            "new captures derive it at capture time",
 }
 
 # The 26 tools below are collected here and handed to the SDK only when the
