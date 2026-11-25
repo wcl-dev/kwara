@@ -89,6 +89,11 @@ SIGNAL_HEADER_VALUE    = "header_value"      # a response header that identifies
 # its own type so it stays indexed as a LEAD without inheriting that sentence.
 # See clusters.GTM_PLATFORM for the full reasoning and the measurement.
 SIGNAL_GTM_CONTAINER   = "gtm_container"     # GTM-XXXXXXX — correlated, not binding
+# A Google tag ID (G-, GT-, GTM-, UA-) seen only in the requests a page sent,
+# never in its HTML. A HAR does not say which frame fired a request, so an ad
+# creative's tag reads like the operator's own: a lead, never a link. IDs the
+# HTML also carried are already indexed above and are not repeated here.
+SIGNAL_NETWORK_TAG_ID  = "network_tag_id"    # from HAR request URLs — lead only
 
 # Every type this module emits. Kept complete because `index lookup --type`
 # validates against it — a typo there used to return an empty result set that
@@ -97,6 +102,7 @@ SIGNAL_GTM_CONTAINER   = "gtm_container"     # GTM-XXXXXXX — correlated, not b
 ALL_SIGNAL_TYPES = frozenset({
     SIGNAL_TRACKING_ID,
     SIGNAL_GTM_CONTAINER,
+    SIGNAL_NETWORK_TAG_ID,
     SIGNAL_CERT_SERIAL,
     SIGNAL_REGISTRAR,
     SIGNAL_ASN,
@@ -285,6 +291,52 @@ def extract_case_signals(
                      else SIGNAL_TRACKING_ID)
             for ident in ids:
                 _emit(stype, ident, platform=platform,
+                      scan_run_id=r["scan_run_id"], final_domain=domain,
+                      observed_at=r["run_at"])
+
+    # ── snapshot-level leads: Google tag IDs only the network layer saw ────
+    # Keyed by scan_run, like the HTML pass above, so an ID the HTML of the
+    # same scan_run carried is skipped rather than indexed twice.
+    in_html: set[tuple[int, str]] = set()
+    for r in pixel_rows:
+        try:
+            parsed = json.loads(r["tracking_ids_json"])
+        except (ValueError, TypeError):
+            continue
+        if isinstance(parsed, dict):
+            for ids in parsed.values():
+                if isinstance(ids, list):
+                    in_html.update((r["scan_run_id"], i) for i in ids)
+    try:
+        net_rows = conn.execute(
+            f"""SELECT sr.id AS scan_run_id, sr.run_at,
+                       s.network_tag_ids_json,
+                       COALESCE(s.final_domain, '') AS final_domain
+                FROM url_artifacts ua
+                JOIN scan_runs sr ON sr.id = {LATEST_DONE_SCAN_RUN}
+                JOIN snapshots s ON s.id IN {usable_snapshots("network_tag_ids_json")}
+                WHERE ua.case_id = ?""",
+            (case_id,),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        # A database not yet migrated has no such column. The leads are
+        # optional; the rest of the index must still build.
+        net_rows = []
+    for r in net_rows:
+        try:
+            ids_by_platform = json.loads(r["network_tag_ids_json"])
+        except (ValueError, TypeError):
+            continue
+        if not isinstance(ids_by_platform, dict):
+            continue
+        domain = (r["final_domain"] or "").lower()
+        for platform, ids in ids_by_platform.items():
+            if not isinstance(ids, list):
+                continue
+            for ident in ids:
+                if (r["scan_run_id"], ident) in in_html:
+                    continue
+                _emit(SIGNAL_NETWORK_TAG_ID, ident, platform=platform,
                       scan_run_id=r["scan_run_id"], final_domain=domain,
                       observed_at=r["run_at"])
 

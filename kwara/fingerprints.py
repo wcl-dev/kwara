@@ -17,6 +17,9 @@ LIMITATIONS:
     almost all pixel snippets ship the ID as a literal).
   - IDs inside iframes whose document we did not capture.
   - IDs loaded after the capture timeout fired.
+  - IDs that only ever appear in network requests (GT- Google tags, tags
+    fired by a GTM container). extract_network_tag_ids_from_har() reads
+    those from the HAR, as leads only — see the note above it.
 
 DESIGN NOTE — context anchoring (codex review fix #1):
 Earlier versions matched bare tokens like ``G-AB12CD34``. That's fine
@@ -286,3 +289,106 @@ def extract_tracking_ids_from_file(html_path: str | None) -> dict[str, list[str]
     except OSError:
         return {}
     return extract_tracking_ids(html)
+
+
+# ── Network layer: Google tag IDs in the requests a page actually sent ────
+#
+# A Google tag can sit behind a GTM container, be merged under a GT- Google
+# tag, or be assembled by script at runtime, and in each case the HTML may
+# never carry the measurement ID as a literal. The request that reports back
+# to Google always does, as `id=` on the loader or `tid=` on the collect hit.
+#
+# Measured 2026-11-25 over 2,369 stored HARs: 773 captures carried a Google ID
+# in their requests that HTML extraction missed, but 359 of those were one
+# platform-wide ID already rejected as a fingerprint, and of the remaining 35
+# distinct IDs, 20 appeared in a single capture. No GT- ID was found on more
+# than one domain at that point. So this is a gap closed ahead of need, not a
+# source of current attribution.
+#
+# Everything found here is a LEAD and never binds a group, for two reasons:
+#   - A HAR does not say which frame sent a request. An ad creative or an
+#     embedded widget fires its own tags from inside the page, and those land
+#     in the HAR exactly like the operator's own. The platform-wide ID above,
+#     on 359 captures across unrelated operators, is one such ID.
+#   - A GT- Google tag can route to several destinations; what a shared one
+#     implies about account ownership has not been measured here.
+# For the same reason the extractor deliberately ignores AW- (Google Ads
+# conversion) and DC- (Floodlight): in the measurement above both spanned
+# operator groups known to be separate, consistent with advertisers' own
+# conversion tags riding along in ad creatives.
+_NETWORK_GOOGLE_HOSTS = (
+    "googletagmanager.com",
+    "google-analytics.com",
+    "analytics.google.com",
+    "g.doubleclick.net",
+)
+_NETWORK_ID_PARAMS = ("id", "tid")
+_NETWORK_ID_FORMS: list[tuple[str, re.Pattern]] = [
+    ("Google Analytics 4", re.compile(r"^G-[A-Z0-9]{6,12}$")),
+    ("Google Tag", re.compile(r"^GT-[A-Z0-9]{6,12}$")),
+    ("Google Tag Manager", re.compile(r"^GTM-[A-Z0-9]{4,8}$")),
+    ("Google Analytics (UA)", re.compile(r"^UA-\d{4,12}-\d{1,4}$")),
+]
+
+
+def _is_google_tag_host(host: str) -> bool:
+    host = (host or "").lower()
+    return any(host == h or host.endswith("." + h)
+               for h in _NETWORK_GOOGLE_HOSTS)
+
+
+def extract_network_tag_ids(urls) -> dict[str, list[str]]:
+    """``{platform_label: sorted_unique_ids}`` from request URLs.
+
+    Only URLs on a Google tag host are read, and only their ``id`` / ``tid``
+    query parameters, so an ``?id=G-…`` on any other host is ignored.
+    Placeholders are filtered as for HTML.
+    """
+    from urllib.parse import parse_qs, urlsplit
+
+    out: dict[str, set[str]] = {}
+    for url in urls:
+        try:
+            parts = urlsplit(url or "")
+        except ValueError:
+            continue
+        if not _is_google_tag_host(parts.hostname or ""):
+            continue
+        query = parse_qs(parts.query)
+        for param in _NETWORK_ID_PARAMS:
+            for value in query.get(param, []):
+                value = value.strip()
+                if _looks_like_placeholder(value):
+                    continue
+                for label, form in _NETWORK_ID_FORMS:
+                    if form.match(value):
+                        out.setdefault(label, set()).add(value)
+                        break
+    return {k: sorted(v) for k, v in out.items()}
+
+
+def extract_network_tag_ids_from_har(har_path: str | None) -> dict[str, list[str]] | None:
+    """Run extract_network_tag_ids() over a HAR's request URLs.
+
+    Returns None when there is no HAR or it cannot be read (nothing was
+    observed), and ``{}`` when the HAR was read and held no Google tag ID.
+    Callers store the two differently, so a backfill can tell "not yet
+    derived" from "derived, empty".
+    """
+    if not har_path:
+        return None
+    import json
+    try:
+        with open(har_path, encoding="utf-8", errors="replace") as f:
+            entries = json.load(f).get("log", {}).get("entries", [])
+    except (OSError, ValueError, AttributeError):
+        return None
+    if not isinstance(entries, list):
+        return None
+    urls = []
+    for e in entries:
+        if isinstance(e, dict):
+            req = e.get("request")
+            if isinstance(req, dict) and isinstance(req.get("url"), str):
+                urls.append(req["url"])
+    return extract_network_tag_ids(urls)

@@ -99,6 +99,7 @@ LATEST_SCAN_RUN_FOR_URL = (
 _USABLE_SNAPSHOT_COLS = frozenset({
     "tracking_ids_json",
     "request_domains_json",
+    "network_tag_ids_json",
 })
 
 

@@ -15,7 +15,8 @@ from .config import (
     SUSPICIOUS_EXTS,
     TRACKER_DOMAINS,
 )
-from .fingerprints import extract_tracking_ids_from_file
+from .fingerprints import (extract_network_tag_ids_from_har,
+                           extract_tracking_ids_from_file)
 from .lightweight_fetch import CAPTURE_METHOD_PLAYWRIGHT
 
 CAPTURE_OK = "ok"
@@ -624,6 +625,10 @@ def _record_capture(conn: sqlite3.Connection, scan_run_id: int,
     tracking_ids = extract_tracking_ids_from_file(html_path)
     tracking_ids_json = (json.dumps(tracking_ids, ensure_ascii=False)
                          if tracking_ids else None)
+    # Read after redaction, so it sees the HAR as stored. Leads only.
+    network_tag_ids = extract_network_tag_ids_from_har(har_path)
+    network_tag_ids_json = (json.dumps(network_tag_ids, ensure_ascii=False)
+                            if network_tag_ids is not None else None)
 
     conn.execute(
         """INSERT INTO snapshots
@@ -631,8 +636,8 @@ def _record_capture(conn: sqlite3.Connection, scan_run_id: int,
                 screenshot_path, html_path, har_path,
                 request_domains_json, risk_tags, captured_at,
                 capture_status, capture_detail, tracking_ids_json,
-                capture_method, investigator_ip_json)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                capture_method, investigator_ip_json, network_tag_ids_json)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             scan_run_id, meta["final_url"], meta["final_domain"],
             screenshot_path, html_path, har_path,
@@ -644,6 +649,7 @@ def _record_capture(conn: sqlite3.Connection, scan_run_id: int,
             tracking_ids_json,
             CAPTURE_METHOD_PLAYWRIGHT,
             investigator_ip_json,
+            network_tag_ids_json,
         ),
     )
     conn.commit()

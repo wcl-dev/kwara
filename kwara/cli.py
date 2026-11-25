@@ -725,6 +725,46 @@ def cmd_evidence_ip_scan(args):
             "items": items}
 
 
+def cmd_evidence_net_ids(args):
+    """Derive network-layer Google tag IDs for captures stored before they were.
+
+    Fills `network_tag_ids_json` from each snapshot's HAR, only where it is
+    still NULL, so a second run changes nothing. A dry run unless --apply.
+    The IDs are leads: re-index the case afterwards to see them in `index`.
+    """
+    from .fingerprints import extract_network_tag_ids_from_har
+    conn = _open_db(args)
+    where, params = ["s.network_tag_ids_json IS NULL", "s.har_path IS NOT NULL"], []
+    if args.case:
+        where.append("ua.case_id = ?"); params.append(args.case)
+    rows = conn.execute(
+        f"""SELECT s.id, ua.case_id, s.final_domain, s.har_path
+              FROM snapshots s
+              JOIN scan_runs sr ON sr.id = s.scan_run_id
+              JOIN url_artifacts ua ON ua.id = sr.url_artifact_id
+             WHERE {" AND ".join(where)}
+             ORDER BY s.id""", params).fetchall()
+    filled, unreadable, with_ids, cases = 0, 0, 0, set()
+    for r in rows:
+        ids = extract_network_tag_ids_from_har(r["har_path"])
+        if ids is None:
+            unreadable += 1
+            continue
+        filled += 1
+        if ids:
+            with_ids += 1
+            cases.add(r["case_id"])
+        if args.apply:
+            conn.execute("UPDATE snapshots SET network_tag_ids_json = ? "
+                         "WHERE id = ? AND network_tag_ids_json IS NULL",
+                         (json.dumps(ids, ensure_ascii=False), r["id"]))
+    if args.apply:
+        conn.commit()
+    return {"candidates": len(rows), "derived": filled,
+            "with_ids": with_ids, "har_unreadable": unreadable,
+            "cases_with_ids": sorted(cases), "applied": args.apply}
+
+
 def cmd_evidence_list(args):
     """Where the evidence for a domain actually sits on disk.
 
@@ -1281,6 +1321,14 @@ def build_parser() -> argparse.ArgumentParser:
                       help="with --redact, do not keep the original bytes "
                            "beside the file")
     e_ip.set_defaults(fn=cmd_evidence_ip_scan)
+
+    e_net = _leaf(ev, "net-ids",
+                  help="derive Google tag IDs (G-/GT-/GTM-/UA-) from stored "
+                       "HARs for captures that predate it; leads only")
+    e_net.add_argument("--case", type=int)
+    e_net.add_argument("--apply", action="store_true",
+                       help="write (default is a dry run)")
+    e_net.set_defaults(fn=cmd_evidence_net_ids)
 
     e_list.add_argument("--case", type=int,
                         help="limit to one case (or use --domain)")
